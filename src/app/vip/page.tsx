@@ -9,6 +9,7 @@ import {
   Crown,
   Sparkles,
   Check,
+  X,
   ArrowLeft,
   Lock,
   Heart,
@@ -142,13 +143,13 @@ export default function VIPPage() {
                 <Check className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>Basic Profile</span>
               </li>
-              <li className="flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Basic Mood</span>
+              <li className="flex items-center gap-2 text-slate-400 opacity-75">
+                <X className="w-4 h-4 text-rose-400/80 shrink-0" />
+                <span className="line-through">Basic Mood (VIP Only)</span>
               </li>
-              <li className="flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Report & Block Features</span>
+              <li className="flex items-center gap-2 text-slate-400 opacity-75">
+                <X className="w-4 h-4 text-rose-400/80 shrink-0" />
+                <span className="line-through">Report & Block Features (VIP Only)</span>
               </li>
             </ul>
           </div>

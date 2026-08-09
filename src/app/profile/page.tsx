@@ -340,6 +340,7 @@ export default function ProfilePage() {
                 <div className="px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 font-mono text-xs">
                   @{user?.username}
                 </div>
+                <p className="text-[10px] text-pink-200/60 font-medium">Username is set once during setup and cannot be changed.</p>
               </div>
 
               <div className="space-y-1">
