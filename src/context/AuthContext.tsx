@@ -73,6 +73,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clerkLoaded, isSignedIn]);
 
+  // Client-side Strict Route Protection Guard
+  useEffect(() => {
+    if (!loading && clerkLoaded) {
+      const publicPaths = ['/', '/login', '/register', '/privacy', '/terms', '/sso-callback'];
+      const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
+
+      if (!user && !isSignedIn && !isPublic) {
+        router.push('/login');
+      }
+    }
+  }, [loading, user, isSignedIn, pathname, clerkLoaded, router]);
+
   const login = (userData: any) => {
     setUser(userData);
     router.push('/dashboard');
