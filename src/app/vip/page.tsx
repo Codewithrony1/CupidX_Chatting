@@ -124,7 +124,12 @@ export default function VIPPage() {
 
       razorpayInstance.on('payment.failed', function (response: any) {
         console.error('Razorpay Payment Failed:', response.error);
-        alert(`Payment failed: ${response.error.description || response.error.reason}`);
+        const desc = response.error?.description || response.error?.reason || '';
+        if (desc.toLowerCase().includes('international')) {
+          alert('💳 International cards are disabled on this Razorpay account by default.\n\n👉 Please select UPI, Netbanking, or an Indian Domestic Card to complete the payment.');
+        } else {
+          alert(`Payment failed: ${desc}`);
+        }
         setLoadingPayment(false);
       });
 
