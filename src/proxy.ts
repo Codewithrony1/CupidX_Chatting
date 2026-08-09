@@ -20,11 +20,15 @@ export default clerkMiddleware(async (auth, req) => {
     return;
   }
 
-  const { userId } = await auth();
+  // Fast-path: Check local token cookie FIRST to avoid remote Edge Middleware latency (~0.1ms)
   const tokenCookie = req.cookies.get('token')?.value;
+  if (tokenCookie) {
+    return;
+  }
 
-  // If neither Clerk session nor JWT token cookie exists, redirect unauthenticated user to /login
-  if (!userId && !tokenCookie) {
+  // Fallback: Check Clerk session
+  const { userId } = await auth();
+  if (!userId) {
     const loginUrl = new URL('/login', req.url);
     return NextResponse.redirect(loginUrl);
   }

@@ -72,7 +72,7 @@ export default function OnboardingPage() {
       const data = await res.json();
       if (res.ok && (data.success || data.user)) {
         await refreshUser();
-        window.location.href = '/dashboard';
+        router.push('/dashboard');
       } else {
         alert(data.error || 'Failed to set username');
       }
