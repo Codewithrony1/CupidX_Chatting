@@ -408,20 +408,32 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* SECTION 3: CURRENT MOOD & EXPIRATION (Requirement 10 & 21) */}
+          {/* SECTION 3: CURRENT MOOD & EXPIRATION (VIP Feature) */}
           <div className="glass-romantic rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black text-white flex items-center gap-2">
                 <Smile className="w-4 h-4 text-amber-400" />
                 <span>Current Mood</span>
+                {!isVIP && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                    <Lock className="w-2.5 h-2.5" /> VIP
+                  </span>
+                )}
               </h3>
 
               <button
                 type="button"
-                onClick={() => setShowMoodSheet(true)}
-                className="text-xs font-bold text-pink-400 hover:text-pink-300 transition-colors"
+                onClick={() => {
+                  if (!isVIP) {
+                    setShowVipLockModal(true);
+                  } else {
+                    setShowMoodSheet(true);
+                  }
+                }}
+                className="text-xs font-bold text-pink-400 hover:text-pink-300 transition-colors flex items-center gap-1 cursor-pointer"
               >
-                Change Mood
+                <span>Change Mood</span>
+                {!isVIP && <Lock className="w-3 h-3 text-yellow-400" />}
               </button>
             </div>
 
@@ -445,29 +457,43 @@ export default function ProfilePage() {
                   <button
                     key={d.id}
                     type="button"
-                    onClick={() => setMoodDuration(d.id as any)}
-                    className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                    onClick={() => {
+                      if (!isVIP) {
+                        setShowVipLockModal(true);
+                        return;
+                      }
+                      setMoodDuration(d.id as any);
+                    }}
+                    className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
                       moodDuration === d.id
                         ? 'bg-pink-500 text-white shadow-md'
                         : 'bg-white/5 border border-white/10 text-pink-200/70 hover:bg-white/10'
                     }`}
                   >
-                    {d.label}
+                    <span>{d.label}</span>
+                    {!isVIP && <Lock className="w-2.5 h-2.5 text-yellow-400" />}
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* SECTION 4: PERSONALITY PREFERENCES (Requirement 8) */}
+          {/* SECTION 4: PERSONALITY PREFERENCES (VIP Feature) */}
           <div className="glass-romantic rounded-3xl p-6 space-y-4">
-            <h3 className="text-sm font-black text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-yellow-400" />
-              <span>Conversation Style & Personality</span>
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-yellow-400" />
+                <span>Conversation Style & Personality</span>
+                {!isVIP && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                    <Lock className="w-2.5 h-2.5" /> VIP
+                  </span>
+                )}
+              </h3>
+            </div>
 
             <p className="text-xs text-pink-200/70">
-              Select personality tags that describe you and your conversation style.
+              Select personality tags that describe you and your conversation style (VIP Exclusive).
             </p>
 
             <div className="flex flex-wrap gap-2">
@@ -477,7 +503,13 @@ export default function ProfilePage() {
                   <button
                     key={tag}
                     type="button"
-                    onClick={() => togglePersonalityTag(tag)}
+                    onClick={() => {
+                      if (!isVIP) {
+                        setShowVipLockModal(true);
+                        return;
+                      }
+                      togglePersonalityTag(tag);
+                    }}
                     className={`px-3 py-2 rounded-2xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
                       selected
                         ? 'bg-gradient-to-r from-pink-600 to-rose-500 text-white border-pink-400 shadow-md scale-105'
@@ -485,7 +517,8 @@ export default function ProfilePage() {
                     }`}
                   >
                     <span>{tag}</span>
-                    {selected && <Check className="w-3.5 h-3.5 text-white" />}
+                    {!isVIP && <Lock className="w-3 h-3 text-yellow-400" />}
+                    {isVIP && selected && <Check className="w-3.5 h-3.5 text-white" />}
                   </button>
                 );
               })}

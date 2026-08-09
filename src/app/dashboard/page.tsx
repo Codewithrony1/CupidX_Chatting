@@ -300,16 +300,30 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Current Mood Widget (Requirement 10 & 11) */}
+        {/* Current Mood Widget (VIP Exclusive Feature) */}
         <div className="glass-romantic rounded-3xl p-5 space-y-3 border border-pink-500/20">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-pink-300 uppercase tracking-wider">Current Mood</span>
+            <div className="flex items-center space-x-1.5">
+              <span className="text-xs font-bold text-pink-300 uppercase tracking-wider">Current Mood</span>
+              {!isVIP && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                  <Lock className="w-2.5 h-2.5" /> VIP
+                </span>
+              )}
+            </div>
             <button
-              onClick={() => setShowMoodSheet(true)}
+              onClick={() => {
+                if (!isVIP) {
+                  alert('🔒 Changing your mood is an exclusive VIP feature! Upgrade to VIP to personalize your mood.');
+                  return;
+                }
+                setShowMoodSheet(true);
+              }}
               className="text-xs font-bold text-pink-400 hover:text-pink-300 transition-colors flex items-center gap-1 cursor-pointer"
             >
               <Smile className="w-3.5 h-3.5" />
               <span>Change</span>
+              {!isVIP && <Lock className="w-3 h-3 text-yellow-400" />}
             </button>
           </div>
 

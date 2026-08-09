@@ -56,13 +56,15 @@ export async function PUT(req: Request) {
     } = body;
 
     // Strict Server-side VIP Protection for VIP-only features
-    const isUpdatingVIPAvatar = avatarData && avatarData.startsWith('data:image/');
+    const isUpdatingVIPAvatar = (avatarData && avatarData.startsWith('data:image/')) || (avatarUrlPreset && avatarUrlPreset.includes('api.dicebear.com'));
     const isUpdatingVIPPreferences = preferredGender && preferredGender !== 'auto';
+    const isUpdatingVIPMood = mood !== undefined || moodDuration !== undefined;
+    const isUpdatingVIPPersonality = personalityPreferences !== undefined;
 
-    if ((isUpdatingVIPAvatar || isUpdatingVIPPreferences) && !isVIP) {
+    if ((isUpdatingVIPAvatar || isUpdatingVIPPreferences || isUpdatingVIPMood || isUpdatingVIPPersonality) && !isVIP) {
       return NextResponse.json(
         {
-          error: 'Custom profile avatar uploads & targeted discovery preferences require CupidX VIP.',
+          error: 'Custom moods, personality styles, custom avatars & targeted discovery preferences require CupidX VIP.',
           isVipRequired: true,
         },
         { status: 403 }
