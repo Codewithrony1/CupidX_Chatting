@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/AppShell';
+import { detectUserCountry, getCountryFlag, getCountryName } from '@/lib/countryFlag';
 import {
   User,
   Settings,
@@ -17,6 +18,8 @@ import {
   Check,
   Loader2,
   Lock,
+  Globe,
+  MapPin,
   Trash2
 } from 'lucide-react';
 
@@ -39,6 +42,20 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
+  
+  const [locationInfo, setLocationInfo] = useState({
+    countryCode: 'IN',
+    countryName: 'India',
+    flag: '🇮🇳',
+  });
+
+  useEffect(() => {
+    detectUserCountry().then((info) => {
+      if (info) {
+        setLocationInfo(info);
+      }
+    });
+  }, []);
 
   const handleAvatarClick = () => {
     if (!isVIP) {
@@ -173,9 +190,21 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div>
-            <h2 className="text-xl font-black text-white">@{user?.username}</h2>
+          <div className="space-y-1">
+            <h2 className="text-xl font-black text-white flex items-center justify-center gap-1.5">
+              <span>@{user?.username}</span>
+              <span className="text-lg" title={locationInfo.countryName}>
+                {locationInfo.flag}
+              </span>
+            </h2>
             <p className="text-xs text-pink-200/70">{user?.fullName}</p>
+          </div>
+
+          {/* Location Badge */}
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-pink-500/20 text-pink-200 text-xs font-semibold shadow-inner">
+            <MapPin className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+            <span>{locationInfo.countryName}</span>
+            <span className="text-base leading-none ml-0.5">{locationInfo.flag}</span>
           </div>
 
           {/* VIP-only Profile Picture Picker Drawer */}

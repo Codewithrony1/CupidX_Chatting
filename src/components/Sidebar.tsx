@@ -1,10 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings } from 'lucide-react';
+import { detectUserCountry } from '@/lib/countryFlag';
+import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings, MapPin } from 'lucide-react';
 
 export default function Sidebar({
   onOpenVIPModal,
@@ -15,6 +16,20 @@ export default function Sidebar({
 }) {
   const { user, logout } = useAuth();
   const pathname = usePathname();
+
+  const [locationInfo, setLocationInfo] = useState({
+    countryCode: 'IN',
+    countryName: 'India',
+    flag: '🇮🇳',
+  });
+
+  useEffect(() => {
+    detectUserCountry().then((info) => {
+      if (info) {
+        setLocationInfo(info);
+      }
+    });
+  }, []);
 
   if (!user) return null;
 
@@ -50,24 +65,36 @@ export default function Sidebar({
             />
             <div className="overflow-hidden">
               <h4 className="text-sm font-semibold text-white truncate flex items-center gap-1">
-                {user.fullName}
+                <span className="truncate">{user.fullName}</span>
+                <span className="text-sm shrink-0" title={locationInfo.countryName}>
+                  {locationInfo.flag}
+                </span>
                 {isVIP && <Sparkles className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 shrink-0" />}
               </h4>
               <p className="text-xs text-slate-400 truncate">@{user.username}</p>
             </div>
           </div>
-          {isVIP ? (
-            <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] font-extrabold uppercase tracking-wide">
-              VIP MEMBER
+
+          <div className="flex items-center justify-between pt-1">
+            {isVIP ? (
+              <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] font-extrabold uppercase tracking-wide">
+                VIP MEMBER
+              </div>
+            ) : (
+              <Link
+                href="/dashboard"
+                className="py-1 px-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 text-white font-bold text-[11px] shadow-md transition-all active:scale-95 cursor-pointer block text-center"
+              >
+                Get VIP
+              </Link>
+            )}
+
+            <div className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-pink-300 text-[10px] font-semibold">
+              <MapPin className="w-2.5 h-2.5 text-pink-400 shrink-0" />
+              <span>{locationInfo.countryName}</span>
+              <span>{locationInfo.flag}</span>
             </div>
-          ) : (
-            <Link
-              href="/dashboard"
-              className="w-full py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer block text-center"
-            >
-              Get VIP membership
-            </Link>
-          )}
+          </div>
         </div>
 
         {/* Navigation Links */}

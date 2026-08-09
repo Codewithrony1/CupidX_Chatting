@@ -305,8 +305,17 @@ export default function RandomChatPage() {
 
             <div>
               <div className="flex items-center space-x-1.5">
-                <h3 className="font-extrabold text-sm text-white tracking-tight">
-                  {partner ? `@${partner.username}` : matchStatus === 'searching' ? 'Looking for someone...' : 'Random Chat'}
+                <h3 className="font-extrabold text-sm text-white tracking-tight flex items-center gap-1.5">
+                  {partner ? (
+                    <>
+                      <span>@{partner.username}</span>
+                      <span className="text-sm leading-none" title="Location: India">🇮🇳</span>
+                    </>
+                  ) : matchStatus === 'searching' ? (
+                    'Looking for someone...'
+                  ) : (
+                    'Random Chat'
+                  )}
                 </h3>
                 {partner?.isVIP && <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current" />}
               </div>

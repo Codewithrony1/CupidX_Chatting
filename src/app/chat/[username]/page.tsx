@@ -349,8 +349,9 @@ export default function ChatWindow() {
           </div>
 
           <div>
-            <h4 className="text-sm font-bold text-white flex items-center gap-1">
-              {targetUser.fullName}
+            <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+              <span>{targetUser.fullName}</span>
+              <span className="text-sm leading-none" title="Location: India">🇮🇳</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400 border border-white/5 font-normal">
                 @{targetUser.username}
               </span>
