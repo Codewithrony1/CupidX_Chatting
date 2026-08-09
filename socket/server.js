@@ -10,7 +10,27 @@ const JWT_SECRET = process.env.JWT_SECRET || 'cupidx_fallback_jwt_secret';
 const PORT = process.env.SOCKET_PORT || 3001;
 const CLIENT_URL = process.env.NEXT_PUBLIC_CLIENT_URL || 'http://localhost:3000';
 
-const dbPath = path.join(__dirname, '..', 'prisma', 'dev.db');
+const fs = require('fs');
+const os = require('os');
+const defaultDbPath = path.join(__dirname, '..', 'prisma', 'dev.db');
+let dbPath = defaultDbPath;
+
+if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production') {
+  const tmpPath = path.join(os.tmpdir(), 'dev.db');
+  try {
+    if (!fs.existsSync(tmpPath)) {
+      if (fs.existsSync(defaultDbPath)) {
+        fs.copyFileSync(defaultDbPath, tmpPath);
+      } else {
+        fs.writeFileSync(tmpPath, '');
+      }
+    }
+    dbPath = tmpPath;
+  } catch (e) {
+    console.warn('Failed to copy SQLite database in socket server:', e);
+  }
+}
+
 const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
 const prisma = new PrismaClient({ adapter });
 
