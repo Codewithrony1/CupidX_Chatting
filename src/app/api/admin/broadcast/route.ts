@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       select: { id: true }
     });
 
-    const notificationData = users.map((u) => ({
+    const notificationData = users.map((u: { id: string }) => ({
       userId: u.id,
       type: 'ADMIN',
       content: cleanContent,

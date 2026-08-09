@@ -19,7 +19,7 @@ export async function GET(req: Request) {
       },
     });
 
-    const formattedUsers = users.map((u) => ({
+    const formattedUsers = users.map((u: any) => ({
       id: u.id,
       username: u.username,
       fullName: u.fullName,
