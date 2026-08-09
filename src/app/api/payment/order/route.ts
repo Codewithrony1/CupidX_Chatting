@@ -7,63 +7,73 @@ export async function POST(req: Request) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
 
-    const amount = 2900; // ₹29 in paise (29 * 100)
+    const body = await req.json().catch(() => ({}));
+    const amount = body.amount || 2900; // Amount in paise (default ₹29 = 2900 paise)
+    const currency = body.currency || 'INR';
 
-    const isMock = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID.includes('mock');
+    // Validate minimum amount requirement (100 paise = ₹1)
+    if (typeof amount !== 'number' || amount < 100) {
+      return NextResponse.json(
+        { error: 'Invalid amount. Minimum required amount is 100 paise (₹1).' },
+        { status: 400 }
+      );
+    }
 
-    if (isMock) {
-      const mockOrderId = `order_mock_${Date.now()}`;
-      
-      await prisma.payment.create({
-        data: {
-          userId: user.id,
-          razorpayOrderId: mockOrderId,
-          amount,
-          status: 'PENDING',
-        }
-      });
+    const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-      return NextResponse.json({
-        isMock: true,
-        orderId: mockOrderId,
-        amount,
-        currency: 'INR',
-        keyId: 'mock_key'
-      });
+    if (!keyId || !keySecret) {
+      console.error('Razorpay credentials missing in environment');
+      return NextResponse.json({ error: 'Razorpay payment gateway not configured' }, { status: 500 });
     }
 
     const razorpay = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID!,
-      key_secret: process.env.RAZORPAY_KEY_SECRET!,
+      key_id: keyId,
+      key_secret: keySecret,
     });
+
+    const receipt = `rcpt_${user.id.substring(0, 8)}_${Date.now()}`;
 
     const order = await razorpay.orders.create({
       amount,
-      currency: 'INR',
-      receipt: `receipt_${user.username}_${Date.now()}`,
+      currency,
+      receipt,
+      notes: {
+        userId: user.id,
+        username: user.username,
+        tier: 'VIP',
+      },
     });
 
+    if (!order || !order.id) {
+      return NextResponse.json({ error: 'Failed to create order with Razorpay' }, { status: 500 });
+    }
+
+    // Record order in Prisma database
     await prisma.payment.create({
       data: {
         userId: user.id,
         razorpayOrderId: order.id,
         amount,
         status: 'PENDING',
-      }
+      },
     });
 
     return NextResponse.json({
-      isMock: false,
+      order_id: order.id,
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      keyId: process.env.RAZORPAY_KEY_ID,
+      keyId,
     });
   } catch (error: any) {
-    console.error('Order creation error:', error);
-    return NextResponse.json({ error: 'Failed to create payment order' }, { status: 500 });
+    console.error('Razorpay Order Creation Error:', error);
+    return NextResponse.json(
+      { error: error?.message || 'Failed to create payment order' },
+      { status: 500 }
+    );
   }
 }

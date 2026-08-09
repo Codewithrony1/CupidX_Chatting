@@ -29,42 +29,109 @@ export default function VIPPage() {
 
   const isVIP = user?.subscription?.isActive || user?.membershipTier === 'VIP';
 
+  const loadRazorpayScript = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (typeof window !== 'undefined' && (window as any).Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handleGetVIP = async () => {
     setLoadingPayment(true);
     try {
-      // Create payment order
-      const orderRes = await fetch('/api/payment/order', { method: 'POST' });
+      const isScriptLoaded = await loadRazorpayScript();
+      if (!isScriptLoaded) {
+        alert('Failed to load Razorpay SDK. Please check your internet connection.');
+        setLoadingPayment(false);
+        return;
+      }
+
+      // Step 1: Create Order via Backend
+      const orderRes = await fetch('/api/payment/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: 2900, currency: 'INR' }),
+      });
       const orderData = await orderRes.json();
 
-      if (!orderRes.ok) {
+      if (!orderRes.ok || (!orderData.orderId && !orderData.order_id)) {
         alert(orderData.error || 'Failed to create payment order');
         setLoadingPayment(false);
         return;
       }
 
-      // Verify payment (Supports Mock or Razorpay)
-      const verifyRes = await fetch('/api/payment/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          razorpayOrderId: orderData.orderId,
-          razorpayPaymentId: `pay_${Date.now()}`,
-          isMock: orderData.isMock ?? true,
-        }),
+      const orderId = orderData.order_id || orderData.orderId;
+      const keyId = orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TNfnCTokMe0Xh0';
+
+      // Step 2: Open Razorpay Modal
+      const options = {
+        key: keyId,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        name: 'CupidX VIP',
+        description: '1 Month VIP Membership Subscription',
+        order_id: orderId,
+        handler: async function (response: any) {
+          try {
+            // Step 3: Verify Payment Signature via Backend
+            const verifyRes = await fetch('/api/payment/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              }),
+            });
+
+            const verifyData = await verifyRes.json();
+            if (verifyRes.ok && verifyData.success) {
+              await refreshUser();
+              alert('🎉 Payment Successful! Welcome to CupidX VIP.');
+              router.push('/profile');
+            } else {
+              alert(verifyData.error || 'Payment signature verification failed.');
+            }
+          } catch (err) {
+            console.error('Verification error:', err);
+            alert('Error verifying payment signature.');
+          } finally {
+            setLoadingPayment(false);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setLoadingPayment(false);
+          },
+        },
+        prefill: {
+          name: user?.fullName || user?.username || 'CupidX User',
+          email: `${user?.username || 'user'}@cupidx.com`,
+        },
+        theme: {
+          color: '#e11d48',
+        },
+      };
+
+      const razorpayInstance = new (window as any).Razorpay(options);
+
+      razorpayInstance.on('payment.failed', function (response: any) {
+        console.error('Razorpay Payment Failed:', response.error);
+        alert(`Payment failed: ${response.error.description || response.error.reason}`);
+        setLoadingPayment(false);
       });
 
-      const verifyData = await verifyRes.json();
-      if (verifyRes.ok && verifyData.success) {
-        await refreshUser();
-        alert('🎉 Congratulations! You are now a CupidX VIP Member.');
-        router.push('/profile');
-      } else {
-        alert(verifyData.error || 'Payment verification failed');
-      }
+      razorpayInstance.open();
     } catch (err) {
-      console.error(err);
-      alert('Error processing payment.');
-    } finally {
+      console.error('Checkout error:', err);
+      alert('Error initiating checkout process.');
       setLoadingPayment(false);
     }
   };

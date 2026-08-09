@@ -7,126 +7,94 @@ export async function POST(req: Request) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
 
-    const body = await req.json();
-    const { razorpayOrderId, razorpayPaymentId, razorpaySignature, isMock } = body;
+    const body = await req.json().catch(() => ({}));
+    const razorpayOrderId = body.razorpay_order_id || body.razorpayOrderId;
+    const razorpayPaymentId = body.razorpay_payment_id || body.razorpayPaymentId;
+    const razorpaySignature = body.razorpay_signature || body.razorpaySignature;
 
-    if (!razorpayOrderId) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      return NextResponse.json(
+        { error: 'Missing required payment verification fields' },
+        { status: 400 }
+      );
     }
 
-    if (isMock) {
-      const payment = await prisma.payment.findUnique({
-        where: { razorpayOrderId },
-      });
-
-      if (!payment) {
-        return NextResponse.json({ error: 'Payment order not found' }, { status: 404 });
-      }
-
-      await prisma.payment.update({
-        where: { razorpayOrderId },
-        data: {
-          razorpayPaymentId: razorpayPaymentId || `pay_mock_${Date.now()}`,
-          status: 'SUCCESS',
-        }
-      });
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { membershipTier: 'VIP' },
-      });
-
-      await prisma.subscription.upsert({
-        where: { userId: user.id },
-        update: {
-          plan: 'VIP',
-          isActive: true,
-          startDate: new Date(),
-          endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year VIP
-        },
-        create: {
-          userId: user.id,
-          plan: 'VIP',
-          isActive: true,
-          startDate: new Date(),
-          endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-        }
-      });
-
-      await prisma.notification.create({
-        data: {
-          userId: user.id,
-          type: 'PAYMENT',
-          content: 'Congratulations! You are now a CupidX VIP Member.',
-        }
-      });
-
-      return NextResponse.json({
-        message: 'Mock payment verified and VIP subscription activated.',
-        success: true,
-      });
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!secret) {
+      console.error('RAZORPAY_KEY_SECRET is not configured');
+      return NextResponse.json({ error: 'Payment gateway configuration error' }, { status: 500 });
     }
 
-    if (!razorpayPaymentId || !razorpaySignature) {
-      return NextResponse.json({ error: 'Missing payment proof' }, { status: 400 });
-    }
-
+    // Razorpay HMAC-SHA256 signature verification formula: HMAC-SHA256(order_id + "|" + payment_id, secret)
     const text = `${razorpayOrderId}|${razorpayPaymentId}`;
     const generatedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
+      .createHmac('sha256', secret)
       .update(text)
       .digest('hex');
 
     if (generatedSignature !== razorpaySignature) {
-      await prisma.payment.update({
+      // Signature mismatch: Mark payment as FAILED and reject activation
+      await prisma.payment.updateMany({
         where: { razorpayOrderId },
-        data: { status: 'FAILED' }
+        data: { status: 'FAILED' },
       });
-      return NextResponse.json({ error: 'Invalid payment signature' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid payment signature', success: false }, { status: 400 });
     }
 
-    await prisma.payment.update({
+    // Signature verified! Update payment status to SUCCESS in database
+    await prisma.payment.updateMany({
       where: { razorpayOrderId },
       data: {
         razorpayPaymentId,
         status: 'SUCCESS',
-      }
+      },
     });
 
+    // Upgrade user to VIP membership
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { membershipTier: 'VIP' },
+    });
+
+    const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
     await prisma.subscription.upsert({
       where: { userId: user.id },
       update: {
         plan: 'VIP',
         isActive: true,
         startDate: new Date(),
-        endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        endDate: new Date(Date.now() + ONE_YEAR_MS),
       },
       create: {
         userId: user.id,
         plan: 'VIP',
         isActive: true,
         startDate: new Date(),
-        endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      }
+        endDate: new Date(Date.now() + ONE_YEAR_MS),
+      },
     });
 
+    // Create confirmation notification
     await prisma.notification.create({
       data: {
         userId: user.id,
         type: 'PAYMENT',
-        content: 'Your payment was successful. CupidX VIP membership activated!',
-      }
+        content: '🎉 Payment Verified! Welcome to CupidX VIP Membership.',
+      },
     });
 
     return NextResponse.json({
-      message: 'Payment verified successfully. VIP membership activated.',
       success: true,
+      message: 'Payment verified and VIP subscription activated.',
     });
-  } catch (error) {
-    console.error('Payment verification error:', error);
-    return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Razorpay Verification Error:', error);
+    return NextResponse.json(
+      { error: error?.message || 'Error verifying payment signature' },
+      { status: 500 }
+    );
   }
 }
