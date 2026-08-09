@@ -97,8 +97,8 @@ async function canUsersMatch(candidateA, candidateB) {
     const isMaleTarget = Math.random() < (candidateA.isVIP ? 0.40 : 0.70);
     const targetGender = isMaleTarget ? 'male' : 'female';
     if (candidateB.gender !== 'unspecified' && candidateB.gender !== targetGender && candidateB.gender !== 'nonbinary') {
-      // Allow match if candidate pool is small, but favor probability
-      if (Math.random() < 0.65) return false;
+      // Allow instant match if queue is small (<= 2 users)
+      if (randomMatchQueue.length > 2 && Math.random() < 0.65) return false;
     }
   }
 
@@ -106,7 +106,7 @@ async function canUsersMatch(candidateA, candidateB) {
     const isMaleTarget = Math.random() < (candidateB.isVIP ? 0.40 : 0.70);
     const targetGender = isMaleTarget ? 'male' : 'female';
     if (candidateA.gender !== 'unspecified' && candidateA.gender !== targetGender && candidateA.gender !== 'nonbinary') {
-      if (Math.random() < 0.65) return false;
+      if (randomMatchQueue.length > 2 && Math.random() < 0.65) return false;
     }
   }
 
