@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { usernameSchema } from '@/lib/validation/username';
-import { signToken } from '@/lib/auth';
+import { signToken, getCurrentUser } from '@/lib/auth';
 
 export async function GET(req: Request) {
   try {
@@ -13,7 +13,9 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Username query parameter is required' }, { status: 400 });
     }
 
-    const validation = usernameSchema.safeParse(username);
+    const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+
+    const validation = usernameSchema.safeParse(cleanUsername);
     if (!validation.success) {
       return NextResponse.json({
         available: false,
@@ -23,7 +25,7 @@ export async function GET(req: Request) {
 
     const existing = await prisma.user.findFirst({
       where: {
-        username: username.toLowerCase(),
+        username: cleanUsername,
       },
     });
 
@@ -40,33 +42,92 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const clerkAuth = await auth();
-    const clerkUser = await currentUser();
+    const body = await req.json().catch(() => ({}));
+    const { username } = body;
 
-    if (!clerkAuth || !clerkAuth.userId || !clerkUser) {
-      return NextResponse.json({ error: 'Unauthorized. Please authenticate with Clerk first.' }, { status: 401 });
+    if (!username) {
+      return NextResponse.json({ error: 'Username is required' }, { status: 400 });
     }
 
-    const { username } = await req.json();
+    const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
 
-    const validation = usernameSchema.safeParse(username);
+    const validation = usernameSchema.safeParse(cleanUsername);
     if (!validation.success) {
-      return NextResponse.json({ error: validation.error.issues[0]?.message || 'Invalid username' }, { status: 400 });
+      return NextResponse.json(
+        { error: validation.error.issues[0]?.message || 'Invalid username format' },
+        { status: 400 }
+      );
     }
 
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { clerkUserId: clerkAuth.userId },
-    });
+    let clerkUserId: string | null = null;
+    let clerkFirstName = '';
+    let clerkLastName = '';
+    let clerkImageUrl = '';
 
-    if (existingUser) {
+    // Safely check Clerk Auth without throwing
+    try {
+      const clerkAuth = await auth();
+      if (clerkAuth && clerkAuth.userId) {
+        clerkUserId = clerkAuth.userId;
+        try {
+          const clerkUser = await currentUser();
+          if (clerkUser) {
+            clerkFirstName = clerkUser.firstName || '';
+            clerkLastName = clerkUser.lastName || '';
+            clerkImageUrl = clerkUser.imageUrl || '';
+          }
+        } catch (e) {
+          console.warn('Unable to fetch Clerk user details, proceeding with fallback');
+        }
+      }
+    } catch (e) {
+      console.warn('Clerk auth check fallback:', e);
+    }
+
+    // Fallback: Check existing cookie user if Clerk auth isn't present
+    const existingCookieUser = await getCurrentUser(req);
+
+    if (!clerkUserId && !existingCookieUser) {
+      return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
+    }
+
+    // 1. Check if user already exists by Clerk ID or DB ID
+    let user = null;
+    if (clerkUserId) {
+      user = await prisma.user.findUnique({
+        where: { clerkUserId },
+        include: { profile: true, subscription: true },
+      });
+    } else if (existingCookieUser) {
+      user = existingCookieUser;
+    }
+
+    if (user) {
+      // User already exists; update username if not set or different
+      if (user.username !== cleanUsername) {
+        // Check if target cleanUsername is taken by someone else
+        const taken = await prisma.user.findFirst({
+          where: { username: cleanUsername, id: { not: user.id } },
+        });
+
+        if (taken) {
+          return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
+        }
+
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { username: cleanUsername },
+          include: { profile: true, subscription: true },
+        });
+      }
+
       const token = signToken({
-        userId: existingUser.id,
-        username: existingUser.username,
-        role: existingUser.role,
+        userId: user.id,
+        username: user.username,
+        role: user.role,
       });
 
-      const response = NextResponse.json({ success: true, user: existingUser });
+      const response = NextResponse.json({ success: true, user });
       response.cookies.set('token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -77,24 +138,23 @@ export async function POST(req: Request) {
       return response;
     }
 
-    // Check username uniqueness
+    // 2. Check if username is taken by anyone
     const usernameTaken = await prisma.user.findFirst({
-      where: {
-        username: username.toLowerCase(),
-      },
+      where: { username: cleanUsername },
     });
 
     if (usernameTaken) {
       return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
     }
 
-    const fullName = `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || username;
-    const avatarUrl = clerkUser.imageUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${username}`;
+    const fullName = `${clerkFirstName} ${clerkLastName}`.trim() || cleanUsername;
+    const avatarUrl = clerkImageUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${cleanUsername}`;
 
+    // 3. Create new user in database
     const newUser = await prisma.user.create({
       data: {
-        clerkUserId: clerkAuth.userId,
-        username: username.toLowerCase(),
+        clerkUserId: clerkUserId || null,
+        username: cleanUsername,
         fullName,
         displayName: fullName,
         passwordHash: '',
@@ -123,7 +183,7 @@ export async function POST(req: Request) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60, // 7 days
+      maxAge: 7 * 24 * 60 * 60,
       path: '/',
     });
 
