@@ -18,6 +18,7 @@ import {
   LogOut
 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
+import Sidebar from '@/components/Sidebar';
 
 interface AppShellProps {
   children: React.ReactNode;
