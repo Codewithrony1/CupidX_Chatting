@@ -23,9 +23,7 @@ export async function GET(req: Request) {
 
     const existing = await prisma.user.findFirst({
       where: {
-        username: {
-          equals: username.toLowerCase(),
-        },
+        username: username.toLowerCase(),
       },
     });
 
@@ -68,9 +66,7 @@ export async function POST(req: Request) {
     // Check username uniqueness
     const usernameTaken = await prisma.user.findFirst({
       where: {
-        username: {
-          equals: username.toLowerCase(),
-        },
+        username: username.toLowerCase(),
       },
     });
 
