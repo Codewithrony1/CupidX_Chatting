@@ -60,7 +60,21 @@ export async function POST(req: Request) {
     });
 
     if (existingUser) {
-      return NextResponse.json({ message: 'Profile already created', user: existingUser });
+      const token = signToken({
+        userId: existingUser.id,
+        username: existingUser.username,
+        role: existingUser.role,
+      });
+
+      const response = NextResponse.json({ success: true, user: existingUser });
+      response.cookies.set('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60,
+        path: '/',
+      });
+      return response;
     }
 
     // Check username uniqueness

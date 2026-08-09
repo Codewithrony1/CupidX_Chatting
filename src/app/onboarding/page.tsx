@@ -70,9 +70,9 @@ export default function OnboardingPage() {
       });
 
       const data = await res.json();
-      if (res.ok && data.success) {
+      if (res.ok && (data.success || data.user)) {
         await refreshUser();
-        router.push('/dashboard');
+        window.location.href = '/dashboard';
       } else {
         alert(data.error || 'Failed to set username');
       }
