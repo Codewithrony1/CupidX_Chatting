@@ -1,0 +1,107 @@
+'use client';
+
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import { useClerk, useUser } from '@clerk/nextjs';
+
+interface User {
+  id: string;
+  clerkUserId?: string | null;
+  username: string;
+  fullName: string;
+  role: 'USER' | 'ADMIN';
+  profile?: {
+    bio: string;
+    age: number;
+    gender: string;
+    preferredGender?: string;
+    language?: string;
+    saveChatHistory?: boolean;
+    interests: string;
+    avatarUrl: string;
+    themePreference: string;
+  };
+  subscription?: {
+    isActive: boolean;
+    plan: string;
+    endDate?: string;
+  };
+}
+
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (userData: any) => void;
+  logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const pathname = usePathname();
+  const clerk = useClerk();
+  const { isSignedIn, isLoaded: clerkLoaded } = useUser();
+
+  const refreshUser = async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+
+        // If authenticated with Clerk but username is missing, redirect to /onboarding
+        if (data.needsOnboarding && pathname !== '/onboarding') {
+          router.push('/onboarding');
+        }
+      } else {
+        setUser(null);
+      }
+    } catch (e) {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (clerkLoaded) {
+      refreshUser();
+    }
+  }, [clerkLoaded, isSignedIn]);
+
+  const login = (userData: any) => {
+    setUser(userData);
+    router.push('/dashboard');
+  };
+
+  const logout = async () => {
+    try {
+      if (clerk) {
+        await clerk.signOut();
+      }
+      await fetch('/api/auth/logout', { method: 'POST' });
+      setUser(null);
+      router.push('/login');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}

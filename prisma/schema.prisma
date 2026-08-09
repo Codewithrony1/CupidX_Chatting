@@ -1,0 +1,148 @@
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  clerkUserId  String?       @unique
+  username     String        @unique
+  fullName     String
+  displayName  String?
+  passwordHash String?       @default("")
+  role         String        @default("USER") // "USER" or "ADMIN"
+  isSuspended  Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  profile      Profile?
+  subscription Subscription?
+  payments     Payment[]
+  notifications Notification[]
+
+  sentMessages     Message[]     @relation("SentMessages")
+  receivedMessages Message[]     @relation("ReceivedMessages")
+
+  chatSessionsA    ChatSession[] @relation("ChatSessionUserA")
+  chatSessionsB    ChatSession[] @relation("ChatSessionUserB")
+
+  blockedUsers Block[] @relation("Blocker")
+  blockedBy    Block[] @relation("Blocked")
+
+  sentReports  Report[] @relation("Reporter")
+  reportedBy   Report[] @relation("Reported")
+}
+
+model Profile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio             String   @default("")
+  age             Int      @default(18)
+  gender          String   @default("unspecified") // "male", "female", "nonbinary", "unspecified"
+  preferredGender String   @default("auto") // "auto", "male", "female", "nonbinary"
+  language        String   @default("english") // "english", "hindi", "spanish", "french", "any"
+  saveChatHistory Boolean  @default(false)
+  interests       String   @default("") // Comma-separated interests
+  avatarUrl       String   @default("/default-avatar.png")
+  isOnline        Boolean  @default(false)
+  lastSeen        DateTime @default(now())
+  themePreference String   @default("system") // "light", "dark", "system"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ChatSession {
+  id             String    @id @default(uuid())
+  userAId        String
+  userBId        String
+  status         String    @default("ACTIVE") // "ACTIVE", "ENDED"
+  createdAt      DateTime  @default(now())
+  lastActivityAt DateTime  @default(now())
+  expiresAt      DateTime?
+
+  userA User @relation("ChatSessionUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB User @relation("ChatSessionUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  messages Message[]
+}
+
+model Message {
+  id            String       @id @default(uuid())
+  chatSessionId String?
+  senderId      String
+  receiverId    String
+  content       String
+  imageUrl      String?
+  isRead        Boolean      @default(false)
+  isDeleted     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+
+  chatSession ChatSession? @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  sender      User        @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver    User        @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+}
+
+model Report {
+  id             String   @id @default(uuid())
+  reporterId     String
+  reportedUserId String
+  reason         String
+  status         String   @default("PENDING") // PENDING, RESOLVED
+  createdAt      DateTime @default(now())
+
+  reporter User @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User @relation("Reported", fields: [reportedUserId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id                 String   @id @default(uuid())
+  userId             String
+  razorpayOrderId    String   @unique
+  razorpayPaymentId  String?  @unique
+  amount             Int
+  status             String   @default("PENDING") // PENDING, SUCCESS, FAILED
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  plan      String    @default("VIP")
+  isActive  Boolean   @default(false)
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   @default("SYSTEM") // MESSAGE, SYSTEM, ADMIN, PAYMENT
+  content   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
