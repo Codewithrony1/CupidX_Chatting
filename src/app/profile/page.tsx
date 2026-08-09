@@ -60,12 +60,12 @@ const PERSONALITY_OPTIONS = [
 ];
 
 const AVATAR_PRESETS = [
-  '/default-avatar.png',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=Cupid1',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=Cupid2',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=Cupid3',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=Cupid4',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=Cupid5',
+  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX1',
+  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX2',
+  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX3',
+  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX4',
+  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX5',
+  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX6',
 ];
 
 export default function ProfilePage() {
@@ -290,24 +290,44 @@ export default function ProfilePage() {
               <p className="text-xs text-pink-200/70">{user?.fullName}</p>
             </div>
 
-            {/* Avatar Preset Selector */}
+            {/* Avatar Preset Selector (VIP Exclusive Feature) */}
             <div className="space-y-2 pt-2 border-t border-white/10">
-              <span className="text-[11px] font-bold text-pink-300 uppercase tracking-wider block">Avatar Presets</span>
+              <div className="flex items-center justify-center space-x-1.5">
+                <span className="text-[11px] font-bold text-pink-300 uppercase tracking-wider">
+                  Avatar Presets
+                </span>
+                {!isVIP && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                    <Lock className="w-2.5 h-2.5" /> VIP
+                  </span>
+                )}
+              </div>
               <div className="flex items-center justify-center space-x-2">
                 {AVATAR_PRESETS.map((preset, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => {
+                      if (!isVIP) {
+                        setShowVipLockModal(true);
+                        return;
+                      }
                       setAvatarUrl(preset);
                       setImagePreview(null);
                       setAvatarData('');
                     }}
-                    className={`w-9 h-9 rounded-full overflow-hidden border-2 transition-all cursor-pointer ${
-                      avatarUrl === preset && !imagePreview ? 'border-pink-400 scale-110 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'
+                    className={`w-9 h-9 rounded-full overflow-hidden border-2 transition-all cursor-pointer relative ${
+                      avatarUrl === preset && !imagePreview
+                        ? 'border-pink-400 scale-110 shadow-md'
+                        : 'border-transparent opacity-60 hover:opacity-100'
                     }`}
                   >
                     <img src={preset} alt={`Preset ${idx}`} className="w-full h-full object-cover" />
+                    {!isVIP && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                        <Lock className="w-3 h-3 text-yellow-400" />
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
