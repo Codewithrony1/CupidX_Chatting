@@ -69,9 +69,12 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#0d0014] text-white flex flex-col justify-between relative overflow-x-hidden selection:bg-pink-500 selection:text-white">
+    <div className="min-h-[100dvh] bg-[#0d0014] text-white flex flex-col md:flex-row justify-between relative overflow-x-hidden selection:bg-pink-500 selection:text-white">
       {/* Background Effects */}
       <FloatingHearts />
+
+      {/* Desktop PC Sidebar Panel (Laptop/Desktop View) */}
+      <Sidebar />
 
       {/* Mobile Dark Backdrop Overlay */}
       <div
