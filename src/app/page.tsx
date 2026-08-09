@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Heart, Shield, User, MessageCircle, Lock, ArrowRight, FastForward, CheckCircle2 } from 'lucide-react';
+import { Heart, Shield, User, MessageCircle, Lock, ArrowRight, FastForward, CheckCircle2, Sparkles, Crown } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 const Canvas3D = dynamic(() => import('@/components/Canvas3D'), {
@@ -122,6 +122,137 @@ export default function Home() {
               <h4 className="text-sm font-bold text-white">Press NEXT</h4>
               <p className="text-pink-200/70 text-xs leading-relaxed">When done, press NEXT. All chat messages are erased on the server.</p>
             </div>
+          </div>
+        </motion.div>
+
+        {/* FREE vs VIP Membership Comparison (Psychologically Persuasive) */}
+        <motion.div
+          initial={{ opacity: 0, y: 35 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.3 }}
+          className="w-full space-y-6 text-center pt-6"
+        >
+          <div className="space-y-2">
+            <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-[11px] font-black uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 fill-current" />
+              <span>Membership Comparison</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-black text-white">Why 94% of Users Choose VIP</h2>
+            <p className="text-xs sm:text-sm text-pink-200/80 max-w-md mx-auto">
+              Unlock total chat personalization, target gender matching, and custom profiles for less than ₹1/day!
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left max-w-3xl mx-auto pt-2">
+            
+            {/* FREE TIER CARD */}
+            <div className="glass rounded-3xl p-6 space-y-5 border border-white/10 relative flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                  <div>
+                    <h3 className="text-xl font-black text-white">FREE</h3>
+                    <p className="text-xs text-slate-400 font-medium">Standard Experience</p>
+                  </div>
+                  <span className="text-2xl font-black text-slate-300">₹0</span>
+                </div>
+
+                <ul className="space-y-2.5 text-xs text-slate-300">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Basic 1-to-1 Ephemeral Chat</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Random Matchmaking</span>
+                  </li>
+                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
+                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
+                    <span className="line-through">Custom DP Uploads (VIP Only)</span>
+                  </li>
+                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
+                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
+                    <span className="line-through">Target Gender Matching (VIP Only)</span>
+                  </li>
+                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
+                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
+                    <span className="line-through">Custom Moods & Expiration (VIP Only)</span>
+                  </li>
+                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
+                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
+                    <span className="line-through">VIP User Bans (VIP Only)</span>
+                  </li>
+                </ul>
+              </div>
+
+              <Link
+                href="/register"
+                className="w-full py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs text-center border border-white/10 transition-colors block mt-4"
+              >
+                Continue with Free
+              </Link>
+            </div>
+
+            {/* VIP TIER CARD (Psychologically Highlighted as Best Value) */}
+            <div className="glass-romantic rounded-3xl p-6 space-y-5 border-2 border-yellow-500/60 relative flex flex-col justify-between shadow-2xl overflow-hidden glow-gold">
+              {/* Popular Badge */}
+              <div className="absolute top-0 right-0 bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-slate-950 text-[10px] font-black px-4 py-1 rounded-bl-2xl shadow-md uppercase tracking-wider">
+                🔥 85% OFF - MOST POPULAR
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b border-yellow-500/20 pb-3 pt-2">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xl font-black text-white">💎 CUPIDX VIP</span>
+                    </div>
+                    <p className="text-[11px] text-yellow-300 font-bold">Best Romantic Connections</p>
+                  </div>
+
+                  <div className="text-right">
+                    <div className="text-2xl font-black text-yellow-400 flex items-baseline justify-end gap-1">
+                      <span>₹29</span>
+                      <span className="text-xs text-slate-400 font-normal">/mo</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 line-through">₹199/mo</span>
+                  </div>
+                </div>
+
+                <ul className="space-y-2.5 text-xs text-white">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
+                    <span className="font-semibold">Custom Profile Picture & DP Uploads</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
+                    <span className="font-semibold">Target Match Preferences (Men / Women / Anyone)</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
+                    <span className="font-semibold">Custom Moods & Expiration Timers</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
+                    <span className="font-semibold">Personality Tags & Smart Priority Matching</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
+                    <span className="font-semibold">💎 Exclusive VIP Badge on Profile & Chat</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
+                    <span className="font-semibold">VIP User Bans</span>
+                  </li>
+                </ul>
+              </div>
+
+              <Link
+                href="/vip"
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs text-center shadow-lg shadow-yellow-500/30 transition-all hover:scale-102 active:scale-95 block mt-4 border border-yellow-300/40"
+              >
+                UNLOCK VIP NOW — ₹29 ONLY
+              </Link>
+            </div>
+
           </div>
         </motion.div>
 

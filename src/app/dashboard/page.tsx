@@ -198,17 +198,22 @@ export default function DashboardPage() {
               </div>
             </div>
             <div>
-              <h3 className="text-sm font-black text-white">Unlock Cupidx VIP</h3>
+              <div className="flex items-baseline gap-2">
+                <h3 className="text-sm font-black text-white">Unlock Cupidx VIP</h3>
+                <span className="text-[10px] text-yellow-300 font-extrabold bg-yellow-500/20 px-2 py-0.5 rounded border border-yellow-500/30">
+                  ONLY ₹29/mo (85% OFF)
+                </span>
+              </div>
               <p className="text-xs text-pink-200/70 mt-0.5">
-                Customize your profile, discover better connections and express yourself more.
+                Customize your profile, target gender matches & express yourself for less than ₹1/day.
               </p>
             </div>
             <Link
               href="/vip"
-              className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-slate-950 font-black text-xs shadow-md hover:scale-102 transition-transform cursor-pointer"
+              className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-md hover:scale-102 transition-transform cursor-pointer border border-yellow-300/40"
             >
               <Crown className="w-3.5 h-3.5 fill-current" />
-              <span>GET VIP</span>
+              <span>GET VIP FOR ₹29 ONLY</span>
             </Link>
           </div>
         ) : (

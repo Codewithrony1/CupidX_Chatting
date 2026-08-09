@@ -164,10 +164,14 @@ export default function VIPPage() {
                   <Sparkles className="w-4 h-4 text-yellow-400 fill-current" />
                   <h3 className="text-xl font-black text-white">💎 VIP</h3>
                 </div>
-                <p className="text-xs text-yellow-400 font-black">₹199 / month</p>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-xl font-black text-yellow-400">₹29</span>
+                  <span className="text-xs text-pink-200/60 font-semibold">/ month</span>
+                  <span className="text-[10px] text-slate-400 line-through">₹199</span>
+                </div>
               </div>
-              <span className="text-[11px] font-black px-3 py-1 rounded-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 shadow-md">
-                PREMIUM
+              <span className="text-[10px] font-black px-3 py-1 rounded-full bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 shadow-md uppercase tracking-wider">
+                🔥 85% OFF LAUNCH SPECIAL
               </span>
             </div>
 
@@ -233,7 +237,7 @@ export default function VIPPage() {
                 ) : (
                   <>
                     <Crown className="w-4 h-4 fill-current" />
-                    <span>GET VIP</span>
+                    <span>GET VIP — ONLY ₹29 / MONTH</span>
                   </>
                 )}
               </button>
