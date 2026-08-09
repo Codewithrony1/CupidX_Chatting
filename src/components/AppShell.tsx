@@ -81,7 +81,7 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
       <div
         onClick={() => setDrawerOpen(false)}
         aria-hidden="true"
-        className={`fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[90] transition-opacity duration-300 ease-in-out ${
+        className={`md:hidden fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[90] transition-opacity duration-300 ease-in-out ${
           drawerOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
       />
@@ -91,7 +91,7 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
         id="navigation-drawer"
         aria-label="Navigation Menu"
         aria-hidden={!drawerOpen}
-        className={`fixed top-0 left-0 bottom-0 z-[100] w-80 max-w-[85vw] bg-[#120019] text-white flex flex-col justify-between p-6 shadow-2xl border-r border-pink-500/30 transition-transform duration-300 ease-in-out pt-[calc(1.5rem+env(safe-area-inset-top))] pb-[calc(1.5rem+env(safe-area-inset-bottom))] overflow-y-auto ${
+        className={`md:hidden fixed top-0 left-0 bottom-0 z-[100] w-80 max-w-[85vw] bg-[#120019] text-white flex flex-col justify-between p-6 shadow-2xl border-r border-pink-500/30 transition-transform duration-300 ease-in-out pt-[calc(1.5rem+env(safe-area-inset-top))] pb-[calc(1.5rem+env(safe-area-inset-bottom))] overflow-y-auto ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
