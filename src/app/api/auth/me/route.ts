@@ -7,6 +7,7 @@ export async function GET(req: Request) {
   try {
     const user = await getCurrentUser(req);
     if (user) {
+      const isVIP = user.subscription?.isActive || user.membershipTier === 'VIP';
       return NextResponse.json({
         user: {
           id: user.id,
@@ -14,6 +15,7 @@ export async function GET(req: Request) {
           username: user.username,
           fullName: user.fullName,
           role: user.role,
+          membershipTier: isVIP ? 'VIP' : 'FREE',
           profile: user.profile,
           subscription: user.subscription,
         },

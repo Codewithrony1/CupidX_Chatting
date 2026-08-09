@@ -34,6 +34,11 @@ export async function POST(req: Request) {
         }
       });
 
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { membershipTier: 'VIP' },
+      });
+
       await prisma.subscription.upsert({
         where: { userId: user.id },
         update: {

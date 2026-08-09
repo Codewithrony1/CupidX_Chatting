@@ -10,11 +10,18 @@ interface User {
   username: string;
   fullName: string;
   role: 'USER' | 'ADMIN';
+  membershipTier?: string;
   profile?: {
     bio: string;
+    showBio?: boolean;
     age: number;
     gender: string;
+    showGender?: boolean;
     preferredGender?: string;
+    personalityPreferences?: string;
+    mood?: string;
+    showMood?: boolean;
+    moodExpiresAt?: string | null;
     language?: string;
     saveChatHistory?: boolean;
     interests: string;

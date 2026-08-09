@@ -43,8 +43,10 @@ interface TargetUserProfile {
   id: string;
   username: string;
   fullName: string;
+  displayName?: string;
   avatarUrl: string;
   isOnline: boolean;
+  isVIP?: boolean;
   bio: string;
   age: number;
   gender: string;
@@ -72,9 +74,10 @@ export default function ChatWindow() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
-  // VIP Ban States
+  // VIP Ban & Profile View States
   const [showBanModal, setShowBanModal] = useState(false);
   const [showVipLockModal, setShowVipLockModal] = useState(false);
+  const [showUserProfileModal, setShowUserProfileModal] = useState(false);
   const [banSubmitting, setBanSubmitting] = useState(false);
 
   const isVIP = user?.subscription?.isActive || false;
@@ -415,7 +418,7 @@ export default function ChatWindow() {
               <button
                 onClick={() => {
                   setShowMenu(false);
-                  router.push('/profile');
+                  setShowUserProfileModal(true);
                 }}
                 className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:bg-white/5 transition-all text-left cursor-pointer"
               >
@@ -710,6 +713,70 @@ export default function ChatWindow() {
         </div>
       )}
 
+      {/* Public User Profile View Modal (Requirement 13 & 14) */}
+      {showUserProfileModal && targetUser && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/30 shadow-2xl">
+            <button
+              onClick={() => setShowUserProfileModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="relative w-20 h-20 mx-auto">
+              <img
+                src={targetUser.avatarUrl || '/default-avatar.png'}
+                alt={targetUser.username}
+                className="w-20 h-20 rounded-full object-cover bg-slate-900 border-2 border-pink-400 shadow-lg"
+              />
+              {targetUser.isOnline && (
+                <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-400 border-2 border-slate-950" title="Online" />
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-center space-x-1.5">
+                <h3 className="text-lg font-black text-white">@{targetUser.username}</h3>
+                <Crown className="w-4 h-4 text-yellow-400 fill-current" />
+              </div>
+              <p className="text-xs text-pink-200/70">{targetUser.displayName || targetUser.fullName}</p>
+              
+              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-[10px] font-extrabold uppercase mt-1">
+                💎 VIP MEMBER
+              </span>
+            </div>
+
+            {/* Current Mood Display */}
+            <div className="p-3 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-200 font-semibold flex items-center justify-center space-x-2">
+              <Smile className="w-4 h-4 text-amber-400" />
+              <span>Current Mood: 😎 Attitude</span>
+            </div>
+
+            {/* Personality Badges */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-extrabold text-pink-300 uppercase tracking-wider block">Personality</span>
+              <div className="flex flex-wrap justify-center gap-1.5">
+                {['💬 Talkative', '😂 Funny', '😊 Friendly'].map((tag) => (
+                  <span key={tag} className="px-2.5 py-1 rounded-xl bg-pink-500/15 text-pink-200 text-[11px] font-bold border border-pink-500/30">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => setShowUserProfileModal(false)}
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-pink-600 to-rose-500 text-white font-bold text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+              >
+                Chat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Free User VIP Feature Lock Modal */}
       {showVipLockModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
@@ -727,21 +794,21 @@ export default function ChatWindow() {
 
             <div className="space-y-2">
               <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-[11px] font-extrabold uppercase tracking-wide">
-                💎 VIP Feature
+                💎 VIP FEATURE
               </span>
-              <h3 className="text-lg font-black text-white">Personal User Bans</h3>
+              <h3 className="text-lg font-black text-white">This feature is available with Cupidx VIP.</h3>
               <p className="text-xs text-pink-200/70 leading-relaxed px-2">
-                Personal user bans are available exclusively with Cupidx VIP membership.
+                Unlock custom DP uploads, targeted gender discovery, talkative matchmaking & VIP profile badge.
               </p>
             </div>
 
             <div className="space-y-2 pt-1">
               <Link
-                href="/dashboard"
+                href="/vip"
                 onClick={() => setShowVipLockModal(false)}
                 className="w-full py-3 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black text-xs shadow-lg transition-all active:scale-95 cursor-pointer block text-center"
               >
-                Explore VIP
+                EXPLORE VIP
               </Link>
 
               <button

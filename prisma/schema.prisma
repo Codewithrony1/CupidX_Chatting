@@ -7,16 +7,17 @@ generator client {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  clerkUserId  String?       @unique
-  username     String        @unique
-  fullName     String
-  displayName  String?
-  passwordHash String?       @default("")
-  role         String        @default("USER") // "USER" or "ADMIN"
-  isSuspended  Boolean       @default(false)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id             String        @id @default(uuid())
+  clerkUserId    String?       @unique
+  username       String        @unique
+  fullName       String
+  displayName    String?
+  passwordHash   String?       @default("")
+  role           String        @default("USER") // "USER" or "ADMIN"
+  membershipTier String        @default("FREE") // "FREE" or "VIP"
+  isSuspended    Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   profile      Profile?
   subscription Subscription?
@@ -40,22 +41,28 @@ model User {
 }
 
 model Profile {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bio             String   @default("")
-  age             Int      @default(18)
-  gender          String   @default("unspecified") // "male", "female", "nonbinary", "unspecified"
-  preferredGender String   @default("auto") // "auto", "male", "female", "nonbinary"
-  language        String   @default("english") // "english", "hindi", "spanish", "french", "any"
-  saveChatHistory Boolean  @default(false)
-  interests       String   @default("") // Comma-separated interests
-  avatarUrl       String   @default("/default-avatar.png")
-  isOnline        Boolean  @default(false)
-  lastSeen        DateTime @default(now())
-  themePreference String   @default("system") // "light", "dark", "system"
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                     String    @id @default(uuid())
+  userId                 String    @unique
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio                    String    @default("")
+  showBio                Boolean   @default(true)
+  age                    Int       @default(18)
+  gender                 String    @default("unspecified") // "male", "female", "nonbinary", "prefer_not_to_say", "unspecified"
+  showGender             Boolean   @default(true)
+  preferredGender        String    @default("auto") // "auto", "male", "female", "any"
+  personalityPreferences String    @default("") // Comma-separated personality tags (e.g. "Talkative,Funny,Friendly")
+  mood                   String    @default("😎 Attitude") // Current mood emoji + title
+  showMood               Boolean   @default(true)
+  moodExpiresAt          DateTime?
+  language               String    @default("english") // "english", "hindi", "spanish", "french", "any"
+  saveChatHistory        Boolean   @default(false)
+  interests              String    @default("") // Comma-separated interests
+  avatarUrl              String    @default("/default-avatar.png")
+  isOnline               Boolean   @default(false)
+  lastSeen               DateTime  @default(now())
+  themePreference        String    @default("system") // "light", "dark", "system"
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 }
 
 model ChatSession {
