@@ -58,10 +58,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        setUser(data.user);
-
-        // If authenticated with Clerk but username is missing, redirect to /onboarding
-        if (data.needsOnboarding && pathname !== '/onboarding') {
+        if (data.user) {
+          setUser(data.user);
+        } else if (data.needsOnboarding && pathname !== '/onboarding') {
           router.push('/onboarding');
         }
       } else {

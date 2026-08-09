@@ -14,7 +14,7 @@ export async function comparePassword(password: string, hash: string): Promise<b
 }
 
 export function signToken(payload: { userId: string; username: string; role: string }): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
 }
 
 export function verifyToken(token: string): { userId: string; username: string; role: string } | null {
@@ -48,17 +48,35 @@ export async function getCurrentUser(req?: Request) {
       }
     }
 
-    // 2. Fallback to Clerk authentication if local token cookie is not present
+    // 2. Fallback check Clerk authentication
     try {
       const clerkAuth = await auth();
       if (clerkAuth && clerkAuth.userId) {
-        const user = await prisma.user.findUnique({
+        let user = await prisma.user.findUnique({
           where: { clerkUserId: clerkAuth.userId },
           include: {
             profile: true,
             subscription: true,
           },
         });
+
+        // If not found by clerkUserId, check token cookie user and auto-link clerkUserId
+        if (!user && req) {
+          const cookieHeader = req.headers.get('cookie') || '';
+          const cookieMatch = cookieHeader.match(/(?:^|;\s*)token=([^;]*)/);
+          const token = cookieMatch ? cookieMatch[1] : null;
+          if (token) {
+            const payload = verifyToken(token);
+            if (payload) {
+              user = await prisma.user.update({
+                where: { id: payload.userId },
+                data: { clerkUserId: clerkAuth.userId },
+                include: { profile: true, subscription: true },
+              });
+            }
+          }
+        }
+
         if (user && !user.isSuspended) {
           return user;
         }

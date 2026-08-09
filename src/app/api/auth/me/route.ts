@@ -22,7 +22,7 @@ export async function GET(req: Request) {
       });
     }
 
-    // Check if Clerk user is signed in but needs Cupidx onboarding
+    // Check if Clerk user is signed in but has no user record in database
     try {
       const clerkAuth = await auth();
       if (clerkAuth && clerkAuth.userId) {
