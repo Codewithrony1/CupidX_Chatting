@@ -15,7 +15,7 @@ const os = require('os');
 const defaultDbPath = path.join(__dirname, '..', 'prisma', 'dev.db');
 let dbPath = defaultDbPath;
 
-if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production') {
+if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
   const tmpPath = path.join(os.tmpdir(), 'dev.db');
   try {
     if (!fs.existsSync(tmpPath)) {

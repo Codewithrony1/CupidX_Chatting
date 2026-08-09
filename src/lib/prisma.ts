@@ -11,9 +11,9 @@ const globalForPrisma = globalThis as unknown as {
 const getDatabasePath = () => {
   const defaultPath = path.join(process.cwd(), 'prisma', 'dev.db');
   
-  // On Vercel / AWS Lambda / Serverless execution environments, /var/task is read-only.
-  // os.tmpdir() returns the system temp folder (/tmp on Linux/Vercel, %TEMP% on Windows).
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production') {
+  // On Vercel / AWS Lambda Serverless platform, /var/task is read-only.
+  // os.tmpdir() returns /tmp in serverless execution environments.
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     const tmpPath = path.join(os.tmpdir(), 'dev.db');
     try {
       if (!fs.existsSync(tmpPath)) {
