@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
@@ -16,7 +17,10 @@ import {
   MoreVertical,
   X,
   AlertCircle,
-  MessageSquare
+  MessageSquare,
+  User,
+  Lock,
+  Crown
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -67,6 +71,42 @@ export default function ChatWindow() {
   const [reportReason, setReportReason] = useState('');
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+
+  // VIP Ban States
+  const [showBanModal, setShowBanModal] = useState(false);
+  const [showVipLockModal, setShowVipLockModal] = useState(false);
+  const [banSubmitting, setBanSubmitting] = useState(false);
+
+  const isVIP = user?.subscription?.isActive || false;
+
+  const handleBanUser = async () => {
+    if (!targetUser) return;
+    setBanSubmitting(true);
+    try {
+      const res = await fetch('/api/chat/ban', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: targetUser.id, action: 'ban' }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`@${targetUser.username} has been personally banned. They can no longer connect or match with you.`);
+        setShowBanModal(false);
+        router.push('/dashboard');
+      } else if (res.status === 403 && data.isVipRequired) {
+        setShowBanModal(false);
+        setShowVipLockModal(true);
+      } else {
+        alert(data.error || 'Failed to ban user.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Error applying personal ban.');
+    } finally {
+      setBanSubmitting(false);
+    }
+  };
 
   // Input states
   const [inputText, setInputText] = useState('');
@@ -371,20 +411,57 @@ export default function ChatWindow() {
           </button>
 
           {showMenu && (
-            <div className="absolute right-0 mt-2 w-48 glass rounded-2xl p-2 border border-white/10 shadow-2xl z-30">
+            <div className="absolute right-0 mt-2 w-52 glass rounded-2xl p-2 border border-white/10 shadow-2xl z-30 space-y-1 animate-in fade-in zoom-in-95 duration-150">
               <button
-                onClick={handleBlockUser}
-                className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold text-pink-400 hover:bg-pink-500/10 transition-all text-left cursor-pointer"
+                onClick={() => {
+                  setShowMenu(false);
+                  router.push('/profile');
+                }}
+                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:bg-white/5 transition-all text-left cursor-pointer"
+              >
+                <User className="w-4 h-4 text-purple-400" />
+                <span>View Profile</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowMenu(false);
+                  handleBlockUser();
+                }}
+                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-pink-400 hover:bg-pink-500/10 transition-all text-left cursor-pointer"
               >
                 <Ban className="w-4 h-4" />
                 <span>{blockedByMe ? 'Unblock User' : 'Block User'}</span>
               </button>
+
+              <button
+                onClick={() => {
+                  setShowMenu(false);
+                  if (isVIP) {
+                    setShowBanModal(true);
+                  } else {
+                    setShowVipLockModal(true);
+                  }
+                }}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-yellow-400 hover:bg-yellow-500/10 transition-all text-left cursor-pointer"
+              >
+                <div className="flex items-center space-x-2.5">
+                  <Sparkles className="w-4 h-4 text-yellow-400 fill-current" />
+                  <span>Ban User</span>
+                </div>
+                {!isVIP && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                    <Lock className="w-2.5 h-2.5" /> VIP
+                  </span>
+                )}
+              </button>
+
               <button
                 onClick={() => {
                   setShowReportModal(true);
                   setShowMenu(false);
                 }}
-                className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold text-yellow-400 hover:bg-yellow-500/10 transition-all text-left cursor-pointer"
+                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-all text-left cursor-pointer"
               >
                 <Flag className="w-4 h-4" />
                 <span>Report User</span>
@@ -562,7 +639,7 @@ export default function ChatWindow() {
               </div>
               <div className="space-y-1">
                 <h3 className="text-xl font-bold text-white">Report User</h3>
-                <p className="text-xs text-slate-400">File a report against @{targetUser.username}</p>
+                <p className="text-xs text-slate-400">File a report against @{targetUser?.username}</p>
               </div>
             </div>
 
@@ -587,6 +664,93 @@ export default function ChatWindow() {
                 {reportSubmitting ? 'Submitting Report...' : 'Submit Report'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* VIP User Personal Ban Confirmation Modal */}
+      {showBanModal && targetUser && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-yellow-500/30 shadow-2xl">
+            <button
+              onClick={() => setShowBanModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-yellow-500 to-amber-600 flex items-center justify-center mx-auto text-slate-950 shadow-lg shadow-yellow-500/20">
+              <Sparkles className="w-6 h-6 fill-current" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-lg font-black text-white">Ban @{targetUser.username}?</h3>
+              <p className="text-xs text-pink-200/80 leading-relaxed px-2">
+                This will prevent this user from connecting or matching with you across Cupidx discovery features.
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                onClick={() => setShowBanModal(false)}
+                className="flex-1 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={handleBanUser}
+                disabled={banSubmitting}
+                className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+              >
+                {banSubmitting ? 'Banning...' : 'Ban User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Free User VIP Feature Lock Modal */}
+      {showVipLockModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/30 shadow-2xl">
+            <button
+              onClick={() => setShowVipLockModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-yellow-400 via-amber-500 to-yellow-600 flex items-center justify-center mx-auto text-slate-950 shadow-xl shadow-yellow-500/30 animate-pulse">
+              <Crown className="w-7 h-7 fill-current" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-[11px] font-extrabold uppercase tracking-wide">
+                💎 VIP Feature
+              </span>
+              <h3 className="text-lg font-black text-white">Personal User Bans</h3>
+              <p className="text-xs text-pink-200/70 leading-relaxed px-2">
+                Personal user bans are available exclusively with Cupidx VIP membership.
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <Link
+                href="/dashboard"
+                onClick={() => setShowVipLockModal(false)}
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black text-xs shadow-lg transition-all active:scale-95 cursor-pointer block text-center"
+              >
+                Explore VIP
+              </Link>
+
+              <button
+                onClick={() => setShowVipLockModal(false)}
+                className="w-full py-2.5 rounded-2xl text-xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Maybe later
+              </button>
+            </div>
           </div>
         </div>
       )}

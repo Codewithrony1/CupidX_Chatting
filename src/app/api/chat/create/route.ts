@@ -77,7 +77,21 @@ export async function POST(req: Request) {
     });
 
     if (isBlocked) {
-      return NextResponse.json({ error: 'Unable to connect with this user' }, { status: 403 });
+      return NextResponse.json({ error: 'Connection unavailable.' }, { status: 403 });
+    }
+
+    // Check personal ban relations (Does A ban B? Or B ban A?)
+    const isBanned = await prisma.userBan.findFirst({
+      where: {
+        OR: [
+          { bannedByUserId: user.id, bannedUserId: targetUser.id },
+          { bannedByUserId: targetUser.id, bannedUserId: user.id },
+        ],
+      },
+    });
+
+    if (isBanned) {
+      return NextResponse.json({ error: 'Connection unavailable.' }, { status: 403 });
     }
 
     // Create new active chat session

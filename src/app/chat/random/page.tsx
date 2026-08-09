@@ -72,11 +72,45 @@ export default function RandomChatPage() {
   const [reportReason, setReportReason] = useState('');
   const [reportSubmitting, setReportSubmitting] = useState(false);
 
+  // VIP Ban States
+  const [showBanModal, setShowBanModal] = useState(false);
+  const [showVipLockModal, setShowVipLockModal] = useState(false);
+  const [banSubmitting, setBanSubmitting] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
 
   const isVIP = user?.subscription?.isActive || false;
+
+  const handleBanUser = async () => {
+    if (!partner) return;
+    setBanSubmitting(true);
+    try {
+      const res = await fetch('/api/chat/ban', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: partner.id, action: 'ban' }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`@${partner.username} has been personally banned. You will no longer match with them.`);
+        setShowBanModal(false);
+        handleNextPartnerDirect();
+      } else if (res.status === 403 && data.isVipRequired) {
+        setShowBanModal(false);
+        setShowVipLockModal(true);
+      } else {
+        alert(data.error || 'Failed to ban user.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Error applying personal ban.');
+    } finally {
+      setBanSubmitting(false);
+    }
+  };
 
   // Auto-scroll helper
   useEffect(() => {
@@ -326,7 +360,7 @@ export default function RandomChatPage() {
           </div>
 
           {matchStatus === 'connected' && (
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5">
               <button
                 onClick={handleBlockUser}
                 className="p-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-rose-300 transition-colors"
@@ -334,6 +368,22 @@ export default function RandomChatPage() {
               >
                 <Ban className="w-4 h-4" />
               </button>
+
+              <button
+                onClick={() => {
+                  if (isVIP) {
+                    setShowBanModal(true);
+                  } else {
+                    setShowVipLockModal(true);
+                  }
+                }}
+                className="p-1.5 rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 transition-colors flex items-center gap-1 cursor-pointer"
+                title={isVIP ? 'Personal Ban User (VIP)' : 'Personal Ban User (VIP Feature)'}
+              >
+                <Sparkles className="w-4 h-4 fill-current" />
+                {!isVIP && <Lock className="w-2.5 h-2.5" />}
+              </button>
+
               <button
                 onClick={() => setShowReportModal(true)}
                 className="p-1.5 rounded-xl bg-white/5 hover:bg-amber-500/20 text-amber-300 transition-colors"
@@ -464,38 +514,138 @@ export default function RandomChatPage() {
         isNext={true}
       />
 
-      {/* Report User Bottom Sheet */}
-      <BottomSheet isOpen={showReportModal} onClose={() => setShowReportModal(false)} title={`Report @${partner?.username}`}>
-        <form onSubmit={handleReportUser} className="space-y-4">
-          <p className="text-xs text-pink-200/70">
-            Please state the reason for reporting @{partner?.username}. Reports are handled confidentially by our moderation team.
-          </p>
-          <textarea
-            rows={3}
-            value={reportReason}
-            onChange={(e) => setReportReason(e.target.value)}
-            placeholder="Specify reason (Spam, Harassment, Inappropriate behavior...)"
-            className="w-full p-3 rounded-2xl glass-input text-xs"
-            required
-          />
-          <div className="flex gap-2">
+      {/* Report Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="w-full max-w-md glass-premium rounded-3xl p-8 space-y-6 relative border border-yellow-500/20">
             <button
-              type="button"
               onClick={() => setShowReportModal(false)}
-              className="w-full py-3 rounded-2xl bg-white/5 text-pink-200 font-bold text-xs"
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
             >
-              Cancel
+              <X className="w-5 h-5" />
             </button>
-            <button
-              type="submit"
-              disabled={reportSubmitting}
-              className="w-full py-3 rounded-2xl bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-500/30"
-            >
-              {reportSubmitting ? 'Submitting...' : 'Submit Report'}
-            </button>
+
+            <div className="space-y-4 text-center">
+              <div className="mx-auto w-12 h-12 rounded-xl bg-yellow-500/10 flex items-center justify-center text-yellow-500 border border-yellow-500/30">
+                <Flag className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xl font-bold text-white">Report User</h3>
+                <p className="text-xs text-slate-400">File a report against @{partner?.username}</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleReportUser} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Reason for Report</label>
+                <textarea
+                  required
+                  rows={4}
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.target.value)}
+                  placeholder="Describe the inappropriate behavior, harassment, or violation..."
+                  className="w-full px-3 py-2 rounded-xl glass-input text-xs"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={reportSubmitting || !reportReason.trim()}
+                className="w-full py-3 rounded-xl bg-yellow-600 hover:bg-yellow-500 text-slate-950 font-bold text-sm shadow-md transition-all cursor-pointer disabled:opacity-50"
+              >
+                {reportSubmitting ? 'Submitting Report...' : 'Submit Report'}
+              </button>
+            </form>
           </div>
-        </form>
-      </BottomSheet>
+        </div>
+      )}
+
+      {/* VIP User Personal Ban Confirmation Modal */}
+      {showBanModal && partner && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-yellow-500/30 shadow-2xl">
+            <button
+              onClick={() => setShowBanModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-yellow-500 to-amber-600 flex items-center justify-center mx-auto text-slate-950 shadow-lg shadow-yellow-500/20">
+              <Sparkles className="w-6 h-6 fill-current" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-lg font-black text-white">Ban @{partner.username}?</h3>
+              <p className="text-xs text-pink-200/80 leading-relaxed px-2">
+                This will prevent this user from connecting or matching with you across Cupidx discovery features.
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                onClick={() => setShowBanModal(false)}
+                className="flex-1 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={handleBanUser}
+                disabled={banSubmitting}
+                className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+              >
+                {banSubmitting ? 'Banning...' : 'Ban User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Free User VIP Feature Lock Modal */}
+      {showVipLockModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/30 shadow-2xl">
+            <button
+              onClick={() => setShowVipLockModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-yellow-400 via-amber-500 to-yellow-600 flex items-center justify-center mx-auto text-slate-950 shadow-xl shadow-yellow-500/30 animate-pulse">
+              <Crown className="w-7 h-7 fill-current" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-[11px] font-extrabold uppercase tracking-wide">
+                💎 VIP Feature
+              </span>
+              <h3 className="text-lg font-black text-white">Personal User Bans</h3>
+              <p className="text-xs text-pink-200/70 leading-relaxed px-2">
+                Personal user bans are available exclusively with Cupidx VIP membership.
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <Link
+                href="/dashboard"
+                onClick={() => setShowVipLockModal(false)}
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black text-xs shadow-lg transition-all active:scale-95 cursor-pointer block text-center"
+              >
+                Explore VIP
+              </Link>
+
+              <button
+                onClick={() => setShowVipLockModal(false)}
+                className="w-full py-2.5 rounded-2xl text-xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Maybe later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

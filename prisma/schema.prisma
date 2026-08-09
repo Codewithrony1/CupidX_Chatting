@@ -32,6 +32,9 @@ model User {
   blockedUsers Block[] @relation("Blocker")
   blockedBy    Block[] @relation("Blocked")
 
+  bansAuthor   UserBan[] @relation("BanAuthor")
+  bannedUsers  UserBan[] @relation("BannedSubject")
+
   sentReports  Report[] @relation("Reporter")
   reportedBy   Report[] @relation("Reported")
 }
@@ -96,6 +99,20 @@ model Block {
   blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
 
   @@unique([blockerId, blockedId])
+}
+
+model UserBan {
+  id             String   @id @default(uuid())
+  bannedByUserId String
+  bannedUserId   String
+  createdAt      DateTime @default(now())
+
+  bannedBy   User @relation("BanAuthor", fields: [bannedByUserId], references: [id], onDelete: Cascade)
+  bannedUser User @relation("BannedSubject", fields: [bannedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([bannedByUserId, bannedUserId])
+  @@index([bannedByUserId])
+  @@index([bannedUserId])
 }
 
 model Report {

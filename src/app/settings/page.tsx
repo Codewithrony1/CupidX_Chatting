@@ -20,6 +20,7 @@ import {
   Heart
 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
+import AppShell from '@/components/AppShell';
 
 interface BlockedUser {
   id: string;
@@ -31,11 +32,24 @@ interface BlockedUser {
   };
 }
 
-import AppShell from '@/components/AppShell';
+interface BannedUserItem {
+  id: string;
+  bannedUserId: string;
+  bannedUser: {
+    id: string;
+    username: string;
+    fullName: string;
+    profile?: {
+      avatarUrl?: string;
+    };
+  };
+}
 
 export default function SettingsPage() {
   const { user, logout, refreshUser } = useAuth();
   const router = useRouter();
+
+  const isVIP = user?.subscription?.isActive || false;
 
   const [displayName, setDisplayName] = useState(user?.fullName || '');
   const [bio, setBio] = useState(user?.profile?.bio || '');
@@ -44,15 +58,25 @@ export default function SettingsPage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [bannedUsers, setBannedUsers] = useState<BannedUserItem[]>([]);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
 
-  // Fetch blocked users list
-  const fetchBlockedUsers = async () => {
+  // Fetch blocked & personal banned users list
+  const fetchPrivacyLists = async () => {
     try {
-      const res = await fetch('/api/chat/block');
-      if (res.ok) {
-        const data = await res.json();
+      const [blockRes, banRes] = await Promise.all([
+        fetch('/api/chat/block'),
+        fetch('/api/chat/ban'),
+      ]);
+
+      if (blockRes.ok) {
+        const data = await blockRes.json();
         setBlockedUsers(data.blockedUsers || []);
+      }
+
+      if (banRes.ok) {
+        const data = await banRes.json();
+        setBannedUsers(data.bans || []);
       }
     } catch (e) {
       console.error(e);
@@ -66,7 +90,7 @@ export default function SettingsPage() {
       setDisplayName(user.fullName || '');
       setBio(user.profile?.bio || '');
       setTheme(user.profile?.themePreference || 'system');
-      fetchBlockedUsers();
+      fetchPrivacyLists();
     }
   }, [user]);
 
@@ -106,6 +130,29 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         setBlockedUsers((prev) => prev.filter((b) => b.blockedId !== blockedId));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleUnban = async (targetUserId: string) => {
+    if (!isVIP) {
+      alert('🔒 Unbanning users is an exclusive VIP feature! Active VIP membership is required to manage personal bans.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/chat/ban', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId, action: 'unban' }),
+      });
+      if (res.ok) {
+        setBannedUsers((prev) => prev.filter((b) => b.bannedUserId !== targetUserId));
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to unban user.');
       }
     } catch (e) {
       console.error(e);
@@ -180,20 +227,125 @@ export default function SettingsPage() {
             <div className="space-y-1">
               <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Bio</label>
               <textarea
-                rows={2}
+                rows={3}
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
+                placeholder="Share something about yourself..."
                 className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs"
-                placeholder="Write a brief bio..."
               />
             </div>
           </div>
 
-          {/* Section 2: Appearance / Theme Toggle */}
+          {/* Section 2: Privacy (Blocked & Banned Users) */}
+          <div className="glass-romantic rounded-3xl p-6 space-y-5">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Shield className="w-4 h-4 text-purple-400" />
+              Privacy & User Moderation
+            </h3>
+
+            {/* Blocked Users Sub-Section */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-extrabold text-pink-300 uppercase tracking-wider">Blocked Users (Free & Everyone)</h4>
+
+              {loadingBlocks ? (
+                <div className="text-xs text-pink-200/50">Loading list...</div>
+              ) : blockedUsers.length === 0 ? (
+                <div className="text-xs text-pink-200/60 italic p-3 rounded-2xl bg-white/5 border border-white/5">
+                  You have not blocked any users.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {blockedUsers.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-3 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <img
+                          src={item.blockedUser.avatarUrl || '/default-avatar.png'}
+                          alt={item.blockedUser.username}
+                          className="w-8 h-8 rounded-full object-cover bg-slate-800"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-white">@{item.blockedUser.username}</p>
+                          <p className="text-[10px] text-pink-200/60">{item.blockedUser.fullName}</p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUnblock(item.blockedId)}
+                        className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/40 text-pink-300 text-xs font-bold border border-pink-500/30 transition-all cursor-pointer"
+                      >
+                        Unblock
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* VIP Personal Banned Users Sub-Section */}
+            <div className="space-y-3 pt-2 border-t border-pink-500/15">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-extrabold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 fill-current" />
+                  <span>Banned Users (VIP Personal Bans)</span>
+                </h4>
+                {!isVIP && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                    <Lock className="w-3 h-3" /> VIP Feature
+                  </span>
+                )}
+              </div>
+
+              {loadingBlocks ? (
+                <div className="text-xs text-pink-200/50">Loading list...</div>
+              ) : bannedUsers.length === 0 ? (
+                <div className="text-xs text-pink-200/60 italic p-3 rounded-2xl bg-white/5 border border-white/5">
+                  You have not personally banned any users.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {bannedUsers.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-3 rounded-2xl bg-white/5 border border-yellow-500/20 flex items-center justify-between"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <img
+                          src={item.bannedUser.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${item.bannedUser.username}`}
+                          alt={item.bannedUser.username}
+                          className="w-8 h-8 rounded-full object-cover bg-slate-800 border border-yellow-500/40"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-white flex items-center gap-1">
+                            <span>@{item.bannedUser.username}</span>
+                            <Sparkles className="w-3 h-3 text-yellow-400 fill-current shrink-0" />
+                          </p>
+                          <p className="text-[10px] text-pink-200/60">{item.bannedUser.fullName}</p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUnban(item.bannedUserId)}
+                        className="px-3 py-1.5 rounded-xl bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-300 text-xs font-bold border border-yellow-500/30 transition-all cursor-pointer"
+                      >
+                        Unban
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Section 3: Appearance & Theme */}
           <div className="glass-romantic rounded-3xl p-6 space-y-4">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Sun className="w-4 h-4 text-yellow-400" />
-              Appearance & Theme
+              <Moon className="w-4 h-4 text-purple-400" />
+              Appearance Theme
             </h3>
 
             <div className="grid grid-cols-3 gap-3">
@@ -206,7 +358,7 @@ export default function SettingsPage() {
                     : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
                 }`}
               >
-                <Sun className="w-5 h-5 text-yellow-400" />
+                <Sun className="w-5 h-5 text-amber-400" />
                 <span>Light</span>
               </button>
 
@@ -237,8 +389,6 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-
-
 
           {saveSuccess && (
             <div className="p-3 rounded-2xl bg-green-500/15 border border-green-500/30 text-xs text-green-400 text-center font-bold flex items-center justify-center gap-1">

@@ -95,7 +95,7 @@ async function canUsersMatch(candidateA, candidateB) {
     return false;
   }
 
-  // Block checks
+  // Block & Personal VIP Ban checks
   try {
     const blockRelation = await prisma.block.findFirst({
       where: {
@@ -106,8 +106,18 @@ async function canUsersMatch(candidateA, candidateB) {
       }
     });
     if (blockRelation) return false;
+
+    const banRelation = await prisma.userBan.findFirst({
+      where: {
+        OR: [
+          { bannedByUserId: candidateA.userId, bannedUserId: candidateB.userId },
+          { bannedByUserId: candidateB.userId, bannedUserId: candidateA.userId }
+        ]
+      }
+    });
+    if (banRelation) return false;
   } catch (e) {
-    console.error('Error checking block relation during match:', e);
+    console.error('Error checking block/ban relation during match:', e);
   }
 
   return true;
