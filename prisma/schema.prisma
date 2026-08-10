@@ -19,9 +19,9 @@ model User {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  profile      Profile?
-  subscription Subscription?
-  payments     Payment[]
+  profile       Profile?
+  subscription  Subscription?
+  payments      Payment[]
   notifications Notification[]
 
   sentMessages     Message[]     @relation("SentMessages")
@@ -135,29 +135,44 @@ model Report {
 }
 
 model Payment {
-  id                 String   @id @default(uuid())
-  userId             String
-  razorpayOrderId    String   @unique
-  razorpayPaymentId  String?  @unique
-  amount             Int
-  status             String   @default("PENDING") // PENDING, SUCCESS, FAILED
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                String   @id @default(uuid())
+  userId            String
+  razorpayOrderId   String   @unique
+  razorpayPaymentId String?  @unique
+  amount            Int
+  currency          String   @default("INR")
+  plan              String   @default("VIP")
+  status            String   @default("PENDING") // PENDING, CREATED, SUCCESS, FAILED, CANCELLED, REFUNDED
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Subscription {
-  id        String    @id @default(uuid())
-  userId    String    @unique
-  plan      String    @default("VIP")
-  isActive  Boolean   @default(false)
-  startDate DateTime  @default(now())
-  endDate   DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  userId             String    @unique
+  plan               String    @default("VIP")
+  isActive           Boolean   @default(false)
+  subscriptionStatus String    @default("INACTIVE") // INACTIVE, ACTIVE, EXPIRED, CANCELLED
+  subscriptionId     String?
+  razorpayOrderId    String?
+  razorpayPaymentId  String?
+  startDate          DateTime  @default(now())
+  endDate            DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  eventType   String
+  processedAt DateTime @default(now())
 }
 
 model Notification {

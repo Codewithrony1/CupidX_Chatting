@@ -54,7 +54,7 @@ export default function VIPPage() {
       }
 
       // Step 1: Create Order via Backend
-      const orderRes = await fetch('/api/payment/order', {
+      const orderRes = await fetch('/api/payments/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: 2900, currency: 'INR' }),
@@ -81,7 +81,7 @@ export default function VIPPage() {
         handler: async function (response: any) {
           try {
             // Step 3: Verify Payment Signature via Backend
-            const verifyRes = await fetch('/api/payment/verify', {
+            const verifyRes = await fetch('/api/payments/verify-payment', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
