@@ -40,7 +40,6 @@ export async function GET(req: Request) {
                   data: {
                     clerkUserId: clerkAuth.userId,
                     username: finalUsername,
-                    email: email || undefined,
                     fullName: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || finalUsername,
                     profile: {
                       create: {
