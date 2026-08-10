@@ -57,7 +57,7 @@ export default function DashboardPage() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
 
-  const isVIP = user?.subscription?.isActive || user?.membershipTier === 'VIP';
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);

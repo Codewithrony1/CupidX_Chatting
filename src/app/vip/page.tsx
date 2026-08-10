@@ -27,7 +27,7 @@ export default function VIPPage() {
 
   const [loadingPayment, setLoadingPayment] = useState(false);
 
-  const isVIP = user?.subscription?.isActive || user?.membershipTier === 'VIP';
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   const loadRazorpayScript = (): Promise<boolean> => {
     return new Promise((resolve) => {

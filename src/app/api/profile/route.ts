@@ -33,7 +33,7 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const isVIP = user.subscription?.isActive || user.membershipTier === 'VIP';
+    const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
 
     const body = await req.json();
     const {

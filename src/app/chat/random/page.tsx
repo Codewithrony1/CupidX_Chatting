@@ -81,7 +81,7 @@ export default function RandomChatPage() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
 
-  const isVIP = user?.subscription?.isActive || false;
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   const handleBanUser = async () => {
     if (!partner) return;

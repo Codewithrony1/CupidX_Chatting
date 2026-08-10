@@ -28,7 +28,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const isVIP = targetUser.subscription?.isActive || targetUser.membershipTier === 'VIP';
+    const isVIP = targetUser.membershipTier === 'VIP' || (targetUser.subscription?.isActive === true && targetUser.subscription?.plan === 'VIP');
     const prof = targetUser.profile;
 
     return NextResponse.json({

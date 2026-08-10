@@ -49,7 +49,7 @@ export default function SettingsPage() {
   const { user, logout, refreshUser } = useAuth();
   const router = useRouter();
 
-  const isVIP = user?.subscription?.isActive || false;
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   const [displayName, setDisplayName] = useState(user?.fullName || '');
   const [bio, setBio] = useState(user?.profile?.bio || '');

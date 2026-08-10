@@ -235,7 +235,7 @@ io.on('connection', async (socket) => {
       include: { profile: true, subscription: true }
     });
 
-    const isVIP = userDb?.subscription?.isActive || false;
+    const isVIP = userDb?.membershipTier === 'VIP' || (userDb?.subscription?.isActive === true && userDb?.subscription?.plan === 'VIP');
 
     const candidate = {
       socketId: socket.id,
@@ -318,7 +318,7 @@ io.on('connection', async (socket) => {
       include: { profile: true, subscription: true }
     });
 
-    const isVIP = userDb?.subscription?.isActive || false;
+    const isVIP = userDb?.membershipTier === 'VIP' || (userDb?.subscription?.isActive === true && userDb?.subscription?.plan === 'VIP');
 
     const candidate = {
       socketId: socket.id,

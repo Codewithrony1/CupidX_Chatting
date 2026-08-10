@@ -30,7 +30,7 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
   const { user, logout } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const isVIP = user?.subscription?.isActive || false;
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   // 1. Body Scroll Lock & Cleanup after closing
   useEffect(() => {

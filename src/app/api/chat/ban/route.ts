@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     }
 
     // SERVER-SIDE VIP CHECK (Strict Membership Verification)
-    const isVIP = user.subscription?.isActive || false;
+    const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
     if (!isVIP) {
       return NextResponse.json(
         {

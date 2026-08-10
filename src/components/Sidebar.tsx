@@ -33,7 +33,7 @@ export default function Sidebar({
 
   if (!user) return null;
 
-  const isVIP = user.subscription?.isActive || false;
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   return (
     <aside className="hidden md:flex w-64 glass border-r border-white/5 flex-col justify-between h-screen sticky top-0 p-6 z-20 bg-slate-950/80 shrink-0">

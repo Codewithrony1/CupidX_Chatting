@@ -49,7 +49,7 @@ export async function GET(req: Request) {
                     subscription: {
                       create: {
                         plan: 'FREE',
-                        isActive: true,
+                        isActive: false,
                       },
                     },
                   },
@@ -65,7 +65,7 @@ export async function GET(req: Request) {
     }
 
     if (user) {
-      const isVIP = user.subscription?.isActive || user.membershipTier === 'VIP';
+      const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
       const token = signToken({
         userId: user.id,
         username: user.username,

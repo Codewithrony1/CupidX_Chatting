@@ -80,7 +80,7 @@ export default function ChatWindow() {
   const [showUserProfileModal, setShowUserProfileModal] = useState(false);
   const [banSubmitting, setBanSubmitting] = useState(false);
 
-  const isVIP = user?.subscription?.isActive || false;
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   const handleBanUser = async () => {
     if (!targetUser) return;

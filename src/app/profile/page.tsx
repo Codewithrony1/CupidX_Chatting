@@ -72,7 +72,7 @@ export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
 
-  const isVIP = user?.subscription?.isActive || user?.membershipTier === 'VIP';
+  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   // Form States
   const [displayName, setDisplayName] = useState(user?.fullName || '');
