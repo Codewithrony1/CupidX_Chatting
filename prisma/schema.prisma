@@ -65,6 +65,22 @@ model Profile {
   updatedAt              DateTime  @updatedAt
 }
 
+model MatchmakingQueue {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  status          String   @default("WAITING") // WAITING, MATCHED, CANCELLED, EXPIRED
+  chatSessionId   String?
+  partnerUserId   String?
+  gender          String   @default("unspecified")
+  preferredGender String   @default("auto")
+  language        String   @default("english")
+  isVIP           Boolean  @default(false)
+  joinedAt        DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, joinedAt])
+}
+
 model ChatSession {
   id             String    @id @default(uuid())
   userAId        String

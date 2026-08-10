@@ -27,13 +27,17 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: You are not a participant' }, { status: 403 });
     }
 
-    // Perform Server-Side Deletion: Delete all messages & session record
+    // Perform Server-Side Deletion: Delete all messages, session record, and clear queue entries
     await prisma.$transaction([
       prisma.message.deleteMany({
         where: { chatSessionId },
       }),
       prisma.chatSession.delete({
         where: { id: chatSessionId },
+      }),
+      prisma.matchmakingQueue.updateMany({
+        where: { OR: [{ userId: session.userAId }, { userId: session.userBId }] },
+        data: { status: 'CANCELLED' },
       }),
     ]);
 
