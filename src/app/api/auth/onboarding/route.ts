@@ -165,6 +165,13 @@ export async function POST(req: Request) {
             bio: 'Hey there! I am using Cupidx.',
           },
         },
+        subscription: {
+          create: {
+            plan: 'FREE',
+            isActive: false,
+            subscriptionStatus: 'INACTIVE',
+          },
+        },
       },
       include: {
         profile: true,

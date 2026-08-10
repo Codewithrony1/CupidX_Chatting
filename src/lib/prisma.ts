@@ -16,12 +16,8 @@ const getDatabasePath = () => {
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     const tmpPath = path.join(os.tmpdir(), 'dev.db');
     try {
-      if (!fs.existsSync(tmpPath)) {
-        if (fs.existsSync(defaultPath)) {
-          fs.copyFileSync(defaultPath, tmpPath);
-        } else {
-          fs.writeFileSync(tmpPath, '');
-        }
+      if (fs.existsSync(defaultPath)) {
+        fs.copyFileSync(defaultPath, tmpPath);
       }
       return tmpPath;
     } catch (e) {
