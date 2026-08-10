@@ -34,8 +34,8 @@ export default function Login() {
     setError('');
     try {
       clerk.openSignIn({
-        fallbackRedirectUrl: '/onboarding',
-        signUpFallbackRedirectUrl: '/onboarding',
+        fallbackRedirectUrl: '/dashboard',
+        signUpFallbackRedirectUrl: '/dashboard',
       });
     } catch (err: any) {
       console.error(err);

@@ -15,12 +15,24 @@ export default function OnboardingPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // If user already has a Cupidx username, redirect to /dashboard
+  // If user already has a Cupidx username, redirect instantly to /dashboard
   useEffect(() => {
     if (user?.username) {
-      router.push('/dashboard');
+      router.replace('/dashboard');
     }
   }, [user, router]);
+
+  if (user?.username) {
+    return (
+      <div className="min-h-screen bg-[#0d0014] flex items-center justify-center p-4">
+        <FloatingHearts />
+        <div className="text-center space-y-3 z-10">
+          <Loader2 className="w-10 h-10 text-pink-500 animate-spin mx-auto" />
+          <p className="text-xs font-bold text-pink-300">Redirecting to Dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Live Debounced Username Availability Check
   useEffect(() => {
