@@ -203,6 +203,16 @@ export default function Login() {
               )}
             </button>
           </form>
+
+          {/* Toggle between Sign In / Sign Up */}
+          <div className="text-center pt-2 border-t border-pink-500/15">
+            <p className="text-xs text-pink-200/70">
+              Don't have a Cupidx account?{' '}
+              <Link href="/register" className="font-bold text-pink-400 hover:text-white underline">
+                Create Account
+              </Link>
+            </p>
+          </div>
         </div>
 
         {/* Footer Legal Terms */}

@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Client-side Strict Route Protection Guard
   useEffect(() => {
     if (!loading && clerkLoaded) {
-      const publicPaths = ['/', '/login', '/register', '/privacy', '/terms', '/sso-callback', '/onboarding'];
+      const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback', '/onboarding'];
       const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
       const hasTokenCookie = typeof document !== 'undefined' && document.cookie.includes('token=');
@@ -91,8 +91,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.push('/login');
       }
 
-      // Auto redirect authenticated users away from auth pages (/login, /register) to /dashboard
-      if (user?.username && (pathname === '/login' || pathname === '/register')) {
+      // Auto redirect authenticated users away from auth pages (/login, /register, /signup) to /dashboard
+      if (user?.username && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
         router.push('/dashboard');
       }
     }
