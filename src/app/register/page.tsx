@@ -34,7 +34,7 @@ export default function Register() {
     setError('');
     try {
       clerk.openSignUp({
-        fallbackRedirectUrl: '/onboarding',
+        fallbackRedirectUrl: '/dashboard',
         signInFallbackRedirectUrl: '/dashboard',
       });
     } catch (err: any) {
@@ -82,7 +82,7 @@ export default function Register() {
 
       if (completeSignUp.status === 'complete') {
         await setActive({ session: completeSignUp.createdSessionId });
-        router.push('/onboarding');
+        router.push('/dashboard');
       } else {
         setError('Verification incomplete. Please check your verification code.');
       }

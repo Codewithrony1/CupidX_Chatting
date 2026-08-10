@@ -60,8 +60,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = await res.json();
         if (data.user) {
           setUser(data.user);
-        } else if (data.needsOnboarding && pathname !== '/onboarding') {
-          router.push('/onboarding');
         }
       } else {
         setUser(null);
@@ -82,7 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Client-side Strict Route Protection Guard
   useEffect(() => {
     if (!loading && clerkLoaded) {
-      const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback', '/onboarding'];
+      const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback'];
       const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
       const hasTokenCookie = typeof document !== 'undefined' && document.cookie.includes('token=');
@@ -91,8 +89,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.push('/login');
       }
 
-      // Auto redirect authenticated users away from auth pages (/login, /register, /signup) to /dashboard
-      if (user?.username && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
+      // Auto redirect authenticated users away from auth pages (/login, /register, /signup, /onboarding) to /dashboard
+      if ((user || isSignedIn) && (pathname === '/login' || pathname === '/register' || pathname === '/signup' || pathname === '/onboarding')) {
         router.push('/dashboard');
       }
     }

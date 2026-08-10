@@ -7,7 +7,7 @@ export async function GET(req: Request) {
   try {
     let user: any = await getCurrentUser(req);
 
-    // If user is not found via cookie or clerkUserId, check Clerk details & auto-provision if possible
+    // If user is not found via cookie or clerkUserId, check Clerk details & auto-provision immediately
     if (!user) {
       try {
         const clerkAuth = await auth();
@@ -18,49 +18,58 @@ export async function GET(req: Request) {
             include: { profile: true, subscription: true },
           });
 
-          // If still not found, try fetching Clerk user profile details to auto-provision
+          // If still not found, auto-provision user immediately
           if (!user) {
-            const clerkUser = await currentUser();
-            if (clerkUser) {
-              const email = clerkUser.emailAddresses?.[0]?.emailAddress || '';
-              const clerkUsername = clerkUser.username || (email ? email.split('@')[0] : '');
-
-              if (clerkUsername) {
-                let cleanUsername = clerkUsername.toLowerCase().replace(/[^a-z0-9_]/g, '');
-                if (cleanUsername.length < 3) cleanUsername = `user_${Date.now().toString().slice(-4)}`;
-
-                // Check if username is already in DB
-                const existing = await prisma.user.findFirst({
-                  where: { username: cleanUsername },
-                });
-
-                const finalUsername = existing ? `${cleanUsername}_${Math.floor(100 + Math.random() * 900)}` : cleanUsername;
-
-                user = await prisma.user.create({
-                  data: {
-                    clerkUserId: clerkAuth.userId,
-                    username: finalUsername,
-                    fullName: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || finalUsername,
-                    profile: {
-                      create: {
-                        avatarUrl: clerkUser.imageUrl || 'https://api.dicebear.com/7.x/bottts/svg?seed=CupidXUser',
-                      },
-                    },
-                    subscription: {
-                      create: {
-                        plan: 'FREE',
-                        isActive: false,
-                      },
-                    },
-                  },
-                  include: { profile: true, subscription: true },
-                });
-              }
+            let clerkUser: any = null;
+            try {
+              clerkUser = await currentUser();
+            } catch (e) {
+              console.warn('Could not fetch detailed Clerk user profile, using fallback');
             }
+
+            const email = clerkUser?.emailAddresses?.[0]?.emailAddress || '';
+            const rawName = clerkUser?.username || (email ? email.split('@')[0] : '') || `user_${clerkAuth.userId.slice(-6)}`;
+            let cleanUsername = rawName.toLowerCase().replace(/[^a-z0-9_]/g, '');
+            if (cleanUsername.length < 3) cleanUsername = `user_${Date.now().toString().slice(-4)}`;
+
+            // Check if username is already in DB
+            const existing = await prisma.user.findFirst({
+              where: { username: cleanUsername },
+            });
+
+            const finalUsername = existing ? `${cleanUsername}_${Math.floor(100 + Math.random() * 900)}` : cleanUsername;
+            const fullName = `${clerkUser?.firstName || ''} ${clerkUser?.lastName || ''}`.trim() || finalUsername;
+            const avatarUrl = clerkUser?.imageUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${finalUsername}`;
+
+            user = await prisma.user.create({
+              data: {
+                clerkUserId: clerkAuth.userId,
+                username: finalUsername,
+                fullName,
+                displayName: fullName,
+                passwordHash: '',
+                role: 'USER',
+                membershipTier: 'FREE',
+                profile: {
+                  create: {
+                    avatarUrl,
+                    bio: 'Hey there! I am using Cupidx.',
+                  },
+                },
+                subscription: {
+                  create: {
+                    plan: 'FREE',
+                    isActive: false,
+                    subscriptionStatus: 'INACTIVE',
+                  },
+                },
+              },
+              include: { profile: true, subscription: true },
+            });
           }
         }
       } catch (e) {
-        console.warn('Auto-provisioning check fallback:', e);
+        console.warn('Auto-provisioning check fallback error:', e);
       }
     }
 
@@ -97,8 +106,7 @@ export async function GET(req: Request) {
       return response;
     }
 
-    // Only ask for onboarding if NO user exists and no Clerk profile details were found
-    return NextResponse.json({ needsOnboarding: true }, { status: 200 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   } catch (error) {
     console.error('Error in /api/auth/me:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

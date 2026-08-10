@@ -58,7 +58,7 @@ export default function Login() {
       });
 
       if (result?.status === 'complete') {
-        router.push('/onboarding');
+        router.push('/dashboard');
       } else {
         setError('Please check your email for authentication instructions.');
       }
@@ -71,7 +71,7 @@ export default function Login() {
             password: password || 'DefaultCupidxPass123!',
           });
           if (signUpResult?.status === 'complete') {
-            router.push('/onboarding');
+            router.push('/dashboard');
           } else {
             setError('Please verify your email address to continue.');
           }
