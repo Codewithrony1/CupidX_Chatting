@@ -120,6 +120,17 @@ export default function ProfilePage() {
     }
   }, [user]);
 
+  const [payments, setPayments] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch('/api/payments/history')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.payments) setPayments(data.payments);
+      })
+      .catch(console.error);
+  }, []);
+
   // Client-side image crop & compression
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!isVIP) {
@@ -578,6 +589,44 @@ export default function ProfilePage() {
               })}
             </div>
           </div>
+
+          {/* SECTION 6: VIP PAYMENT HISTORY */}
+          {payments.length > 0 && (
+            <div className="glass-romantic rounded-3xl p-6 space-y-4">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <Crown className="w-4 h-4 text-yellow-400 fill-current" />
+                <span>VIP Payment History</span>
+              </h3>
+
+              <div className="space-y-2 text-xs">
+                {payments.map((p) => (
+                  <div
+                    key={p.id}
+                    className="p-3 rounded-2xl bg-white/5 border border-pink-500/15 flex items-center justify-between"
+                  >
+                    <div>
+                      <p className="font-extrabold text-white">💎 Cupidx VIP Membership</p>
+                      <p className="text-[10px] text-pink-200/60">
+                        {new Date(p.createdAt).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-black text-yellow-400">₹{(p.amount / 100).toFixed(0)}</p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        p.status === 'CAPTURED' || p.status === 'SUCCESS'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : p.status === 'REFUNDED'
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                          : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                      }`}>
+                        {p.status === 'CAPTURED' ? 'Paid' : p.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {saveSuccess && (
             <div className="p-3.5 rounded-2xl bg-green-500/15 border border-green-500/30 text-xs text-green-400 text-center font-bold flex items-center justify-center gap-1.5">
