@@ -3,8 +3,10 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Heart, Shield, User, MessageCircle, Lock, ArrowRight, FastForward, CheckCircle2, Sparkles, Crown } from 'lucide-react';
+import { Heart, Shield, User, MessageCircle, Lock, ArrowRight, FastForward, CheckCircle2, Sparkles, Crown, X } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
+import { useAuth } from '@/context/AuthContext';
+import { useUser } from '@clerk/nextjs';
 
 const Canvas3D = dynamic(() => import('@/components/Canvas3D'), {
   ssr: false,
@@ -12,6 +14,31 @@ const Canvas3D = dynamic(() => import('@/components/Canvas3D'), {
 });
 
 export default function Home() {
+  const { user, loading } = useAuth();
+  const { isSignedIn, isLoaded } = useUser();
+
+  const isAuthenticated = !loading && isLoaded && (!!user || isSignedIn);
+  const needsOnboarding = isAuthenticated && user && !user.username;
+
+  // Authentication-aware routing URLs
+  const startChattingUrl = isAuthenticated
+    ? needsOnboarding
+      ? '/onboarding'
+      : '/dashboard'
+    : '/login';
+
+  const loginUrl = isAuthenticated
+    ? needsOnboarding
+      ? '/onboarding'
+      : '/dashboard'
+    : '/login';
+
+  const joinNowUrl = isAuthenticated
+    ? needsOnboarding
+      ? '/onboarding'
+      : '/dashboard'
+    : '/signup';
+
   return (
     <div className="relative min-h-screen flex flex-col justify-between overflow-x-hidden selection:bg-pink-500 selection:text-white bg-[#0d0014]">
       {/* 3D Animated Background */}
@@ -31,14 +58,14 @@ export default function Home() {
         
         <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
           <Link
-            href="/login"
-            className="px-3.5 py-2 sm:px-5 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs font-bold text-pink-200 hover:text-white transition-all bg-white/5 hover:bg-white/10 border border-pink-500/30 backdrop-blur-md whitespace-nowrap"
+            href={loginUrl}
+            className="px-3.5 py-2 sm:px-5 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs font-bold text-pink-200 hover:text-white transition-all bg-white/5 hover:bg-white/10 border border-pink-500/30 backdrop-blur-md whitespace-nowrap cursor-pointer"
           >
             Log In
           </Link>
           <Link
-            href="/register"
-            className="px-3.5 py-2 sm:px-5 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs font-bold bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-lg shadow-pink-500/30 flex items-center gap-1 sm:gap-1.5 transition-all hover:scale-105 active:scale-95 whitespace-nowrap"
+            href={joinNowUrl}
+            className="px-3.5 py-2 sm:px-5 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs font-bold bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-lg shadow-pink-500/30 flex items-center gap-1 sm:gap-1.5 transition-all hover:scale-105 active:scale-95 whitespace-nowrap cursor-pointer"
           >
             <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>Join Now</span>
@@ -76,7 +103,7 @@ export default function Home() {
           {/* CTAs */}
           <div className="flex justify-center pt-4 w-full max-w-sm mx-auto">
             <Link
-              href="/chat/random"
+              href={startChattingUrl}
               className="w-full py-5 rounded-3xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white shadow-2xl shadow-pink-500/50 hover:scale-105 active:scale-95 transition-all text-xl flex items-center justify-center space-x-3 border border-pink-400/40 glow-pink-lg group cursor-pointer"
             >
               <Heart className="w-7 h-7 fill-white animate-bounce" />
@@ -125,7 +152,7 @@ export default function Home() {
           </div>
         </motion.div>
 
-        {/* FREE vs VIP Membership Comparison (Psychologically Persuasive) */}
+        {/* FREE vs VIP Membership Comparison */}
         <motion.div
           initial={{ opacity: 0, y: 35 }}
           animate={{ opacity: 1, y: 0 }}
@@ -150,53 +177,51 @@ export default function Home() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between border-b border-white/10 pb-3">
                   <div>
-                    <h3 className="text-xl font-black text-white">FREE</h3>
-                    <p className="text-xs text-slate-400 font-medium">Standard Experience</p>
+                    <h3 className="text-xl font-black text-white">CUPIDX FREE</h3>
+                    <p className="text-xs text-pink-200/60 font-semibold">Standard Ephemeral Chat</p>
                   </div>
-                  <span className="text-2xl font-black text-slate-300">₹0</span>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-white">₹0</span>
+                    <span className="text-xs text-pink-200/60 block font-normal">Forever Free</span>
+                  </div>
                 </div>
 
-                <ul className="space-y-2.5 text-xs text-slate-300">
+                <ul className="space-y-2.5 text-xs text-pink-200/80">
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Basic 1-to-1 Ephemeral Chat</span>
+                    <span>Unlimited 1-to-1 Ephemeral Random Chat</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Random Matchmaking</span>
+                    <span>Instant NEXT Partner Switching</span>
                   </li>
-                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
-                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
-                    <span className="line-through">Custom DP Uploads (VIP Only)</span>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Basic @username Profile</span>
                   </li>
-                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
-                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
-                    <span className="line-through">Target Gender Matching (VIP Only)</span>
+                  <li className="flex items-center gap-2 text-pink-200/40 line-through">
+                    <X className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>Custom Profile Picture & DP Uploads</span>
                   </li>
-                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
-                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
-                    <span className="line-through">Custom Moods & Expiration (VIP Only)</span>
-                  </li>
-                  <li className="flex items-center gap-2 text-slate-400 opacity-60">
-                    <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] shrink-0">✕</span>
-                    <span className="line-through">VIP User Bans (VIP Only)</span>
+                  <li className="flex items-center gap-2 text-pink-200/40 line-through">
+                    <X className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>Target Gender & Discovery Match Preferences</span>
                   </li>
                 </ul>
               </div>
 
               <Link
-                href="/register"
-                className="w-full py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs text-center border border-white/10 transition-colors block mt-4"
+                href={joinNowUrl}
+                className="w-full py-3.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs text-center border border-white/20 transition-colors block mt-4"
               >
-                Continue with Free
+                START FOR FREE
               </Link>
             </div>
 
-            {/* VIP TIER CARD (Psychologically Highlighted as Best Value) */}
-            <div className="glass-romantic rounded-3xl p-6 space-y-5 border-2 border-yellow-500/60 relative flex flex-col justify-between shadow-2xl overflow-hidden glow-gold">
-              {/* Popular Badge */}
-              <div className="absolute top-0 right-0 bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-slate-950 text-[10px] font-black px-4 py-1 rounded-bl-2xl shadow-md uppercase tracking-wider">
-                🔥 85% OFF - MOST POPULAR
+            {/* VIP TIER CARD */}
+            <div className="glass-romantic rounded-3xl p-6 space-y-5 border border-yellow-500/40 relative flex flex-col justify-between bg-gradient-to-b from-yellow-950/20 via-pink-950/20 to-slate-950 shadow-xl shadow-yellow-500/10">
+              <div className="absolute -top-3 right-4 bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black text-[10px] uppercase tracking-wider px-3 py-1 rounded-full shadow-md border border-yellow-300">
+                RECOMMENDED
               </div>
 
               <div className="space-y-4">
@@ -247,7 +272,7 @@ export default function Home() {
 
               <Link
                 href="/vip"
-                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs text-center shadow-lg shadow-yellow-500/30 transition-all hover:scale-102 active:scale-95 block mt-4 border border-yellow-300/40"
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs text-center shadow-lg shadow-yellow-500/30 transition-all hover:scale-102 active:scale-95 block mt-4 border border-yellow-300/40 cursor-pointer"
               >
                 UNLOCK VIP NOW — ₹29 ONLY
               </Link>
