@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
 import AppShell from '@/components/AppShell';
+import ProfilePreviewSheet from '@/components/chat/ProfilePreviewSheet';
 import NextConfirmModal from '@/components/chat/NextConfirmModal';
 import BottomSheet from '@/components/ui/BottomSheet';
 import {
@@ -24,8 +25,11 @@ import {
   Sparkles,
   Lock,
   Ban,
-  ArrowRight,
-  Loader2
+  ArrowLeft,
+  MoreVertical,
+  UserCheck,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 interface RandomPartner {
@@ -34,6 +38,9 @@ interface RandomPartner {
   fullName: string;
   avatarUrl: string;
   gender: string;
+  mood?: string;
+  personalityPreferences?: string;
+  bio?: string;
   isVIP: boolean;
 }
 
@@ -46,7 +53,7 @@ interface RandomMessage {
   createdAt: string;
 }
 
-export default function RandomChatPage() {
+export default function KnotChatRandomPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { socket } = useSocket();
@@ -57,19 +64,15 @@ export default function RandomChatPage() {
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<RandomMessage[]>([]);
 
-  // Input states
+  // Input & Messaging states
   const [inputText, setInputText] = useState('');
-  const [imageFile, setImageFile] = useState<string>('');
+  const [sendingMsg, setSendingMsg] = useState(false);
   const [partnerTyping, setPartnerTyping] = useState(false);
 
-  // Preference Filter States
-  const [language, setLanguage] = useState(user?.profile?.language || 'english');
-  const [gender, setGender] = useState(user?.profile?.gender || 'male');
-  const [preferredGender, setPreferredGender] = useState(user?.profile?.preferredGender || 'auto');
-
   // Modals & Bottom Sheets
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
+  const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showNextModal, setShowNextModal] = useState(false);
-  const [showVIPModal, setShowVIPModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reportSubmitting, setReportSubmitting] = useState(false);
@@ -92,14 +95,14 @@ export default function RandomChatPage() {
     }
   }, [messages, partnerTyping, matchStatus]);
 
-  // Initial Match Trigger
+  // Initial Match Trigger on page load
   useEffect(() => {
     if (user && matchStatus === 'idle') {
       handleStartMatch();
     }
   }, [user]);
 
-  // Server-Side Persistent Queue Polling (Fallback for Vercel Multi-Instance Execution)
+  // 1. Persistent Queue Status Polling (Fallback during searching state)
   useEffect(() => {
     if (matchStatus !== 'searching') return;
 
@@ -124,7 +127,47 @@ export default function RandomChatPage() {
     return () => clearInterval(pollInterval);
   }, [matchStatus]);
 
-  // Socket Event Listeners (Realtime Boost)
+  // 2. Realtime Active Chat Message & Status Sync (Polling Fallback every 1.5s for Zero Lost Messages)
+  useEffect(() => {
+    if (matchStatus !== 'connected' || !chatSessionId) return;
+
+    const chatSyncInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(chatSessionId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          
+          // Partner ended chat / session ended
+          if (data.sessionStatus === 'ENDED') {
+            setMatchStatus('searching');
+            setPartner(null);
+            setMessages([]);
+            handleStartMatch(); // Automatically find next match!
+            return;
+          }
+
+          if (data.messages) {
+            setMessages(data.messages);
+          }
+          if (data.partner) {
+            setPartner(data.partner);
+          }
+        } else if (res.status === 404) {
+          // Chat session ended by partner via NEXT
+          setMatchStatus('searching');
+          setPartner(null);
+          setMessages([]);
+          handleStartMatch();
+        }
+      } catch (e) {
+        console.error('Chat sync error:', e);
+      }
+    }, 1500);
+
+    return () => clearInterval(chatSyncInterval);
+  }, [matchStatus, chatSessionId]);
+
+  // 3. Socket Realtime Event Listeners
   useEffect(() => {
     if (!socket) return;
 
@@ -135,7 +178,10 @@ export default function RandomChatPage() {
     };
 
     const handleReceiveMessage = (msg: RandomMessage) => {
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
     };
 
     const handlePartnerTyping = (data: { isTyping: boolean }) => {
@@ -143,11 +189,11 @@ export default function RandomChatPage() {
     };
 
     const handlePartnerLeft = () => {
-      setMatchStatus('ended');
-      setPartnerTyping(false);
+      // Partner clicked NEXT: automatically restart matchmaking!
+      setMatchStatus('searching');
+      setPartner(null);
       setMessages([]);
-      setInputText('');
-      setImageFile('');
+      handleStartMatch();
     };
 
     socket.on('random_match_found', handleMatchFound);
@@ -167,17 +213,17 @@ export default function RandomChatPage() {
   const handleStartMatch = async () => {
     setMessages([]);
     setInputText('');
-    setImageFile('');
     setMatchStatus('searching');
+    setPartner(null);
 
     try {
       const res = await fetch('/api/matchmaking/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gender,
-          preferredGender: isVIP ? preferredGender : 'auto',
-          language,
+          gender: user?.profile?.gender || 'unspecified',
+          preferredGender: isVIP ? user?.profile?.preferredGender || 'auto' : 'auto',
+          language: user?.profile?.language || 'english',
         }),
       });
 
@@ -207,6 +253,7 @@ export default function RandomChatPage() {
     }
   };
 
+  // Core NEXT Functionality
   const handleNextClick = () => {
     const skipConfirm = typeof window !== 'undefined' && localStorage.getItem('cupidx_skip_next_confirm') === 'true';
     if (skipConfirm) {
@@ -226,29 +273,13 @@ export default function RandomChatPage() {
       }
     }
     if (socket) {
-      socket.emit('next_partner', { gender, preferredGender: isVIP ? preferredGender : 'auto', language });
+      socket.emit('next_partner');
     }
+    // Automatically transition to Finding someone...
     handleStartMatch();
   };
 
-  const handleEndChat = async () => {
-    if (chatSessionId) {
-      try {
-        await fetch(`/api/chat/${chatSessionId}/next`, { method: 'POST' });
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    if (socket) {
-      socket.emit('end_random_chat');
-    }
-    setMessages([]);
-    setInputText('');
-    setImageFile('');
-    setMatchStatus('ended');
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     setInputText(e.target.value);
     if (!socket) return;
 
@@ -265,35 +296,60 @@ export default function RandomChatPage() {
     }, 2000);
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim() && !imageFile) return;
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage(e);
+    }
+  };
 
-    const currentText = inputText;
-    const currentImg = imageFile;
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || sendingMsg || !chatSessionId) return;
+
+    const currentText = inputText.trim();
     setInputText('');
-    setImageFile('');
+    setSendingMsg(true);
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     isCurrentlyTypingRef.current = false;
     if (socket) socket.emit('random_typing_status', { isTyping: false });
 
+    // Local optimistic message
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const localMsg: RandomMessage = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      id: tempId,
       senderId: user?.id || 'me',
       senderUsername: user?.username || 'me',
       content: currentText,
-      imageUrl: currentImg || null,
+      imageUrl: null,
       createdAt: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, localMsg]);
 
-    if (socket && matchStatus === 'connected') {
-      socket.emit('send_random_message', {
-        content: currentText,
-        imageUrl: currentImg || null,
+    try {
+      // 1. Send via REST API for Guaranteed Database Persistence
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatSessionId,
+          content: currentText,
+        }),
       });
+
+      // 2. Emit Socket event for sub-millisecond realtime delivery
+      if (socket && matchStatus === 'connected') {
+        socket.emit('send_random_message', {
+          content: currentText,
+          imageUrl: null,
+        });
+      }
+    } catch (err) {
+      console.error('Error sending message:', err);
+    } finally {
+      setSendingMsg(false);
     }
   };
 
@@ -366,202 +422,270 @@ export default function RandomChatPage() {
   };
 
   return (
-    <AppShell showNav={matchStatus !== 'connected'}>
-      <div className="flex flex-col h-[calc(100dvh-4rem)] sm:h-[calc(100vh-6rem)] max-w-2xl mx-auto w-full relative">
+    <AppShell showNav={false}>
+      <div className="flex flex-col h-[100dvh] max-w-2xl mx-auto w-full relative bg-[#030014] text-white selection:bg-pink-500 selection:text-white">
         
-        {/* Compact Mobile Chat Header */}
-        <div className="px-4 py-2.5 bg-slate-950/60 backdrop-blur-md border-b border-pink-500/15 flex items-center justify-between z-20 shrink-0">
+        {/* KnotChat Header */}
+        <div className="px-4 py-3 bg-slate-950/80 backdrop-blur-xl border-b border-pink-500/20 flex items-center justify-between z-30 shrink-0">
           <div className="flex items-center space-x-3">
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-pink-300 transition-colors"
+              title="Back to Home"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+
             {partner ? (
-              <div className="relative">
-                <img
-                  src={partner.avatarUrl || '/default-avatar.png'}
-                  alt={partner.username}
-                  className="w-9 h-9 rounded-full border border-pink-400/50 object-cover"
-                />
-                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-slate-950" />
-              </div>
+              <button
+                onClick={() => setShowProfileSheet(true)}
+                className="flex items-center space-x-2.5 text-left group cursor-pointer"
+              >
+                <div className="relative">
+                  <img
+                    src={partner.avatarUrl || '/default-avatar.png'}
+                    alt={partner.username}
+                    className="w-10 h-10 rounded-2xl border border-pink-400/50 object-cover group-hover:scale-105 transition-transform"
+                  />
+                  <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
+                </div>
+
+                <div>
+                  <div className="flex items-center space-x-1.5">
+                    <h3 className="font-black text-sm text-white tracking-tight flex items-center gap-1 group-hover:text-pink-300 transition-colors">
+                      @{partner.username}
+                    </h3>
+                    {partner.isVIP && <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current" />}
+                  </div>
+                  <p className="text-[11px] text-pink-200/70 font-medium">
+                    {partner.mood || '😎 Attitude'}
+                  </p>
+                </div>
+              </button>
             ) : (
-              <div className="w-9 h-9 rounded-full bg-pink-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400">
-                <Heart className="w-4 h-4 fill-pink-400 animate-pulse" />
+              <div className="flex items-center space-x-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-600 to-rose-500 flex items-center justify-center text-white shadow-lg shadow-pink-500/30">
+                  <Heart className="w-5 h-5 fill-white animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-white tracking-tight">
+                    {matchStatus === 'searching' ? 'Finding someone...' : 'CupidX Random Chat'}
+                  </h3>
+                  <p className="text-[11px] text-pink-200/60 font-medium">
+                    {matchStatus === 'searching' ? 'Looking for a person to chat with you' : '1-to-1 Ephemeral Chat'}
+                  </p>
+                </div>
               </div>
             )}
-
-            <div>
-              <div className="flex items-center space-x-1.5">
-                <h3 className="font-extrabold text-sm text-white tracking-tight flex items-center gap-1.5">
-                  {partner ? (
-                    <>
-                      <span>@{partner.username}</span>
-                      <span className="text-sm leading-none" title="Location: India">🇮🇳</span>
-                    </>
-                  ) : matchStatus === 'searching' ? (
-                    'Finding someone...'
-                  ) : (
-                    'Random Chat'
-                  )}
-                </h3>
-                {partner?.isVIP && <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current" />}
-              </div>
-              <p className="text-[11px] text-pink-200/60 font-medium">
-                {matchStatus === 'connected' ? 'Connected • Temporary Chat' : matchStatus === 'searching' ? 'Looking for a person to chat with you...' : 'Press Start to Match'}
-              </p>
-            </div>
           </div>
 
-          {matchStatus === 'connected' && (
-            <div className="flex items-center space-x-1.5">
-              <button
-                onClick={handleBlockUser}
-                className="p-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-rose-300 transition-colors"
-                title="Block User"
-              >
-                <Ban className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={() => {
-                  if (isVIP) {
-                    setShowBanModal(true);
-                  } else {
-                    setShowVipLockModal(true);
-                  }
-                }}
-                className="p-1.5 rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 transition-colors flex items-center gap-1 cursor-pointer"
-                title={isVIP ? 'Personal Ban User (VIP)' : 'Personal Ban User (VIP Feature)'}
-              >
-                <Sparkles className="w-4 h-4 fill-current" />
-                {!isVIP && <Lock className="w-2.5 h-2.5" />}
-              </button>
-
-              <button
-                onClick={() => setShowReportModal(true)}
-                className="p-1.5 rounded-xl bg-white/5 hover:bg-amber-500/20 text-amber-300 transition-colors"
-                title="Report User"
-              >
-                <Flag className="w-4 h-4" />
-              </button>
-            </div>
+          {/* Options Menu Button (⋮) */}
+          {matchStatus === 'connected' && partner && (
+            <button
+              onClick={() => setShowOptionsMenu(true)}
+              className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-pink-200 transition-colors cursor-pointer"
+              title="Options"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
           )}
         </div>
 
-        {/* Scrollable Feed Area */}
-        <div className="flex-grow overflow-y-auto p-4 space-y-3 z-10">
+        {/* Scrollable Message Feed Area */}
+        <div className="flex-grow overflow-y-auto p-4 space-y-3.5 z-10">
           
-          {/* Waiting Screen UI */}
+          {/* SEARCHING / MATCHMAKING WAITING SCREEN */}
           {matchStatus === 'searching' && (
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-5 py-12">
+            <div className="h-full flex flex-col items-center justify-center text-center space-y-6 py-12 animate-in fade-in duration-300">
               <div className="relative">
-                <div className="w-24 h-24 rounded-full bg-pink-500/20 border border-pink-400/40 flex items-center justify-center animate-ping absolute inset-0" />
-                <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-pink-600 to-rose-500 flex items-center justify-center shadow-xl shadow-pink-500/40 relative">
-                  <Heart className="w-12 h-12 text-white fill-white animate-bounce" />
+                <div className="w-28 h-28 rounded-full bg-pink-500/20 border border-pink-400/40 flex items-center justify-center animate-ping absolute inset-0" />
+                <div className="w-28 h-28 rounded-full bg-gradient-to-tr from-pink-600 via-rose-500 to-fuchsia-500 flex items-center justify-center shadow-2xl shadow-pink-500/50 relative border-2 border-pink-300/40">
+                  <Heart className="w-14 h-14 text-white fill-white animate-bounce" />
                 </div>
               </div>
               
-              <div className="space-y-1.5 max-w-xs">
-                <h3 className="text-2xl font-black text-white">Finding someone...</h3>
-                <p className="text-xs text-pink-200/80">Looking for a person to chat with you.</p>
+              <div className="space-y-2 max-w-xs">
+                <h2 className="text-2xl font-black text-white tracking-tight">Finding someone...</h2>
+                <p className="text-xs font-semibold text-pink-200/80 leading-relaxed">
+                  Looking for a person to chat with you.
+                </p>
               </div>
 
               <button
                 type="button"
                 onClick={handleCancelMatch}
-                className="px-6 py-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all cursor-pointer shadow-md"
+                className="px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all cursor-pointer shadow-lg active:scale-95"
               >
-                Cancel
+                Cancel Matchmaking
               </button>
             </div>
           )}
 
-          {/* Connected State Welcome Banner */}
+          {/* CONNECTED STATE WELCOME BANNER */}
           {matchStatus === 'connected' && partner && messages.length === 0 && (
-            <div className="glass-romantic rounded-3xl p-4 text-center space-y-1.5 border border-pink-500/20 max-w-sm mx-auto my-4 animate-in fade-in zoom-in duration-300">
+            <div className="glass-romantic rounded-3xl p-4 text-center space-y-1.5 border border-pink-500/30 max-w-sm mx-auto my-4 animate-in fade-in zoom-in duration-300">
               <Sparkles className="w-5 h-5 text-pink-400 mx-auto" />
-              <h4 className="text-sm font-bold text-white">✨ Match Found! Connected with @{partner.username}</h4>
+              <h4 className="text-sm font-black text-white">✨ Match Found! Connected with @{partner.username}</h4>
               <p className="text-[11px] text-pink-200/70">
-                Say hello 👋 Messages are temporary and erased when either person presses NEXT.
+                Say hello 👋 All messages are temporary and deleted when either person presses NEXT.
               </p>
             </div>
           )}
 
-          {/* Messages Feed */}
+          {/* MESSAGES LIST */}
           {messages.map((msg) => {
             const isMe = msg.senderId === user?.id || msg.senderUsername === user?.username;
             return (
               <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}>
                 <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-xs leading-relaxed shadow-sm ${
+                  className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-sm ${
                     isMe
-                      ? 'bg-gradient-to-r from-pink-600 to-rose-500 text-white rounded-br-none'
-                      : 'bg-white/10 backdrop-blur-md text-pink-50 border border-white/10 rounded-bl-none'
+                      ? 'bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 text-white rounded-br-none font-medium'
+                      : 'bg-white/10 backdrop-blur-md text-pink-50 border border-white/10 rounded-bl-none font-medium'
                   }`}
                 >
                   {msg.content}
                 </div>
-                <span className="text-[9px] text-pink-200/40 px-1">
+                <span className="text-[9px] text-pink-200/40 px-1 font-mono">
                   {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
             );
           })}
 
-          {/* Partner Typing Indicator */}
+          {/* PARTNER TYPING INDICATOR */}
           {partnerTyping && (
-            <div className="flex items-center space-x-2 text-pink-300 text-xs py-1">
+            <div className="flex items-center space-x-2 text-pink-300 text-xs py-1.5">
               <span className="w-2 h-2 rounded-full bg-pink-400 animate-bounce" />
               <span className="w-2 h-2 rounded-full bg-pink-400 animate-bounce [animation-delay:0.2s]" />
               <span className="w-2 h-2 rounded-full bg-pink-400 animate-bounce [animation-delay:0.4s]" />
-              <span className="text-[11px] italic">@{partner?.username} is typing...</span>
+              <span className="text-[11px] italic font-semibold">@{partner?.username} is typing...</span>
             </div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Bottom Composer & Actions */}
-        <div className="p-3 bg-slate-950/80 backdrop-blur-xl border-t border-pink-500/20 space-y-2 shrink-0 z-20 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        {/* BOTTOM FIXED COMPOSER & PROMINENT NEXT BUTTON */}
+        <div className="p-3 bg-slate-950/90 backdrop-blur-2xl border-t border-pink-500/20 space-y-2.5 shrink-0 z-20 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           
+          {/* Elastic Text Area Input Bar */}
           <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
-            <input
-              type="text"
-              placeholder={matchStatus === 'connected' ? 'Type a message...' : 'Waiting for a match to type...'}
+            <textarea
+              rows={1}
+              placeholder={matchStatus === 'connected' ? 'Type a message...' : 'Finding someone...'}
               value={inputText}
               onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
               disabled={matchStatus !== 'connected'}
-              className="flex-grow px-4 py-3 rounded-full glass-input text-xs sm:text-sm placeholder:text-pink-300/40 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-grow px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm placeholder:text-pink-300/40 disabled:opacity-50 disabled:cursor-not-allowed resize-none max-h-24 focus:outline-none focus:ring-2 focus:ring-pink-500/50"
             />
             <button
               type="submit"
-              disabled={matchStatus !== 'connected' || !inputText.trim()}
-              className="p-3 rounded-full bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-lg shadow-pink-500/30 transition-all disabled:opacity-40 disabled:pointer-events-none cursor-pointer shrink-0"
+              disabled={matchStatus !== 'connected' || !inputText.trim() || sendingMsg}
+              className="p-3.5 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white shadow-xl shadow-pink-500/30 transition-all disabled:opacity-40 disabled:pointer-events-none cursor-pointer shrink-0 active:scale-95"
             >
               <Send className="w-4 h-4 fill-current" />
             </button>
           </form>
 
-          <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={handleNextClick}
-              className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-black text-xs shadow-md shadow-pink-500/20 flex items-center justify-center space-x-1.5 cursor-pointer active:scale-95 border border-pink-400/30"
-            >
-              <span>NEXT CHAT</span>
-              <FastForward className="w-4 h-4" />
-            </button>
-
-            {matchStatus === 'connected' && (
-              <button
-                type="button"
-                onClick={handleEndChat}
-                className="px-4 py-2.5 rounded-2xl bg-white/5 hover:bg-rose-500/20 text-rose-300 font-bold text-xs border border-white/10 shrink-0 cursor-pointer"
-              >
-                End
-              </button>
-            )}
-          </div>
+          {/* Prominent KnotChat NEXT CHAT Button */}
+          <button
+            type="button"
+            onClick={handleNextClick}
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-black text-sm tracking-wider uppercase shadow-xl shadow-pink-500/30 flex items-center justify-center space-x-2 cursor-pointer active:scale-95 border border-pink-400/40"
+          >
+            <span>NEXT CHAT</span>
+            <FastForward className="w-5 h-5 fill-current" />
+          </button>
         </div>
 
       </div>
+
+      {/* Matched Partner Profile Preview Sheet */}
+      <ProfilePreviewSheet
+        isOpen={showProfileSheet}
+        onClose={() => setShowProfileSheet(false)}
+        partner={partner}
+      />
+
+      {/* Options Menu Bottom Sheet (⋮) */}
+      <BottomSheet isOpen={showOptionsMenu} onClose={() => setShowOptionsMenu(false)} title="Chat Options">
+        <div className="space-y-2 py-2 text-white">
+          <button
+            type="button"
+            onClick={() => {
+              setShowOptionsMenu(false);
+              setShowProfileSheet(true);
+            }}
+            className="w-full p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 font-bold text-xs flex items-center space-x-3 text-left transition-colors cursor-pointer"
+          >
+            <User className="w-4 h-4 text-pink-400" />
+            <span>View @{partner?.username}'s Profile</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowOptionsMenu(false);
+              setShowReportModal(true);
+            }}
+            className="w-full p-3.5 rounded-2xl bg-white/5 hover:bg-amber-500/20 text-amber-300 font-bold text-xs flex items-center space-x-3 text-left transition-colors cursor-pointer"
+          >
+            <Flag className="w-4 h-4" />
+            <span>Report @{partner?.username}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowOptionsMenu(false);
+              handleBlockUser();
+            }}
+            className="w-full p-3.5 rounded-2xl bg-white/5 hover:bg-rose-500/20 text-rose-300 font-bold text-xs flex items-center space-x-3 text-left transition-colors cursor-pointer"
+          >
+            <Ban className="w-4 h-4" />
+            <span>Block @{partner?.username}</span>
+          </button>
+
+          {isVIP ? (
+            <button
+              type="button"
+              onClick={() => {
+                setShowOptionsMenu(false);
+                setShowBanModal(true);
+              }}
+              className="w-full p-3.5 rounded-2xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 font-bold text-xs flex items-center space-x-3 text-left transition-colors cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 fill-current text-yellow-400" />
+              <span>Personal Ban User (VIP Feature)</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setShowOptionsMenu(false);
+                setShowVipLockModal(true);
+              }}
+              className="w-full p-3.5 rounded-2xl bg-white/5 text-pink-200/40 font-bold text-xs flex items-center justify-between text-left cursor-pointer"
+            >
+              <div className="flex items-center space-x-3">
+                <Sparkles className="w-4 h-4 text-yellow-400" />
+                <span>Personal Ban User</span>
+              </div>
+              <Lock className="w-3.5 h-3.5 text-yellow-400" />
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowOptionsMenu(false)}
+            className="w-full py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-colors cursor-pointer mt-2"
+          >
+            Cancel
+          </button>
+        </div>
+      </BottomSheet>
 
       {/* Confirmation Modals */}
       {showNextModal && (
