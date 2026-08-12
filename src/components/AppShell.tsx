@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 import Sidebar from '@/components/Sidebar';
+import UserAvatar from '@/components/UserAvatar';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -123,14 +124,10 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
           {user && (
             <div className="p-4 rounded-2xl bg-white/5 border border-pink-500/20 space-y-3 relative overflow-hidden">
               <div className="flex items-center space-x-3">
-                <img
-                  src={user.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user.username}`}
-                  alt={user.fullName}
-                  className="w-11 h-11 rounded-full border-2 border-pink-400/60 object-cover"
-                />
+                <UserAvatar user={user} size="md" />
                 <div className="overflow-hidden">
                   <h4 className="text-sm font-bold text-white truncate flex items-center gap-1">
-                    {user.fullName}
+                    {user.displayName || user.fullName}
                     {isVIP && <Sparkles className="w-3.5 h-3.5 text-yellow-400 fill-current shrink-0" />}
                   </h4>
                   <p className="text-xs text-pink-200/70 truncate">@{user.username}</p>

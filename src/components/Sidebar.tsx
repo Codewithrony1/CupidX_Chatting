@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { detectUserCountry } from '@/lib/countryFlag';
 import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings, MapPin } from 'lucide-react';
+import UserAvatar from '@/components/UserAvatar';
 
 export default function Sidebar({
   onOpenVIPModal,
@@ -56,16 +57,10 @@ export default function Sidebar({
             <div className="absolute top-0 right-0 w-24 h-24 bg-yellow-500/10 rounded-full blur-xl -mr-4 -mt-4" />
           )}
           <div className="flex items-center space-x-3">
-            <img
-              src={user.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user.username}`}
-              alt={user.fullName}
-              className={`w-10 h-10 rounded-full object-cover bg-slate-800 ${
-                isVIP ? 'border-2 border-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.3)]' : 'border border-white/10'
-              }`}
-            />
+            <UserAvatar user={user} size="md" />
             <div className="overflow-hidden">
               <h4 className="text-sm font-semibold text-white truncate flex items-center gap-1">
-                <span className="truncate">{user.fullName}</span>
+                <span className="truncate">{user.displayName || user.fullName}</span>
                 <span className="text-sm shrink-0" title={locationInfo.countryName}>
                   {locationInfo.flag}
                 </span>
