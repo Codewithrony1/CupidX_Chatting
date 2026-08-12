@@ -9,6 +9,7 @@ interface User {
   clerkUserId?: string | null;
   username: string;
   fullName: string;
+  displayName?: string;
   role: 'USER' | 'ADMIN';
   membershipTier?: string;
   profile?: {
@@ -25,7 +26,9 @@ interface User {
     language?: string;
     saveChatHistory?: boolean;
     interests: string;
-    avatarUrl: string;
+    avatarType?: string;
+    avatarEmoji?: string;
+    avatarUrl?: string | null;
     themePreference: string;
   };
   subscription?: {

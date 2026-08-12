@@ -87,9 +87,9 @@ export default function ProfilePage() {
 
   // Personality Tags (array from comma-separated string)
   const [personalityTags, setPersonalityTags] = useState<string[]>([]);
-
-  // Avatar States
-  const [avatarUrl, setAvatarUrl] = useState(user?.profile?.avatarUrl || '/default-avatar.png');
+  const [avatarType, setAvatarType] = useState<string>(user?.profile?.avatarType || 'EMOJI');
+  const [avatarEmoji, setAvatarEmoji] = useState<string>(user?.profile?.avatarEmoji || '😊');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(user?.profile?.avatarUrl || null);
   const [avatarData, setAvatarData] = useState<string>('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
@@ -103,7 +103,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (user?.profile) {
-      setDisplayName(user.fullName || '');
+      setDisplayName(user.displayName || user.fullName || '');
       setBio(user.profile.bio || '');
       setShowBio(user.profile.showBio ?? true);
       setGender(user.profile.gender || 'unspecified');
@@ -111,11 +111,13 @@ export default function ProfilePage() {
       setPreferredGender(user.profile.preferredGender || 'auto');
       setMood(user.profile.mood || '');
       setShowMood(user.profile.showMood ?? true);
-      setAvatarUrl(user.profile.avatarUrl || '/default-avatar.png');
+      setAvatarType(user.profile.avatarType || 'EMOJI');
+      setAvatarEmoji(user.profile.avatarEmoji || '😊');
+      setAvatarUrl(user.profile.avatarUrl || null);
 
       const tags = user.profile.personalityPreferences
         ? user.profile.personalityPreferences.split(',').filter(Boolean)
-        : ['💬 Talkative', '😂 Funny', '😊 Friendly'];
+        : [];
       setPersonalityTags(tags);
     }
   }, [user]);
@@ -141,8 +143,8 @@ export default function ProfilePage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image file size must be under 5MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image size must be less than 10MB');
       return;
     }
 
@@ -151,30 +153,31 @@ export default function ProfilePage() {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const maxDim = 400;
+        const ctx = canvas.getContext('2d');
+        const maxDim = 600;
         let width = img.width;
         let height = img.height;
 
         if (width > height) {
           if (width > maxDim) {
-            height = Math.round((height * maxDim) / width);
+            height *= maxDim / width;
             width = maxDim;
           }
         } else {
           if (height > maxDim) {
-            width = Math.round((width * maxDim) / height);
+            width *= maxDim / height;
             height = maxDim;
           }
         }
 
         canvas.width = width;
         canvas.height = height;
-        const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
 
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        setImagePreview(compressedDataUrl);
-        setAvatarData(compressedDataUrl);
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+        setImagePreview(compressedBase64);
+        setAvatarData(compressedBase64);
+        setAvatarType('IMAGE');
       };
       img.src = event.target?.result as string;
     };
@@ -197,6 +200,7 @@ export default function ProfilePage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          displayName,
           bio,
           showBio,
           gender,
@@ -206,8 +210,9 @@ export default function ProfilePage() {
           mood,
           showMood,
           moodDuration,
+          avatarType,
+          avatarEmoji,
           avatarData: avatarData || undefined,
-          avatarUrlPreset: !avatarData && avatarUrl ? avatarUrl : undefined,
         }),
       });
 
@@ -263,14 +268,22 @@ export default function ProfilePage() {
 
         <form onSubmit={handleSaveProfile} className="space-y-6">
           
-          {/* SECTION 1: PROFILE & DP */}
-          <div className="glass-romantic rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/25">
-            <div className="relative w-24 h-24 mx-auto">
-              <img
-                src={imagePreview || avatarUrl}
-                alt={user?.username || 'User Avatar'}
-                className="w-24 h-24 rounded-full object-cover bg-slate-900 border-2 border-pink-400 shadow-xl"
-              />
+          {/* SECTION 1: CUPIDX IDENTITY & AVATAR */}
+          <div className="glass-romantic rounded-3xl p-6 text-center space-y-5">
+            
+            {/* Avatar Render Box (Emoji or Custom Image) */}
+            <div className="relative w-28 h-28 mx-auto">
+              {isVIP && avatarType === 'IMAGE' && (imagePreview || avatarUrl) ? (
+                <img
+                  src={imagePreview || avatarUrl!}
+                  alt={user?.username || 'User Avatar'}
+                  className="w-28 h-28 rounded-3xl object-cover bg-slate-900 border-2 border-pink-400 shadow-xl"
+                />
+              ) : (
+                <div className="w-28 h-28 rounded-3xl bg-gradient-to-tr from-pink-600/30 to-purple-600/30 border-2 border-pink-400/50 shadow-xl flex items-center justify-center text-6xl select-none">
+                  {avatarEmoji}
+                </div>
+              )}
 
               <button
                 type="button"
@@ -281,8 +294,8 @@ export default function ProfilePage() {
                     fileInputRef.current?.click();
                   }
                 }}
-                className="absolute bottom-0 right-0 p-2 rounded-full bg-gradient-to-tr from-pink-600 to-rose-500 text-white shadow-lg border border-white/20 hover:scale-110 transition-transform cursor-pointer"
-                title={isVIP ? 'Change Profile Picture' : 'Custom DP requires VIP'}
+                className="absolute -bottom-1 -right-1 p-2 rounded-2xl bg-gradient-to-tr from-pink-600 to-rose-500 text-white shadow-lg border border-white/20 hover:scale-110 transition-transform cursor-pointer"
+                title={isVIP ? 'Upload Custom Image DP' : 'Custom Image DP requires VIP'}
               >
                 {isVIP ? <Camera className="w-4 h-4" /> : <Lock className="w-4 h-4 text-yellow-300" />}
               </button>
@@ -291,63 +304,64 @@ export default function ProfilePage() {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                onChange={handleImageFileChange}
+                onChange={(e) => {
+                  if (!isVIP) {
+                    setShowVipLockModal(true);
+                    return;
+                  }
+                  handleImageFileChange(e);
+                }}
                 className="hidden"
               />
             </div>
 
             <div>
-              <h2 className="text-lg font-black text-white">@{user?.username}</h2>
-              <p className="text-xs text-pink-200/70">{user?.fullName}</p>
+              <h2 className="text-xl font-black text-white">{displayName || user?.username}</h2>
+              <p className="text-xs text-pink-200/70 font-semibold">@{user?.username}</p>
             </div>
 
-            {/* Avatar Preset Selector (VIP Exclusive Feature) */}
+            {/* Emoji DP Selection Grid */}
             <div className="space-y-2 pt-2 border-t border-white/10">
-              <div className="flex items-center justify-center space-x-1.5">
-                <span className="text-[11px] font-bold text-pink-300 uppercase tracking-wider">
-                  Avatar Presets
-                </span>
-                {!isVIP && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
-                    <Lock className="w-2.5 h-2.5" /> VIP
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center justify-center space-x-2">
-                {AVATAR_PRESETS.map((preset, idx) => (
+              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block text-center">
+                Choose Emoji DP
+              </label>
+              <div className="flex flex-wrap justify-center gap-2">
+                {['😊', '😎', '😄', '🤪', '🥰', '😇', '😈', '🤩', '😌', '🥳', '🤠', '😍', '🫡'].map((emoji) => (
                   <button
-                    key={idx}
+                    key={emoji}
                     type="button"
                     onClick={() => {
-                      if (!isVIP) {
-                        setShowVipLockModal(true);
-                        return;
-                      }
-                      setAvatarUrl(preset);
-                      setImagePreview(null);
-                      setAvatarData('');
+                      setAvatarEmoji(emoji);
+                      setAvatarType('EMOJI');
                     }}
-                    className={`w-9 h-9 rounded-full overflow-hidden border-2 transition-all cursor-pointer relative ${
-                      avatarUrl === preset && !imagePreview
-                        ? 'border-pink-400 scale-110 shadow-md'
-                        : 'border-transparent opacity-60 hover:opacity-100'
+                    className={`w-9 h-9 rounded-xl text-xl flex items-center justify-center transition-all cursor-pointer select-none ${
+                      avatarEmoji === emoji && avatarType === 'EMOJI'
+                        ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-md scale-110'
+                        : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-70 hover:opacity-100'
                     }`}
                   >
-                    <img src={preset} alt={`Preset ${idx}`} className="w-full h-full object-cover" />
-                    {!isVIP && (
-                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                        <Lock className="w-3 h-3 text-yellow-400" />
-                      </div>
-                    )}
+                    {emoji}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Username & Bio Fields */}
+            {/* Display Name & Username Edit Fields */}
             <div className="space-y-3 text-left pt-2">
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Username</label>
+                <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Cupidx Display Name</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="e.g. Rony Rai"
+                  className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-semibold"
+                />
+                <p className="text-[10px] text-pink-200/60">Your display name shown on chat headers and profile sheets.</p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Unique @username</label>
                 <div className="px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 font-mono text-xs">
                   @{user?.username}
                 </div>

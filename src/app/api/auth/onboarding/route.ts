@@ -43,13 +43,15 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { username } = body;
+    const { username, displayName: inputDisplayName, avatarEmoji: inputAvatarEmoji } = body;
 
     if (!username) {
       return NextResponse.json({ error: 'Username is required' }, { status: 400 });
     }
 
     const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+    const cleanDisplayName = (inputDisplayName || '').trim() || cleanUsername;
+    const selectedEmoji = inputAvatarEmoji || '😊';
 
     const validation = usernameSchema.safeParse(cleanUsername);
     if (!validation.success) {
@@ -60,31 +62,16 @@ export async function POST(req: Request) {
     }
 
     let clerkUserId: string | null = null;
-    let clerkFirstName = '';
-    let clerkLastName = '';
-    let clerkImageUrl = '';
 
-    // Safely check Clerk Auth without throwing
     try {
       const clerkAuth = await auth();
       if (clerkAuth && clerkAuth.userId) {
         clerkUserId = clerkAuth.userId;
-        try {
-          const clerkUser = await currentUser();
-          if (clerkUser) {
-            clerkFirstName = clerkUser.firstName || '';
-            clerkLastName = clerkUser.lastName || '';
-            clerkImageUrl = clerkUser.imageUrl || '';
-          }
-        } catch (e) {
-          console.warn('Unable to fetch Clerk user details, proceeding with fallback');
-        }
       }
     } catch (e) {
       console.warn('Clerk auth check fallback:', e);
     }
 
-    // Fallback: Check existing cookie user if Clerk auth isn't present
     const existingCookieUser = await getCurrentUser(req);
 
     if (!clerkUserId && !existingCookieUser) {
@@ -103,9 +90,7 @@ export async function POST(req: Request) {
     }
 
     if (user) {
-      // User already exists; update username if not set or different
       if (user.username !== cleanUsername) {
-        // Check if target cleanUsername is taken by someone else
         const taken = await prisma.user.findFirst({
           where: { username: cleanUsername, id: { not: user.id } },
         });
@@ -113,13 +98,23 @@ export async function POST(req: Request) {
         if (taken) {
           return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
         }
-
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: { username: cleanUsername },
-          include: { profile: true, subscription: true },
-        });
       }
+
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          username: cleanUsername,
+          displayName: cleanDisplayName,
+          fullName: cleanDisplayName,
+          profile: {
+            update: {
+              avatarType: 'EMOJI',
+              avatarEmoji: selectedEmoji,
+            },
+          },
+        },
+        include: { profile: true, subscription: true },
+      });
 
       const token = signToken({
         userId: user.id,
@@ -147,21 +142,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
     }
 
-    const fullName = `${clerkFirstName} ${clerkLastName}`.trim() || cleanUsername;
-    const avatarUrl = clerkImageUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${cleanUsername}`;
-
     // 3. Create new user in database
     const newUser = await prisma.user.create({
       data: {
         clerkUserId: clerkUserId || null,
         username: cleanUsername,
-        fullName,
-        displayName: fullName,
+        fullName: cleanDisplayName,
+        displayName: cleanDisplayName,
         passwordHash: '',
         role: 'USER',
         profile: {
           create: {
-            avatarUrl,
+            avatarType: 'EMOJI',
+            avatarEmoji: selectedEmoji,
+            avatarUrl: null,
             bio: 'Hey there! I am using Cupidx.',
           },
         },

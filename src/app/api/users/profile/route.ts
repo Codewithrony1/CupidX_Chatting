@@ -39,7 +39,9 @@ export async function GET(req: Request) {
         isVIP,
         profile: prof
           ? {
-              avatarUrl: prof.avatarUrl || '/default-avatar.png',
+              avatarType: prof.avatarType || 'EMOJI',
+              avatarEmoji: prof.avatarEmoji || '😊',
+              avatarUrl: prof.avatarUrl || null,
               bio: prof.showBio ? prof.bio : undefined,
               gender: prof.showGender ? prof.gender : undefined,
               mood: prof.showMood ? prof.mood : undefined,

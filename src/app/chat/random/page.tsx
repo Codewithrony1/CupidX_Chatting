@@ -38,7 +38,10 @@ interface RandomPartner {
   id: string;
   username: string;
   fullName: string;
-  avatarUrl: string;
+  displayName?: string;
+  avatarType?: string;
+  avatarEmoji?: string;
+  avatarUrl?: string | null;
   gender: string;
   mood?: string;
   personalityPreferences?: string;
@@ -526,23 +529,29 @@ export default function KnotChatRandomPage() {
                 className="flex items-center space-x-2.5 text-left group cursor-pointer"
               >
                 <div className="relative">
-                  <img
-                    src={partner.avatarUrl || '/default-avatar.png'}
-                    alt={partner.username}
-                    className="w-10 h-10 rounded-2xl border border-pink-400/50 object-cover group-hover:scale-105 transition-transform"
-                  />
+                  {partner.isVIP && partner.avatarType === 'IMAGE' && partner.avatarUrl ? (
+                    <img
+                      src={partner.avatarUrl}
+                      alt={partner.username}
+                      className="w-10 h-10 rounded-2xl border border-pink-400/50 object-cover group-hover:scale-105 transition-transform"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-600/30 to-purple-600/30 border border-pink-400/50 flex items-center justify-center text-2xl select-none group-hover:scale-105 transition-transform">
+                      {partner.avatarEmoji || '😊'}
+                    </div>
+                  )}
                   <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
                 </div>
 
                 <div>
                   <div className="flex items-center space-x-1.5">
                     <h3 className="font-black text-sm text-white tracking-tight flex items-center gap-1 group-hover:text-pink-300 transition-colors">
-                      @{partner.username}
+                      {partner.displayName || partner.fullName || partner.username}
                     </h3>
                     {partner.isVIP && <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current" />}
                   </div>
                   <p className="text-[11px] text-pink-200/70 font-medium">
-                    {partner.mood || '😎 Attitude'}
+                    @{partner.username} {partner.mood ? `• ${partner.mood}` : ''}
                   </p>
                 </div>
               </button>

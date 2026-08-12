@@ -38,21 +38,22 @@ export async function GET(req: Request) {
             });
 
             const finalUsername = existing ? `${cleanUsername}_${Math.floor(100 + Math.random() * 900)}` : cleanUsername;
-            const fullName = `${clerkUser?.firstName || ''} ${clerkUser?.lastName || ''}`.trim() || finalUsername;
-            const avatarUrl = clerkUser?.imageUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${finalUsername}`;
+            const displayName = finalUsername;
 
             user = await prisma.user.create({
               data: {
                 clerkUserId: clerkAuth.userId,
                 username: finalUsername,
-                fullName,
-                displayName: fullName,
+                fullName: displayName,
+                displayName: displayName,
                 passwordHash: '',
                 role: 'USER',
                 membershipTier: 'FREE',
                 profile: {
                   create: {
-                    avatarUrl,
+                    avatarType: 'EMOJI',
+                    avatarEmoji: '😊',
+                    avatarUrl: null,
                     bio: 'Hey there! I am using Cupidx.',
                   },
                 },

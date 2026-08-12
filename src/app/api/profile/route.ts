@@ -37,6 +37,7 @@ export async function PUT(req: Request) {
 
     const body = await req.json();
     const {
+      displayName,
       bio,
       showBio,
       age,
@@ -51,12 +52,14 @@ export async function PUT(req: Request) {
       saveChatHistory,
       interests,
       themePreference,
+      avatarType,
+      avatarEmoji,
       avatarData,
       avatarUrlPreset,
     } = body;
 
     // Strict Server-side VIP Protection for VIP-only features
-    const isUpdatingVIPAvatar = (avatarData && avatarData.startsWith('data:image/')) || (avatarUrlPreset && avatarUrlPreset.includes('api.dicebear.com'));
+    const isUpdatingVIPAvatar = (avatarData && avatarData.startsWith('data:image/')) || avatarType === 'IMAGE';
     const isUpdatingVIPPreferences = preferredGender && preferredGender !== 'auto';
     const isUpdatingVIPMood = mood !== undefined || moodDuration !== undefined;
     const isUpdatingVIPPersonality = personalityPreferences !== undefined;
@@ -64,7 +67,7 @@ export async function PUT(req: Request) {
     if ((isUpdatingVIPAvatar || isUpdatingVIPPreferences || isUpdatingVIPMood || isUpdatingVIPPersonality) && !isVIP) {
       return NextResponse.json(
         {
-          error: 'Custom moods, personality styles, custom avatars & targeted discovery preferences require CupidX VIP.',
+          error: 'Custom profile pictures, custom moods, personality styles & targeted discovery preferences require CupidX VIP.',
           isVipRequired: true,
         },
         { status: 403 }
@@ -73,7 +76,7 @@ export async function PUT(req: Request) {
 
     let avatarUrl = avatarUrlPreset !== undefined ? avatarUrlPreset : undefined;
 
-    if (isUpdatingVIPAvatar && isVIP) {
+    if (isUpdatingVIPAvatar && isVIP && avatarData) {
       const matches = avatarData.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
@@ -99,6 +102,17 @@ export async function PUT(req: Request) {
       moodExpiresAt = null;
     }
 
+    // Update User.displayName if provided
+    if (displayName && displayName.trim()) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          displayName: displayName.trim(),
+          fullName: displayName.trim(),
+        },
+      });
+    }
+
     const updatedProfile = await prisma.profile.update({
       where: { userId: user.id },
       data: {
@@ -116,6 +130,8 @@ export async function PUT(req: Request) {
         saveChatHistory: saveChatHistory !== undefined ? Boolean(saveChatHistory) : undefined,
         interests: interests !== undefined ? interests : undefined,
         themePreference: themePreference !== undefined ? themePreference : undefined,
+        avatarType: avatarType !== undefined ? avatarType : undefined,
+        avatarEmoji: avatarEmoji !== undefined ? avatarEmoji : undefined,
         avatarUrl: avatarUrl !== undefined ? avatarUrl : undefined,
       },
     });
