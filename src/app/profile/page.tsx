@@ -81,7 +81,7 @@ export default function ProfilePage() {
   const [gender, setGender] = useState(user?.profile?.gender || 'unspecified');
   const [showGender, setShowGender] = useState(user?.profile?.showGender ?? true);
   const [preferredGender, setPreferredGender] = useState(user?.profile?.preferredGender || 'auto');
-  const [mood, setMood] = useState(user?.profile?.mood || '😎 Attitude');
+  const [mood, setMood] = useState(user?.profile?.mood || '');
   const [showMood, setShowMood] = useState(user?.profile?.showMood ?? true);
   const [moodDuration, setMoodDuration] = useState<'1hour' | '24hours' | 'never'>('24hours');
 
@@ -109,7 +109,7 @@ export default function ProfilePage() {
       setGender(user.profile.gender || 'unspecified');
       setShowGender(user.profile.showGender ?? true);
       setPreferredGender(user.profile.preferredGender || 'auto');
-      setMood(user.profile.mood || '😎 Attitude');
+      setMood(user.profile.mood || '');
       setShowMood(user.profile.showMood ?? true);
       setAvatarUrl(user.profile.avatarUrl || '/default-avatar.png');
 
@@ -420,74 +420,83 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* SECTION 3: CURRENT MOOD & EXPIRATION (VIP Feature) */}
+          {/* SECTION 3: CURRENT MOOD & EXPIRATION (VIP vs FREE) */}
           <div className="glass-romantic rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black text-white flex items-center gap-2">
                 <Smile className="w-4 h-4 text-amber-400" />
                 <span>Current Mood</span>
-                {!isVIP && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
-                    <Lock className="w-2.5 h-2.5" /> VIP
+                {isVIP && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-black border border-yellow-500/30 flex items-center gap-1">
+                    <Crown className="w-3 h-3 fill-current" /> 💎 VIP
                   </span>
                 )}
               </h3>
 
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isVIP) {
-                    setShowVipLockModal(true);
-                  } else {
-                    setShowMoodSheet(true);
-                  }
-                }}
-                className="text-xs font-bold text-pink-400 hover:text-pink-300 transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <span>Change Mood</span>
-                {!isVIP && <Lock className="w-3 h-3 text-yellow-400" />}
-              </button>
+              {isVIP && (
+                <button
+                  type="button"
+                  onClick={() => setShowMoodSheet(true)}
+                  className="text-xs font-bold text-pink-400 hover:text-pink-300 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Change Mood</span>
+                </button>
+              )}
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <span className="text-2xl leading-none">{mood.split(' ')[0]}</span>
-                <span className="text-xs font-bold text-white">{mood}</span>
+            {/* FREE USER MOOD CARD */}
+            {!isVIP ? (
+              <div className="p-4 rounded-2xl bg-white/5 border border-pink-500/15 text-center space-y-2">
+                <p className="text-xs font-bold text-pink-200/80">
+                  {mood ? mood : '😊 Choose your mood'}
+                </p>
+                <p className="text-[11px] text-pink-300/60">
+                  Custom mood selection and expiration timers are available with CupidX VIP.
+                </p>
+                <Link
+                  href="/vip"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-slate-950 font-black text-xs shadow-md hover:scale-105 transition-all mt-1"
+                >
+                  <Crown className="w-3.5 h-3.5 fill-current" />
+                  <span>Explore VIP →</span>
+                </Link>
               </div>
+            ) : (
+              /* VIP USER MOOD CONTROLS */
+              <>
+                <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-2xl leading-none">{mood ? mood.split(' ')[0] : '😊'}</span>
+                    <span className="text-xs font-bold text-white">{mood || 'No mood selected'}</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">Active</span>
+                </div>
 
-              <span className="text-[10px] text-pink-200/60 font-semibold uppercase">Active</span>
-            </div>
-
-            <div className="space-y-2 pt-1">
-              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Mood Duration</label>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                {[
-                  { id: '1hour', label: '1 Hour' },
-                  { id: '24hours', label: '24 Hours (Today)' },
-                  { id: 'never', label: 'Until Changed' },
-                ].map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => {
-                      if (!isVIP) {
-                        setShowVipLockModal(true);
-                        return;
-                      }
-                      setMoodDuration(d.id as any);
-                    }}
-                    className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                      moodDuration === d.id
-                        ? 'bg-pink-500 text-white shadow-md'
-                        : 'bg-white/5 border border-white/10 text-pink-200/70 hover:bg-white/10'
-                    }`}
-                  >
-                    <span>{d.label}</span>
-                    {!isVIP && <Lock className="w-2.5 h-2.5 text-yellow-400" />}
-                  </button>
-                ))}
-              </div>
-            </div>
+                <div className="space-y-2 pt-1">
+                  <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Mood Duration</label>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    {[
+                      { id: '1hour', label: '1 Hour' },
+                      { id: '24hours', label: '24 Hours (Today)' },
+                      { id: 'never', label: 'Until Changed' },
+                    ].map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => setMoodDuration(d.id as any)}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                          moodDuration === d.id
+                            ? 'bg-pink-500 text-white shadow-md'
+                            : 'bg-white/5 border border-white/10 text-pink-200/70 hover:bg-white/10'
+                        }`}
+                      >
+                        <span>{d.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* SECTION 4: PERSONALITY PREFERENCES (VIP Feature) */}

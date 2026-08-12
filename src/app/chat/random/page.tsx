@@ -29,7 +29,9 @@ import {
   MoreVertical,
   UserCheck,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  RefreshCw,
+  Check
 } from 'lucide-react';
 
 interface RandomPartner {
@@ -46,20 +48,23 @@ interface RandomPartner {
 
 interface RandomMessage {
   id: string;
+  clientMessageId?: string | null;
   senderId: string;
   senderUsername: string;
   content: string;
   imageUrl: string | null;
   createdAt: string;
+  status?: 'SENDING' | 'SENT' | 'FAILED';
 }
 
 export default function KnotChatRandomPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const { socket } = useSocket();
+  const { socket, isConnected: socketConnected } = useSocket();
 
   // Statuses: "idle" | "searching" | "connected" | "ended"
   const [matchStatus, setMatchStatus] = useState<'idle' | 'searching' | 'connected' | 'ended'>('idle');
+  const [reconnecting, setReconnecting] = useState(false);
   const [partner, setPartner] = useState<RandomPartner | null>(null);
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<RandomMessage[]>([]);
@@ -85,6 +90,7 @@ export default function KnotChatRandomPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
+  const lastMessageTimestampRef = useRef<string | null>(null);
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
@@ -95,12 +101,30 @@ export default function KnotChatRandomPage() {
     }
   }, [messages, partnerTyping, matchStatus]);
 
+  // Track latest message timestamp for incremental recovery
+  useEffect(() => {
+    if (messages.length > 0) {
+      lastMessageTimestampRef.current = messages[messages.length - 1].createdAt;
+    }
+  }, [messages]);
+
   // Initial Match Trigger on page load
   useEffect(() => {
     if (user && matchStatus === 'idle') {
       handleStartMatch();
     }
   }, [user]);
+
+  // Handle Socket Reconnection Status
+  useEffect(() => {
+    if (matchStatus === 'connected') {
+      if (!socketConnected) {
+        setReconnecting(true);
+      } else {
+        setReconnecting(false);
+      }
+    }
+  }, [socketConnected, matchStatus]);
 
   // 1. Persistent Queue Status Polling (Fallback during searching state)
   useEffect(() => {
@@ -127,13 +151,15 @@ export default function KnotChatRandomPage() {
     return () => clearInterval(pollInterval);
   }, [matchStatus]);
 
-  // 2. Realtime Active Chat Message & Status Sync (Polling Fallback every 1.5s for Zero Lost Messages)
+  // 2. Realtime Active Chat Sync & Reconnection Recovery (Polling every 1.5s)
   useEffect(() => {
     if (matchStatus !== 'connected' || !chatSessionId) return;
 
     const chatSyncInterval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(chatSessionId)}`);
+        const sinceParam = lastMessageTimestampRef.current ? `&since=${encodeURIComponent(lastMessageTimestampRef.current)}` : '';
+        const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(chatSessionId)}${sinceParam}`);
+        
         if (res.ok) {
           const data = await res.json();
           
@@ -146,12 +172,27 @@ export default function KnotChatRandomPage() {
             return;
           }
 
-          if (data.messages) {
-            setMessages(data.messages);
+          if (data.messages && data.messages.length > 0) {
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id || m.clientMessageId));
+              const newMsgs = data.messages.filter((m: any) => !existingIds.has(m.id) && !existingIds.has(m.clientMessageId));
+              if (newMsgs.length === 0) return prev;
+              
+              // Replace any temporary sending messages with confirmed server messages
+              const updated = prev.map((m) => {
+                const match = data.messages.find((serverMsg: any) => serverMsg.clientMessageId && serverMsg.clientMessageId === m.clientMessageId);
+                return match ? { ...match, status: 'SENT' as const } : m;
+              });
+
+              const merged = [...updated, ...newMsgs.map((m: any) => ({ ...m, status: 'SENT' as const }))];
+              return merged;
+            });
           }
+
           if (data.partner) {
             setPartner(data.partner);
           }
+          setReconnecting(false);
         } else if (res.status === 404) {
           // Chat session ended by partner via NEXT
           setMatchStatus('searching');
@@ -161,6 +202,7 @@ export default function KnotChatRandomPage() {
         }
       } catch (e) {
         console.error('Chat sync error:', e);
+        setReconnecting(true);
       }
     }, 1500);
 
@@ -179,8 +221,10 @@ export default function KnotChatRandomPage() {
 
     const handleReceiveMessage = (msg: RandomMessage) => {
       setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
+        if (prev.some((m) => m.id === msg.id || (m.clientMessageId && m.clientMessageId === msg.clientMessageId))) {
+          return prev.map((m) => (m.clientMessageId && m.clientMessageId === msg.clientMessageId ? { ...msg, status: 'SENT' } : m));
+        }
+        return [...prev, { ...msg, status: 'SENT' }];
       });
     };
 
@@ -275,7 +319,6 @@ export default function KnotChatRandomPage() {
     if (socket) {
       socket.emit('next_partner');
     }
-    // Automatically transition to Finding someone...
     handleStartMatch();
   };
 
@@ -303,11 +346,63 @@ export default function KnotChatRandomPage() {
     }
   };
 
+  // Message Sending with Idempotency (clientMessageId) & Retry Support
+  const sendSingleMessage = async (contentToSend: string, clientMsgId: string) => {
+    if (!chatSessionId) return;
+
+    try {
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatSessionId,
+          content: contentToSend,
+          clientMessageId: clientMsgId,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && data.message) {
+        // Update local message state to SENT
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.clientMessageId === clientMsgId
+              ? { ...data.message, status: 'SENT' as const }
+              : m
+          )
+        );
+
+        if (socket && matchStatus === 'connected') {
+          socket.emit('send_random_message', {
+            content: contentToSend,
+            clientMessageId: clientMsgId,
+            imageUrl: null,
+          });
+        }
+      } else if (res.status === 429) {
+        alert("You're sending messages too quickly. Please wait a moment.");
+        setMessages((prev) =>
+          prev.map((m) => (m.clientMessageId === clientMsgId ? { ...m, status: 'FAILED' as const } : m))
+        );
+      } else {
+        setMessages((prev) =>
+          prev.map((m) => (m.clientMessageId === clientMsgId ? { ...m, status: 'FAILED' as const } : m))
+        );
+      }
+    } catch (err) {
+      console.error('Error sending message:', err);
+      setMessages((prev) =>
+        prev.map((m) => (m.clientMessageId === clientMsgId ? { ...m, status: 'FAILED' as const } : m))
+      );
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || sendingMsg || !chatSessionId) return;
 
     const currentText = inputText.trim();
+    const clientMsgId = `cmsg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     setInputText('');
     setSendingMsg(true);
 
@@ -315,42 +410,31 @@ export default function KnotChatRandomPage() {
     isCurrentlyTypingRef.current = false;
     if (socket) socket.emit('random_typing_status', { isTyping: false });
 
-    // Local optimistic message
-    const tempId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    // Local optimistic message with SENDING status
     const localMsg: RandomMessage = {
-      id: tempId,
+      id: clientMsgId,
+      clientMessageId: clientMsgId,
       senderId: user?.id || 'me',
       senderUsername: user?.username || 'me',
       content: currentText,
       imageUrl: null,
       createdAt: new Date().toISOString(),
+      status: 'SENDING',
     };
 
     setMessages((prev) => [...prev, localMsg]);
 
-    try {
-      // 1. Send via REST API for Guaranteed Database Persistence
-      const res = await fetch('/api/chat/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatSessionId,
-          content: currentText,
-        }),
-      });
+    await sendSingleMessage(currentText, clientMsgId);
+    setSendingMsg(false);
+  };
 
-      // 2. Emit Socket event for sub-millisecond realtime delivery
-      if (socket && matchStatus === 'connected') {
-        socket.emit('send_random_message', {
-          content: currentText,
-          imageUrl: null,
-        });
-      }
-    } catch (err) {
-      console.error('Error sending message:', err);
-    } finally {
-      setSendingMsg(false);
-    }
+  // Retry Failed Message
+  const handleRetryMessage = async (msg: RandomMessage) => {
+    if (!msg.clientMessageId || !msg.content) return;
+    setMessages((prev) =>
+      prev.map((m) => (m.clientMessageId === msg.clientMessageId ? { ...m, status: 'SENDING' as const } : m))
+    );
+    await sendSingleMessage(msg.content, msg.clientMessageId);
   };
 
   const handleBlockUser = async () => {
@@ -479,16 +563,25 @@ export default function KnotChatRandomPage() {
             )}
           </div>
 
-          {/* Options Menu Button (⋮) */}
-          {matchStatus === 'connected' && partner && (
-            <button
-              onClick={() => setShowOptionsMenu(true)}
-              className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-pink-200 transition-colors cursor-pointer"
-              title="Options"
-            >
-              <MoreVertical className="w-5 h-5" />
-            </button>
-          )}
+          {/* Reconnecting Badge & Options Menu */}
+          <div className="flex items-center space-x-2">
+            {reconnecting && matchStatus === 'connected' && (
+              <div className="px-2.5 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold flex items-center space-x-1 animate-pulse">
+                <RefreshCw className="w-3 h-3 animate-spin shrink-0" />
+                <span>Reconnecting...</span>
+              </div>
+            )}
+
+            {matchStatus === 'connected' && partner && (
+              <button
+                onClick={() => setShowOptionsMenu(true)}
+                className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-pink-200 transition-colors cursor-pointer"
+                title="Options"
+              >
+                <MoreVertical className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Scrollable Message Feed Area */}
@@ -532,11 +625,11 @@ export default function KnotChatRandomPage() {
             </div>
           )}
 
-          {/* MESSAGES LIST */}
+          {/* MESSAGES LIST WITH DELIVERY STATES & RETRY */}
           {messages.map((msg) => {
             const isMe = msg.senderId === user?.id || msg.senderUsername === user?.username;
             return (
-              <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}>
+              <div key={msg.id || msg.clientMessageId} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} space-y-1`}>
                 <div
                   className={`max-w-[82%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-sm ${
                     isMe
@@ -546,9 +639,27 @@ export default function KnotChatRandomPage() {
                 >
                   {msg.content}
                 </div>
-                <span className="text-[9px] text-pink-200/40 px-1 font-mono">
-                  {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+
+                <div className="flex items-center space-x-1.5 px-1">
+                  <span className="text-[9px] text-pink-200/40 font-mono">
+                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+
+                  {isMe && (
+                    <span className="text-[9px] font-bold">
+                      {msg.status === 'SENDING' && <span className="text-pink-300/60 animate-pulse">Sending...</span>}
+                      {msg.status === 'SENT' && <Check className="w-3 h-3 text-emerald-400 inline" />}
+                      {msg.status === 'FAILED' && (
+                        <button
+                          onClick={() => handleRetryMessage(msg)}
+                          className="text-rose-400 font-bold underline cursor-pointer hover:text-rose-300 flex items-center gap-0.5"
+                        >
+                          Failed (Retry)
+                        </button>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
             );
           })}

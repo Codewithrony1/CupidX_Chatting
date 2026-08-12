@@ -2,41 +2,77 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 
-// Send a message in a ChatSession
+// Send a message in a ChatSession with Idempotency & Strict Authorization
 export async function POST(req: Request) {
   try {
+    // 1. Authenticate Clerk User (Never trust client-supplied userId)
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));
-    const { chatSessionId, content, imageUrl } = body;
+    const { chatSessionId, content, imageUrl, clientMessageId } = body;
 
     if (!chatSessionId || (!content?.trim() && !imageUrl)) {
       return NextResponse.json({ error: 'Chat session ID and content/image are required' }, { status: 400 });
     }
 
-    // Verify ChatSession exists, is ACTIVE, and user is a participant
+    // 2. Strict IDOR Check: Verify ChatSession exists and user is a legitimate participant
     const session = await prisma.chatSession.findUnique({
       where: { id: chatSessionId },
     });
 
-    if (!session || session.status !== 'ACTIVE') {
-      return NextResponse.json({ error: 'Chat session is no longer active or has ended' }, { status: 400 });
+    if (!session) {
+      return NextResponse.json({ error: 'Chat session not found' }, { status: 404 });
     }
 
     if (session.userAId !== user.id && session.userBId !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You are not a participant in this chat' }, { status: 403 });
     }
 
+    if (session.status !== 'ACTIVE') {
+      return NextResponse.json({ error: 'Chat session has already ended' }, { status: 400 });
+    }
+
+    // 3. Idempotency Check: Prevent duplicate messages during retries
+    if (clientMessageId) {
+      const existingMessage = await prisma.message.findUnique({
+        where: { clientMessageId },
+        include: {
+          sender: {
+            select: { username: true },
+          },
+        },
+      });
+
+      if (existingMessage) {
+        return NextResponse.json({
+          success: true,
+          alreadyProcessed: true,
+          message: {
+            id: existingMessage.id,
+            clientMessageId: existingMessage.clientMessageId,
+            chatSessionId: existingMessage.chatSessionId,
+            senderId: existingMessage.senderId,
+            senderUsername: existingMessage.sender.username,
+            receiverId: existingMessage.receiverId,
+            content: existingMessage.content,
+            imageUrl: existingMessage.imageUrl,
+            createdAt: existingMessage.createdAt.toISOString(),
+          },
+        });
+      }
+    }
+
     const receiverId = session.userAId === user.id ? session.userBId : session.userAId;
 
-    // Create Message record
+    // 4. Create Message record in DB (Guaranteed server persistence BEFORE response)
     const message = await prisma.message.create({
       data: {
         chatSessionId,
-        senderId: user.id,
+        clientMessageId: clientMessageId || null,
+        senderId: user.id, // Strictly derived from server Clerk session
         receiverId,
         content: (content || '').trim(),
         imageUrl: imageUrl || null,
@@ -44,16 +80,13 @@ export async function POST(req: Request) {
       include: {
         sender: {
           select: {
-            id: true,
             username: true,
-            fullName: true,
-            membershipTier: true,
           },
         },
       },
     });
 
-    // Update last activity timestamp
+    // 5. Update last activity timestamp
     await prisma.chatSession.update({
       where: { id: chatSessionId },
       data: { lastActivityAt: new Date() },
@@ -63,6 +96,7 @@ export async function POST(req: Request) {
       success: true,
       message: {
         id: message.id,
+        clientMessageId: message.clientMessageId,
         chatSessionId: message.chatSessionId,
         senderId: message.senderId,
         senderUsername: message.sender.username,
@@ -78,7 +112,7 @@ export async function POST(req: Request) {
   }
 }
 
-// Fetch messages & partner status for a ChatSession
+// Fetch messages & partner status for a ChatSession with Authorization & Recovery
 export async function GET(req: Request) {
   try {
     const user = await getCurrentUser(req);
@@ -88,11 +122,13 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const chatSessionId = searchParams.get('chatSessionId');
+    const since = searchParams.get('since'); // Message recovery timestamp
 
     if (!chatSessionId) {
       return NextResponse.json({ error: 'chatSessionId parameter is required' }, { status: 400 });
     }
 
+    // 1. Strict Authorization Check
     const session = await prisma.chatSession.findUnique({
       where: { id: chatSessionId },
       include: {
@@ -102,29 +138,33 @@ export async function GET(req: Request) {
     });
 
     if (!session) {
-      return NextResponse.json({ error: 'Chat session not found or has ended', sessionStatus: 'ENDED' }, { status: 404 });
+      return NextResponse.json({ error: 'Chat session not found', sessionStatus: 'ENDED' }, { status: 404 });
     }
 
     if (session.userAId !== user.id && session.userBId !== user.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      return NextResponse.json({ error: 'Forbidden: Access denied' }, { status: 403 });
     }
 
     const partner = session.userAId === user.id ? session.userB : session.userA;
     const isPartnerVIP = partner.membershipTier === 'VIP';
 
+    // 2. Fetch Messages (supporting incremental recovery)
+    const whereClause: any = { chatSessionId };
+    if (since) {
+      whereClause.createdAt = { gt: new Date(since) };
+    }
+
     const messages = await prisma.message.findMany({
-      where: { chatSessionId },
+      where: whereClause,
       orderBy: { createdAt: 'asc' },
       include: {
         sender: {
-          select: {
-            id: true,
-            username: true,
-          },
+          select: { username: true },
         },
       },
     });
 
+    // 3. Return MINIMUM safe public data fields (no sensitive internal IDs/emails/secrets)
     return NextResponse.json({
       sessionStatus: session.status,
       partner: {
@@ -140,6 +180,7 @@ export async function GET(req: Request) {
       },
       messages: messages.map((m) => ({
         id: m.id,
+        clientMessageId: m.clientMessageId,
         chatSessionId: m.chatSessionId,
         senderId: m.senderId,
         senderUsername: m.sender.username,

@@ -15,11 +15,11 @@ export async function GET(req: Request) {
     await prisma.profile.update({
       where: { userId: user.id },
       data: {
-        mood: '😎 Attitude',
+        mood: '',
         moodExpiresAt: null,
       },
     });
-    user.profile.mood = '😎 Attitude';
+    user.profile.mood = '';
     user.profile.moodExpiresAt = null;
   }
 

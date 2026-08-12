@@ -51,7 +51,7 @@ model Profile {
   showGender             Boolean   @default(true)
   preferredGender        String    @default("auto") // "auto", "male", "female", "any"
   personalityPreferences String    @default("") // Comma-separated personality tags (e.g. "Talkative,Funny,Friendly")
-  mood                   String    @default("😎 Attitude") // Current mood emoji + title
+  mood                   String    @default("") // Current mood emoji + title
   showMood               Boolean   @default(true)
   moodExpiresAt          DateTime?
   language               String    @default("english") // "english", "hindi", "spanish", "french", "any"
@@ -97,15 +97,16 @@ model ChatSession {
 }
 
 model Message {
-  id            String       @id @default(uuid())
-  chatSessionId String?
-  senderId      String
-  receiverId    String
-  content       String
-  imageUrl      String?
-  isRead        Boolean      @default(false)
-  isDeleted     Boolean      @default(false)
-  createdAt     DateTime     @default(now())
+  id              String       @id @default(uuid())
+  clientMessageId String?      @unique
+  chatSessionId   String?
+  senderId        String
+  receiverId      String
+  content         String
+  imageUrl        String?
+  isRead          Boolean      @default(false)
+  isDeleted       Boolean      @default(false)
+  createdAt       DateTime     @default(now())
 
   chatSession ChatSession? @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
   sender      User        @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
