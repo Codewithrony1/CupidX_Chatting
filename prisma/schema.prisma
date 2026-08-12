@@ -57,7 +57,9 @@ model Profile {
   language               String    @default("english") // "english", "hindi", "spanish", "french", "any"
   saveChatHistory        Boolean   @default(false)
   interests              String    @default("") // Comma-separated interests
-  avatarUrl              String    @default("/default-avatar.png")
+  avatarType             String    @default("EMOJI") // "EMOJI" or "IMAGE"
+  avatarEmoji            String    @default("😊") // Default avatar emoji
+  avatarUrl              String?   @default(null) // Custom image URL for VIP
   isOnline               Boolean   @default(false)
   lastSeen               DateTime  @default(now())
   themePreference        String    @default("system") // "light", "dark", "system"
