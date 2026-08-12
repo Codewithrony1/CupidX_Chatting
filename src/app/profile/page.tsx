@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { VIP_AVATAR_CATEGORIES } from '@/lib/avatars';
 import AppShell from '@/components/AppShell';
 import BottomSheet from '@/components/ui/BottomSheet';
 import {
@@ -320,30 +321,135 @@ export default function ProfilePage() {
               <p className="text-xs text-pink-200/70 font-semibold">@{user?.username}</p>
             </div>
 
-            {/* Emoji DP Selection Grid */}
-            <div className="space-y-2 pt-2 border-t border-white/10">
+            {/* Avatar Selector Section */}
+            <div className="space-y-3 pt-2 border-t border-white/10">
               <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block text-center">
-                Choose Emoji DP
+                Choose Avatar
               </label>
-              <div className="flex flex-wrap justify-center gap-2">
-                {['😊', '😎', '😄', '🤪', '🥰', '😇', '😈', '🤩', '😌', '🥳', '🤠', '😍', '🫡'].map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => {
-                      setAvatarEmoji(emoji);
-                      setAvatarType('EMOJI');
-                    }}
-                    className={`w-9 h-9 rounded-xl text-xl flex items-center justify-center transition-all cursor-pointer select-none ${
-                      avatarEmoji === emoji && avatarType === 'EMOJI'
-                        ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-md scale-110'
-                        : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-70 hover:opacity-100'
-                    }`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
+
+              {!isVIP ? (
+                /* FREE USER AVATAR PICKER: 😊 and 😎 ONLY */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-center space-x-3">
+                    {['😊', '😎'].map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => {
+                          setAvatarEmoji(emoji);
+                          setAvatarType('EMOJI');
+                        }}
+                        className={`w-12 h-12 rounded-2xl text-2xl flex items-center justify-center transition-all cursor-pointer select-none ${
+                          avatarEmoji === emoji && avatarType === 'EMOJI'
+                            ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-xl scale-110'
+                            : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-white/5 border border-pink-500/20 text-center space-y-1.5">
+                    <p className="text-[11px] font-semibold text-pink-200/80">
+                      💎 Unlock 25+ Premium Avatars & Custom Image DP with CupidX VIP
+                    </p>
+                    <Link
+                      href="/vip"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-slate-950 font-black text-xs shadow-md hover:scale-105 transition-all"
+                    >
+                      <Crown className="w-3.5 h-3.5 fill-current" />
+                      <span>Explore VIP →</span>
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                /* VIP USER CATEGORIZED AVATAR PICKER */
+                <div className="space-y-4">
+                  {/* Avatar Mode Selector (Emoji vs Custom Image) */}
+                  <div className="flex justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAvatarType('EMOJI')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                        avatarType === 'EMOJI'
+                          ? 'bg-pink-500 text-white shadow-md'
+                          : 'bg-white/5 border border-white/10 text-pink-200/60 hover:bg-white/10'
+                      }`}
+                    >
+                      😎 Emoji Avatar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAvatarType('IMAGE');
+                        if (!avatarUrl && !imagePreview) {
+                          fileInputRef.current?.click();
+                        }
+                      }}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                        avatarType === 'IMAGE'
+                          ? 'bg-pink-500 text-white shadow-md'
+                          : 'bg-white/5 border border-white/10 text-pink-200/60 hover:bg-white/10'
+                      }`}
+                    >
+                      🖼 Custom Image
+                    </button>
+                  </div>
+
+                  {avatarType === 'EMOJI' ? (
+                    <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+                      {VIP_AVATAR_CATEGORIES.map((cat) => (
+                        <div key={cat.name} className="space-y-1 text-left">
+                          <span className="text-[10px] font-extrabold text-yellow-300 uppercase tracking-wider block px-1">
+                            {cat.name}
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {cat.emojis.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => setAvatarEmoji(emoji)}
+                                className={`w-9 h-9 rounded-xl text-xl flex items-center justify-center transition-all cursor-pointer select-none ${
+                                  avatarEmoji === emoji
+                                    ? 'bg-gradient-to-tr from-yellow-500 to-amber-400 text-slate-950 border-2 border-yellow-200 shadow-md scale-110'
+                                    : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-70 hover:opacity-100'
+                                }`}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-2 text-center">
+                      <p className="text-xs text-pink-200/80">Custom image is set as active profile picture.</p>
+                      <div className="flex justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="px-3 py-1.5 rounded-xl bg-pink-500/20 text-pink-300 font-bold text-xs border border-pink-500/30 hover:bg-pink-500/30 transition-colors"
+                        >
+                          Replace Image
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAvatarType('EMOJI');
+                            setImagePreview(null);
+                            setAvatarData('');
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold text-xs border border-rose-500/30 hover:bg-rose-500/30 transition-colors"
+                        >
+                          Remove Image
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Display Name & Username Edit Fields */}

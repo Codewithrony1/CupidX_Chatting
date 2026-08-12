@@ -111,29 +111,36 @@ export default function OnboardingPage() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* 1. Emoji DP Selector Grid */}
+          {/* 1. Emoji DP Selector Grid (FREE Users get 😊 and 😎) */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
-              <Smile className="w-4 h-4 text-pink-400" />
-              <span>Choose your Emoji Profile Picture</span>
+            <label className="text-xs font-bold text-pink-200 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Smile className="w-4 h-4 text-pink-400" />
+                <span>Choose your Avatar</span>
+              </span>
+              <span className="text-[10px] text-pink-300/60 font-semibold">2 Free Avatars</span>
             </label>
 
-            <div className="p-3 rounded-2xl bg-white/5 border border-pink-500/20 flex flex-wrap justify-center gap-2">
-              {EMOJI_AVATARS.map((emoji) => (
+            <div className="p-3.5 rounded-2xl bg-white/5 border border-pink-500/20 flex items-center justify-center space-x-4">
+              {['😊', '😎'].map((emoji) => (
                 <button
                   key={emoji}
                   type="button"
                   onClick={() => setSelectedEmoji(emoji)}
-                  className={`w-10 h-10 rounded-xl text-2xl flex items-center justify-center transition-all cursor-pointer select-none ${
+                  className={`w-14 h-14 rounded-2xl text-3xl flex items-center justify-center transition-all cursor-pointer select-none ${
                     selectedEmoji === emoji
-                      ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-lg scale-110'
-                      : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-70 hover:opacity-100'
+                      ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-xl scale-110'
+                      : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-60 hover:opacity-100'
                   }`}
                 >
                   {emoji}
                 </button>
               ))}
             </div>
+
+            <p className="text-[10px] text-pink-300/70 text-center font-medium pt-0.5">
+              💎 25+ Premium Avatars & Custom Image DP available with CupidX VIP
+            </p>
           </div>
 
           {/* 2. Display Name Input */}

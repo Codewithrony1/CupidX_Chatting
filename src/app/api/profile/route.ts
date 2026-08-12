@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { FREE_AVATARS, isVipAvatar } from '@/lib/avatars';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -59,15 +60,16 @@ export async function PUT(req: Request) {
     } = body;
 
     // Strict Server-side VIP Protection for VIP-only features
-    const isUpdatingVIPAvatar = (avatarData && avatarData.startsWith('data:image/')) || avatarType === 'IMAGE';
+    const isUpdatingVIPAvatarEmoji = avatarEmoji !== undefined && isVipAvatar(avatarEmoji);
+    const isUpdatingVIPAvatarImage = (avatarData && avatarData.startsWith('data:image/')) || avatarType === 'IMAGE';
     const isUpdatingVIPPreferences = preferredGender && preferredGender !== 'auto';
     const isUpdatingVIPMood = mood !== undefined || moodDuration !== undefined;
     const isUpdatingVIPPersonality = personalityPreferences !== undefined;
 
-    if ((isUpdatingVIPAvatar || isUpdatingVIPPreferences || isUpdatingVIPMood || isUpdatingVIPPersonality) && !isVIP) {
+    if ((isUpdatingVIPAvatarEmoji || isUpdatingVIPAvatarImage || isUpdatingVIPPreferences || isUpdatingVIPMood || isUpdatingVIPPersonality) && !isVIP) {
       return NextResponse.json(
         {
-          error: 'Custom profile pictures, custom moods, personality styles & targeted discovery preferences require CupidX VIP.',
+          error: 'Premium avatar collection, custom profile pictures, custom moods & targeted discovery preferences require CupidX VIP.',
           isVipRequired: true,
         },
         { status: 403 }
@@ -76,7 +78,7 @@ export async function PUT(req: Request) {
 
     let avatarUrl = avatarUrlPreset !== undefined ? avatarUrlPreset : undefined;
 
-    if (isUpdatingVIPAvatar && isVIP && avatarData) {
+    if (isUpdatingVIPAvatarImage && isVIP && avatarData) {
       const matches = avatarData.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
