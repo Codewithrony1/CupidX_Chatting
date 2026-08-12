@@ -29,6 +29,7 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   try {
+    // 1. Derive User Identity strictly from authenticated Clerk session
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -36,14 +37,13 @@ export async function PUT(req: Request) {
 
     const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const {
       displayName,
       bio,
       showBio,
       age,
       gender,
-      showGender,
       preferredGender,
       personalityPreferences,
       mood,
@@ -59,12 +59,17 @@ export async function PUT(req: Request) {
       avatarUrlPreset,
     } = body;
 
-    // Strict Server-side VIP Protection for VIP-only features
-    const isUpdatingVIPAvatarEmoji = avatarEmoji !== undefined && isVipAvatar(avatarEmoji);
+    // Sanitize basic fields
+    const cleanDisplayName = displayName !== undefined ? displayName.trim().slice(0, 50) : undefined;
+    const cleanBio = bio !== undefined ? bio.trim().slice(0, 500) : undefined;
+    const cleanGender = gender !== undefined ? gender.trim() : undefined;
+
+    // Strict Server-side VIP Protection (Triggers ONLY if active VIP values are passed)
+    const isUpdatingVIPAvatarEmoji = avatarEmoji !== undefined && avatarEmoji !== '' && isVipAvatar(avatarEmoji);
     const isUpdatingVIPAvatarImage = (avatarData && avatarData.startsWith('data:image/')) || avatarType === 'IMAGE';
-    const isUpdatingVIPPreferences = preferredGender && preferredGender !== 'auto';
-    const isUpdatingVIPMood = mood !== undefined || moodDuration !== undefined;
-    const isUpdatingVIPPersonality = personalityPreferences !== undefined;
+    const isUpdatingVIPPreferences = preferredGender !== undefined && preferredGender !== '' && preferredGender !== 'auto';
+    const isUpdatingVIPMood = (mood !== undefined && mood !== '') || (moodDuration !== undefined && moodDuration !== '');
+    const isUpdatingVIPPersonality = personalityPreferences !== undefined && personalityPreferences !== '';
 
     if ((isUpdatingVIPAvatarEmoji || isUpdatingVIPAvatarImage || isUpdatingVIPPreferences || isUpdatingVIPMood || isUpdatingVIPPersonality) && !isVIP) {
       return NextResponse.json(
@@ -96,38 +101,40 @@ export async function PUT(req: Request) {
 
     // Calculate mood expiration timestamp
     let moodExpiresAt: Date | null | undefined = undefined;
-    if (moodDuration === '1hour') {
-      moodExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
-    } else if (moodDuration === '24hours') {
-      moodExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    } else if (moodDuration === 'never') {
-      moodExpiresAt = null;
+    if (isVIP) {
+      if (moodDuration === '1hour') {
+        moodExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      } else if (moodDuration === '24hours') {
+        moodExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      } else if (moodDuration === 'never') {
+        moodExpiresAt = null;
+      }
     }
 
     // Update User.displayName if provided
-    if (displayName && displayName.trim()) {
+    if (cleanDisplayName) {
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          displayName: displayName.trim(),
-          fullName: displayName.trim(),
+          displayName: cleanDisplayName,
+          fullName: cleanDisplayName,
         },
       });
     }
 
+    // Update Profile record
     const updatedProfile = await prisma.profile.update({
       where: { userId: user.id },
       data: {
-        bio: bio !== undefined ? bio : undefined,
+        bio: cleanBio !== undefined ? cleanBio : undefined,
         showBio: showBio !== undefined ? Boolean(showBio) : undefined,
         age: age !== undefined ? parseInt(age.toString(), 10) : undefined,
-        gender: gender !== undefined ? gender : undefined,
-        showGender: showGender !== undefined ? Boolean(showGender) : undefined,
+        gender: cleanGender !== undefined ? cleanGender : undefined,
         preferredGender: preferredGender !== undefined ? preferredGender : undefined,
-        personalityPreferences: personalityPreferences !== undefined ? personalityPreferences : undefined,
-        mood: mood !== undefined ? mood : undefined,
+        personalityPreferences: isVIP && personalityPreferences !== undefined ? personalityPreferences : undefined,
+        mood: isVIP && mood !== undefined ? mood : undefined,
         showMood: showMood !== undefined ? Boolean(showMood) : undefined,
-        moodExpiresAt: moodExpiresAt !== undefined ? moodExpiresAt : undefined,
+        moodExpiresAt: isVIP && moodExpiresAt !== undefined ? moodExpiresAt : undefined,
         language: language !== undefined ? language : undefined,
         saveChatHistory: saveChatHistory !== undefined ? Boolean(saveChatHistory) : undefined,
         interests: interests !== undefined ? interests : undefined,
@@ -139,6 +146,7 @@ export async function PUT(req: Request) {
     });
 
     return NextResponse.json({
+      success: true,
       message: 'Profile updated successfully',
       profile: updatedProfile,
     });

@@ -498,23 +498,13 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* SECTION 2: IDENTITY & GENDER (Requirement 6) */}
+          {/* SECTION 2: IDENTITY & GENDER */}
           <div className="glass-romantic rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black text-white flex items-center gap-2">
                 <User className="w-4 h-4 text-purple-400" />
                 <span>Identity & Gender</span>
               </h3>
-
-              <label className="flex items-center space-x-1.5 text-xs text-pink-200/80 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showGender}
-                  onChange={(e) => setShowGender(e.target.checked)}
-                  className="rounded accent-pink-500"
-                />
-                <span>Show on profile</span>
-              </label>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
