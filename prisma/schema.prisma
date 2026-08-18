@@ -47,7 +47,9 @@ model Profile {
   bio                    String    @default("")
   showBio                Boolean   @default(true)
   age                    Int       @default(18)
-  gender                 String    @default("unspecified") // "male", "female", "nonbinary", "prefer_not_to_say", "unspecified"
+  gender                 String    @default("unspecified") // "male", "female", "non-binary", "prefer_not_to_say", "unspecified"
+  ageGenderConfirmed     Boolean   @default(false)
+  ageGenderChangesCount  Int       @default(0)
   showGender             Boolean   @default(true)
   preferredGender        String    @default("auto") // "auto", "male", "female", "any"
   personalityPreferences String    @default("") // Comma-separated personality tags (e.g. "Talkative,Funny,Friendly")

@@ -76,10 +76,13 @@ export default function ProfilePage() {
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   // Form States
-  const [displayName, setDisplayName] = useState(user?.fullName || '');
+  const [displayName, setDisplayName] = useState(user?.displayName || user?.fullName || '');
   const [bio, setBio] = useState(user?.profile?.bio || '');
   const [showBio, setShowBio] = useState(user?.profile?.showBio ?? true);
-  const [gender, setGender] = useState(user?.profile?.gender || 'unspecified');
+  const [age, setAge] = useState<number>(user?.profile?.age || 18);
+  const [gender, setGender] = useState<string>(user?.profile?.gender || 'unspecified');
+  const ageGenderConfirmed = user?.profile?.ageGenderConfirmed ?? false;
+  const ageGenderChangesCount = user?.profile?.ageGenderChangesCount ?? 0;
   const [showGender, setShowGender] = useState(user?.profile?.showGender ?? true);
   const [preferredGender, setPreferredGender] = useState(user?.profile?.preferredGender || 'auto');
   const [mood, setMood] = useState(user?.profile?.mood || '');
@@ -107,6 +110,7 @@ export default function ProfilePage() {
       setDisplayName(user.displayName || user.fullName || '');
       setBio(user.profile.bio || '');
       setShowBio(user.profile.showBio ?? true);
+      setAge(user.profile.age || 18);
       setGender(user.profile.gender || 'unspecified');
       setShowGender(user.profile.showGender ?? true);
       setPreferredGender(user.profile.preferredGender || 'auto');
@@ -204,6 +208,7 @@ export default function ProfilePage() {
           displayName,
           bio,
           showBio,
+          age,
           gender,
           showGender,
           preferredGender,
@@ -498,35 +503,78 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* SECTION 2: IDENTITY & GENDER */}
+          {/* SECTION 2: IDENTITY, AGE & GENDER */}
           <div className="glass-romantic rounded-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black text-white flex items-center gap-2">
                 <User className="w-4 h-4 text-purple-400" />
-                <span>Identity & Gender</span>
+                <span>Identity, Age & Gender</span>
               </h3>
+
+              {isVIP ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-1">
+                  <Crown className="w-3 h-3 fill-current" /> Unlimited Edits 💎
+                </span>
+              ) : (
+                <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold border ${
+                  ageGenderChangesCount >= 1
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                }`}>
+                  {ageGenderChangesCount >= 1 ? '0 edits left (Max 1 Free edit)' : '1 edit left (Free)'}
+                </span>
+              )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {[
-                { id: 'male', label: 'Male' },
-                { id: 'female', label: 'Female' },
-                { id: 'nonbinary', label: 'Non-binary' },
-                { id: 'prefer_not_to_say', label: 'Prefer not to say' },
-              ].map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => setGender(g.id)}
-                  className={`p-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
-                    gender === g.id
-                      ? 'bg-pink-500/25 border-pink-400 text-white shadow-md'
-                      : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
-                  }`}
-                >
-                  {g.label}
-                </button>
-              ))}
+            {/* Age Input */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Age (18+)</label>
+              <input
+                type="number"
+                min={18}
+                max={99}
+                value={age}
+                onChange={(e) => {
+                  if (!isVIP && ageGenderConfirmed && ageGenderChangesCount >= 1 && parseInt(e.target.value) !== user?.profile?.age) {
+                    setShowVipLockModal(true);
+                    return;
+                  }
+                  setAge(Math.min(99, Math.max(18, parseInt(e.target.value) || 18)));
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-bold"
+              />
+            </div>
+
+            {/* Gender Selection */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Gender</label>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {[
+                  { id: 'male', label: 'Male' },
+                  { id: 'female', label: 'Female' },
+                  { id: 'non-binary', label: 'Non-binary' },
+                  { id: 'prefer_not_to_say', label: 'Prefer not to say' },
+                ].map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => {
+                      if (!isVIP && ageGenderConfirmed && ageGenderChangesCount >= 1 && g.id !== user?.profile?.gender) {
+                        setShowVipLockModal(true);
+                        return;
+                      }
+                      setGender(g.id);
+                    }}
+                    className={`p-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
+                      gender === g.id
+                        ? 'bg-pink-500/25 border-pink-400 text-white shadow-md'
+                        : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

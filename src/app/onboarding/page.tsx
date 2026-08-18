@@ -3,10 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { Heart, Sparkles, Check, X, Loader2, User, Smile, ArrowRight } from 'lucide-react';
+import { Heart, Sparkles, Check, X, Loader2, User, Smile, ArrowRight, Shield } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
-
-const EMOJI_AVATARS = ['😊', '😎', '😄', '🤪', '🥰', '😇', '😈', '🤩', '😌', '🥳', '🤠', '😍', '🫡'];
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -15,6 +13,8 @@ export default function OnboardingPage() {
   const [displayName, setDisplayName] = useState(user?.displayName || user?.fullName || '');
   const [username, setUsername] = useState(user?.username || '');
   const [selectedEmoji, setSelectedEmoji] = useState(user?.profile?.avatarEmoji || '😊');
+  const [age, setAge] = useState<number>(user?.profile?.age && user.profile.age >= 18 ? user.profile.age : 18);
+  const [gender, setGender] = useState<string>(user?.profile?.gender && user.profile.gender !== 'unspecified' ? user.profile.gender : 'male');
 
   const [checking, setChecking] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -22,9 +22,15 @@ export default function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
 
-  // If user already has username set and completed onboarding, redirect to dashboard
+  // Redirect to dashboard ONLY if username is set AND age/gender confirmed
   useEffect(() => {
-    if (user && user.username && !user.username.startsWith('user_')) {
+    if (
+      user &&
+      user.username &&
+      !user.username.startsWith('user_') &&
+      user.profile?.ageGenderConfirmed === true &&
+      user.profile?.gender !== 'unspecified'
+    ) {
       router.replace('/dashboard');
     }
   }, [user, router]);
@@ -76,6 +82,8 @@ export default function OnboardingPage() {
           username: username.trim(),
           displayName: displayName.trim() || username.trim(),
           avatarEmoji: selectedEmoji,
+          age,
+          gender,
         }),
       });
 
@@ -98,7 +106,7 @@ export default function OnboardingPage() {
     <div className="min-h-screen bg-[#0d0014] text-white flex flex-col justify-center items-center p-4 relative overflow-x-hidden">
       <FloatingHearts />
 
-      <div className="w-full max-w-md glass-romantic rounded-3xl p-6 sm:p-8 space-y-6 z-10 border border-pink-500/30 shadow-2xl shadow-pink-500/20">
+      <div className="w-full max-w-md glass-romantic rounded-3xl p-6 sm:p-8 space-y-6 z-10 border border-pink-500/30 shadow-2xl shadow-pink-500/20 my-6">
         
         {/* Header Branding */}
         <div className="text-center space-y-2">
@@ -106,12 +114,12 @@ export default function OnboardingPage() {
             <Heart className="w-7 h-7 text-white fill-white animate-pulse" />
           </div>
           <h1 className="text-2xl font-black tracking-tight text-white">Welcome to CupidX 👋</h1>
-          <p className="text-xs text-pink-200/80">Choose your display name, unique username & emoji DP</p>
+          <p className="text-xs text-pink-200/80">Complete mandatory profile setup & Age/Gender confirmation</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* 1. Emoji DP Selector Grid (FREE Users get 😊 and 😎) */}
+          {/* 1. Emoji DP Selector Grid */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-pink-200 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -154,7 +162,7 @@ export default function OnboardingPage() {
               placeholder="e.g. Rony Rai"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-2 focus:ring-pink-500/50"
+              className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-2 focus:ring-pink-500/50 font-semibold"
             />
             <p className="text-[10px] text-pink-200/50">Your name visible to people you chat with.</p>
           </div>
@@ -191,6 +199,59 @@ export default function OnboardingPage() {
             <p className="text-[10px] text-pink-200/50">3–20 characters. Letters, numbers and _ allowed.</p>
           </div>
 
+          {/* 4. Mandatory Age & Gender Confirmation Gate */}
+          <div className="space-y-3 pt-3 border-t border-pink-500/20">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-extrabold text-pink-200 flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-emerald-400" />
+                <span>Mandatory Age & Gender Gate</span>
+              </label>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-extrabold border border-emerald-500/30">
+                Required 🔒
+              </span>
+            </div>
+
+            {/* Age Selection */}
+            <div className="space-y-1">
+              <label className="text-[11px] text-pink-200/80 font-bold">Your Age (18+)</label>
+              <input
+                type="number"
+                min={18}
+                max={99}
+                value={age}
+                onChange={(e) => setAge(Math.min(99, Math.max(18, parseInt(e.target.value) || 18)))}
+                required
+                className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white font-bold"
+              />
+            </div>
+
+            {/* Gender Selection */}
+            <div className="space-y-1">
+              <label className="text-[11px] text-pink-200/80 font-bold">Your Gender</label>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {[
+                  { label: 'Male', val: 'male' },
+                  { label: 'Female', val: 'female' },
+                  { label: 'Non-binary', val: 'non-binary' },
+                  { label: 'Prefer not to say', val: 'prefer_not_to_say' },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    type="button"
+                    onClick={() => setGender(item.val)}
+                    className={`py-2.5 px-3 rounded-xl font-bold border transition-all cursor-pointer ${
+                      gender === item.val
+                        ? 'bg-pink-500 text-white border-pink-400 shadow-md scale-[1.02]'
+                        : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {errorMsg && (
             <div className="p-3 rounded-2xl bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 font-bold text-center">
               {errorMsg}
@@ -207,7 +268,7 @@ export default function OnboardingPage() {
               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
               <>
-                <span>Complete Profile & Start Chatting</span>
+                <span>Confirm Age, Gender & Start Chatting</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}

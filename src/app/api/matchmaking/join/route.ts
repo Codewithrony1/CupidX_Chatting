@@ -18,6 +18,17 @@ export async function POST(req: Request) {
     const preferredGender = body.preferredGender || userProfile?.preferredGender || 'auto';
     const language = body.language || userProfile?.language || 'english';
 
+    // Mandatory Age & Gender Gate Check
+    if (!userProfile?.ageGenderConfirmed || userProfile?.gender === 'unspecified') {
+      return NextResponse.json(
+        {
+          error: 'Mandatory Age & Gender confirmation required before joining random chat.',
+          requiresConfirmation: true,
+        },
+        { status: 403 }
+      );
+    }
+
     // 1. Check if user already has an ACTIVE ChatSession
     const activeChat = await prisma.chatSession.findFirst({
       where: {

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Heart, Shield, User, MessageCircle, Lock, ArrowRight, FastForward, CheckCircle2, Sparkles, Crown, X } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
+import CupidXLogo from '@/components/CupidXLogo';
 import { useAuth } from '@/context/AuthContext';
 import { useUser } from '@clerk/nextjs';
 
@@ -47,13 +48,8 @@ export default function Home() {
 
       {/* Header */}
       <header className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-4 flex justify-between items-center z-10">
-        <Link href="/" className="flex items-center space-x-2 sm:space-x-2.5 group shrink-0">
-          <div className="relative w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-pink-600 via-rose-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-pink-500/40 group-hover:scale-110 transition-transform">
-            <Heart className="w-5 h-5 sm:w-6 sm:h-6 text-white fill-white animate-pulse" />
-          </div>
-          <span className="text-xl sm:text-2xl font-black tracking-wider bg-gradient-to-r from-white via-pink-100 to-rose-300 bg-clip-text text-transparent">
-            Cupidx
-          </span>
+        <Link href="/" className="flex items-center group shrink-0">
+          <CupidXLogo size="md" />
         </Link>
         
         <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">

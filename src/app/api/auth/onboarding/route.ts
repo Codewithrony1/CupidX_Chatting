@@ -43,7 +43,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { username, displayName: inputDisplayName, avatarEmoji: inputAvatarEmoji } = body;
+    const { username, displayName: inputDisplayName, avatarEmoji: inputAvatarEmoji, age: inputAge, gender: inputGender } = body;
 
     if (!username) {
       return NextResponse.json({ error: 'Username is required' }, { status: 400 });
@@ -52,6 +52,8 @@ export async function POST(req: Request) {
     const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
     const cleanDisplayName = (inputDisplayName || '').trim() || cleanUsername;
     const selectedEmoji = inputAvatarEmoji || '😊';
+    const parsedAge = inputAge ? Math.min(99, Math.max(18, parseInt(inputAge.toString(), 10))) : 18;
+    const cleanGender = inputGender ? inputGender.toString().trim().toLowerCase() : 'unspecified';
 
     const validation = usernameSchema.safeParse(cleanUsername);
     if (!validation.success) {
@@ -110,6 +112,9 @@ export async function POST(req: Request) {
             update: {
               avatarType: 'EMOJI',
               avatarEmoji: selectedEmoji,
+              age: parsedAge,
+              gender: cleanGender,
+              ageGenderConfirmed: true,
             },
           },
         },
@@ -156,6 +161,9 @@ export async function POST(req: Request) {
             avatarType: 'EMOJI',
             avatarEmoji: selectedEmoji,
             avatarUrl: null,
+            age: parsedAge,
+            gender: cleanGender,
+            ageGenderConfirmed: true,
             bio: 'Hey there! I am using Cupidx.',
           },
         },

@@ -17,6 +17,8 @@ interface User {
     showBio?: boolean;
     age: number;
     gender: string;
+    ageGenderConfirmed?: boolean;
+    ageGenderChangesCount?: number;
     showGender?: boolean;
     preferredGender?: string;
     personalityPreferences?: string;

@@ -122,14 +122,50 @@ export async function PUT(req: Request) {
       });
     }
 
+    // Check Age & Gender Edit Limits
+    const currentAge = user.profile?.age;
+    const currentGender = user.profile?.gender;
+    const isAgeConfirmed = user.profile?.ageGenderConfirmed ?? false;
+    const currentChangesCount = user.profile?.ageGenderChangesCount ?? 0;
+
+    const parsedAge = age !== undefined ? parseInt(age.toString(), 10) : undefined;
+    const isAgeChanged = parsedAge !== undefined && parsedAge !== currentAge;
+    const isGenderChanged = cleanGender !== undefined && cleanGender !== currentGender;
+
+    let nextChangesCount = currentChangesCount;
+    let nextConfirmedState = isAgeConfirmed;
+
+    if (isAgeChanged || isGenderChanged) {
+      if (isAgeConfirmed) {
+        // Post-confirmation edit attempt
+        if (!isVIP) {
+          if (currentChangesCount >= 1) {
+            return NextResponse.json(
+              {
+                error: 'Free users can only change age or gender once after initial confirmation. Upgrade to VIP for unlimited edits!',
+                isVipRequired: true,
+              },
+              { status: 403 }
+            );
+          }
+          nextChangesCount = currentChangesCount + 1;
+        }
+      } else {
+        // Initial confirmation via profile save
+        nextConfirmedState = true;
+      }
+    }
+
     // Update Profile record
     const updatedProfile = await prisma.profile.update({
       where: { userId: user.id },
       data: {
         bio: cleanBio !== undefined ? cleanBio : undefined,
         showBio: showBio !== undefined ? Boolean(showBio) : undefined,
-        age: age !== undefined ? parseInt(age.toString(), 10) : undefined,
+        age: parsedAge !== undefined ? parsedAge : undefined,
         gender: cleanGender !== undefined ? cleanGender : undefined,
+        ageGenderConfirmed: nextConfirmedState,
+        ageGenderChangesCount: nextChangesCount,
         preferredGender: preferredGender !== undefined ? preferredGender : undefined,
         personalityPreferences: isVIP && personalityPreferences !== undefined ? personalityPreferences : undefined,
         mood: isVIP && mood !== undefined ? mood : undefined,
