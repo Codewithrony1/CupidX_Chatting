@@ -1,23 +1,37 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+
+interface OfflineMessage {
+  eventName: string;
+  data: any;
+  timestamp: number;
+}
 
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
+  emitThrottledTyping: (partnerSocketId?: string) => void;
+  sendBufferedMessage: (eventName: string, data: any) => void;
 }
 
 const SocketContext = createContext<SocketContextType>({
   socket: null,
   isConnected: false,
+  emitThrottledTyping: () => {},
+  sendBufferedMessage: () => {},
 });
 
 export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+
+  // Offline message buffer queue for zero message drops during network blips
+  const offlineQueueRef = useRef<OfflineMessage[]>([]);
+  const lastTypingEmitRef = useRef<number>(0);
 
   useEffect(() => {
     if (!user) {
@@ -38,21 +52,39 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         const { token } = await res.json();
 
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3001';
-        
+
         activeSocket = io(socketUrl, {
           auth: { token },
-          transports: ['websocket'],
-          reconnectionAttempts: 5,
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          randomizationFactor: 0.5,
         });
 
         activeSocket.on('connect', () => {
           setIsConnected(true);
-          console.log('Connected to CupidX Socket Server');
+          console.log('⚡ Connected to CupidX Real-Time WebSocket');
+
+          // Flush offline message buffer upon connection/reconnection
+          if (offlineQueueRef.current.length > 0 && activeSocket) {
+            console.log(`Flushing ${offlineQueueRef.current.length} buffered offline messages...`);
+            const pending = [...offlineQueueRef.current];
+            offlineQueueRef.current = [];
+            pending.forEach((item) => {
+              activeSocket?.emit(item.eventName, item.data);
+            });
+          }
         });
 
-        activeSocket.on('disconnect', () => {
+        activeSocket.on('disconnect', (reason) => {
           setIsConnected(false);
-          console.log('Disconnected from CupidX Socket Server');
+          console.log('Socket disconnected:', reason);
+        });
+
+        activeSocket.on('connect_error', (err) => {
+          console.warn('Socket reconnection attempt error:', err.message);
         });
 
         setSocket(activeSocket);
@@ -70,8 +102,42 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [user]);
 
+  // Throttled typing indicator emit (at most once every 300ms)
+  const emitThrottledTyping = useCallback(
+    (partnerSocketId?: string) => {
+      const now = Date.now();
+      if (now - lastTypingEmitRef.current >= 300) {
+        lastTypingEmitRef.current = now;
+        if (socket && isConnected) {
+          socket.emit('typing', { partnerSocketId });
+        }
+      }
+    },
+    [socket, isConnected]
+  );
+
+  // Buffer messages if offline so they send the instant socket reconnects
+  const sendBufferedMessage = useCallback(
+    (eventName: string, data: any) => {
+      if (socket && isConnected) {
+        socket.emit(eventName, data);
+      } else {
+        console.log(`Socket offline. Buffering message: ${eventName}`);
+        offlineQueueRef.current.push({ eventName, data, timestamp: Date.now() });
+      }
+    },
+    [socket, isConnected]
+  );
+
   return (
-    <SocketContext.Provider value={{ socket, isConnected }}>
+    <SocketContext.Provider
+      value={{
+        socket,
+        isConnected,
+        emitThrottledTyping,
+        sendBufferedMessage,
+      }}
+    >
       {children}
     </SocketContext.Provider>
   );

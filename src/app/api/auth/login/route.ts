@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { comparePassword, signToken } from '@/lib/auth';
+import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '@/lib/rateLimit';
 
 export async function POST(req: Request) {
   try {
@@ -11,6 +12,18 @@ export async function POST(req: Request) {
     }
 
     const cleanUsername = username.toLowerCase().trim();
+    const clientIp = req.headers.get('x-forwarded-for') || '127.0.0.1';
+    
+    // Account-based + IP dual rate limiting key
+    const rateLimitKey = `login:${cleanUsername}:${clientIp}`;
+
+    const limitCheck = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
+    if (limitCheck.isBlocked) {
+      return NextResponse.json(
+        { error: `Too many failed login attempts. Please try again in ${limitCheck.retryAfterSeconds} seconds.` },
+        { status: 429 }
+      );
+    }
 
     const user = await prisma.user.findUnique({
       where: { username: cleanUsername },
@@ -18,6 +31,7 @@ export async function POST(req: Request) {
     });
 
     if (!user) {
+      recordFailedAttempt(rateLimitKey);
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 400 });
     }
 
@@ -31,8 +45,12 @@ export async function POST(req: Request) {
 
     const match = await comparePassword(password, user.passwordHash);
     if (!match) {
+      recordFailedAttempt(rateLimitKey);
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 400 });
     }
+
+    // Success! Clear rate limit record
+    clearRateLimit(rateLimitKey);
 
     const token = signToken({
       userId: user.id,

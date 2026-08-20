@@ -6,9 +6,11 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
 import AppShell from '@/components/AppShell';
-import ProfilePreviewSheet from '@/components/chat/ProfilePreviewSheet';
-import NextConfirmModal from '@/components/chat/NextConfirmModal';
-import BottomSheet from '@/components/ui/BottomSheet';
+import dynamic from 'next/dynamic';
+
+const ProfilePreviewSheet = dynamic(() => import('@/components/chat/ProfilePreviewSheet'), { ssr: false });
+const NextConfirmModal = dynamic(() => import('@/components/chat/NextConfirmModal'), { ssr: false });
+const BottomSheet = dynamic(() => import('@/components/ui/BottomSheet'), { ssr: false });
 import {
   Heart,
   Globe,
