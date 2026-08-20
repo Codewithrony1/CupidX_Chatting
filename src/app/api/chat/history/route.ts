@@ -38,27 +38,32 @@ export async function GET(req: Request) {
     const isBlocked = !!blockRelation;
     const blockedByMe = blockRelation ? blockRelation.blockerId === user.id : false;
 
-    // Fetch messages ordered chronologically
-    const messages = await prisma.message.findMany({
+    // Find chat session and fetch messages
+    const session = await prisma.chatSession.findFirst({
       where: {
         OR: [
-          { senderId: user.id, receiverId: targetUser.id },
-          { senderId: targetUser.id, receiverId: user.id }
-        ]
+          { userAId: user.id, userBId: targetUser.id },
+          { userAId: targetUser.id, userBId: user.id },
+        ],
       },
-      orderBy: {
-        createdAt: 'asc'
-      },
-      include: {
-        sender: {
-          select: {
-            id: true,
-            username: true,
-            fullName: true,
-          }
-        }
-      }
+      orderBy: { startedAt: 'desc' },
     });
+
+    const messages = session
+      ? await prisma.message.findMany({
+          where: { chatSessionId: session.id },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                username: true,
+                fullName: true,
+              },
+            },
+          },
+        })
+      : [];
 
     return NextResponse.json({
       messages,

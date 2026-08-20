@@ -43,7 +43,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { username, displayName: inputDisplayName, avatarEmoji: inputAvatarEmoji, age: inputAge, gender: inputGender } = body;
+    const { username, displayName: inputDisplayName, avatarEmoji: inputAvatarEmoji, age: inputAge, gender: inputGender, dob: inputDob, email: inputEmail } = body;
 
     if (!username) {
       return NextResponse.json({ error: 'Username is required' }, { status: 400 });
@@ -52,8 +52,22 @@ export async function POST(req: Request) {
     const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
     const cleanDisplayName = (inputDisplayName || '').trim() || cleanUsername;
     const selectedEmoji = inputAvatarEmoji || '😊';
-    const parsedAge = inputAge ? Math.min(99, Math.max(18, parseInt(inputAge.toString(), 10))) : 18;
     const cleanGender = inputGender ? inputGender.toString().trim().toLowerCase() : 'unspecified';
+    const parsedDob = inputDob ? new Date(inputDob) : null;
+    
+    // Calculate age from DOB if available
+    let parsedAge = 18;
+    if (parsedDob && !isNaN(parsedDob.getTime())) {
+      const today = new Date();
+      let calculatedAge = today.getFullYear() - parsedDob.getFullYear();
+      const m = today.getMonth() - parsedDob.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < parsedDob.getDate())) {
+        calculatedAge--;
+      }
+      parsedAge = Math.min(99, Math.max(18, calculatedAge));
+    } else if (inputAge) {
+      parsedAge = Math.min(99, Math.max(18, parseInt(inputAge.toString(), 10)));
+    }
 
     const validation = usernameSchema.safeParse(cleanUsername);
     if (!validation.success) {
@@ -108,12 +122,16 @@ export async function POST(req: Request) {
           username: cleanUsername,
           displayName: cleanDisplayName,
           fullName: cleanDisplayName,
+          gender: cleanGender,
+          dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
+          email: inputEmail ? inputEmail.trim() : undefined,
           profile: {
             update: {
               avatarType: 'EMOJI',
               avatarEmoji: selectedEmoji,
               age: parsedAge,
               gender: cleanGender,
+              dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
               ageGenderConfirmed: true,
             },
           },
@@ -154,6 +172,9 @@ export async function POST(req: Request) {
         username: cleanUsername,
         fullName: cleanDisplayName,
         displayName: cleanDisplayName,
+        gender: cleanGender,
+        dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : null,
+        email: inputEmail ? inputEmail.trim() : null,
         passwordHash: '',
         role: 'USER',
         profile: {
@@ -163,6 +184,7 @@ export async function POST(req: Request) {
             avatarUrl: null,
             age: parsedAge,
             gender: cleanGender,
+            dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : null,
             ageGenderConfirmed: true,
             bio: 'Hey there! I am using Cupidx.',
           },

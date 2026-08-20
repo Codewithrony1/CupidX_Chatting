@@ -122,38 +122,58 @@ export async function PUT(req: Request) {
       });
     }
 
-    // Check Age & Gender Edit Limits
+    // Check Age, DOB & Gender Edit Limits & Grace Period
     const currentAge = user.profile?.age;
     const currentGender = user.profile?.gender;
     const isAgeConfirmed = user.profile?.ageGenderConfirmed ?? false;
     const currentChangesCount = user.profile?.ageGenderChangesCount ?? 0;
 
     const parsedAge = age !== undefined ? parseInt(age.toString(), 10) : undefined;
+    const parsedDob = body.dob ? new Date(body.dob) : undefined;
     const isAgeChanged = parsedAge !== undefined && parsedAge !== currentAge;
     const isGenderChanged = cleanGender !== undefined && cleanGender !== currentGender;
+    const isDobChanged = parsedDob !== undefined;
+
+    // Admin Lock Override Check
+    if ((isGenderChanged || isDobChanged || isAgeChanged) && user.genderDobLocked) {
+      return NextResponse.json(
+        { error: 'Gender and Date of Birth have been locked by Admin moderation.' },
+        { status: 403 }
+      );
+    }
+
+    // 48-Hour Free Correction Window Calculation
+    const hoursSinceSignup = (Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60);
+    const isWithinGracePeriod = hoursSinceSignup <= 48;
 
     let nextChangesCount = currentChangesCount;
     let nextConfirmedState = isAgeConfirmed;
 
-    if (isAgeChanged || isGenderChanged) {
-      if (isAgeConfirmed) {
-        // Post-confirmation edit attempt
-        if (!isVIP) {
-          if (currentChangesCount >= 1) {
-            return NextResponse.json(
-              {
-                error: 'Free users can only change age or gender once after initial confirmation. Upgrade to VIP for unlimited edits!',
-                isVipRequired: true,
-              },
-              { status: 403 }
-            );
-          }
-          nextChangesCount = currentChangesCount + 1;
-        }
-      } else {
-        // Initial confirmation via profile save
-        nextConfirmedState = true;
+    if (isAgeChanged || isGenderChanged || isDobChanged) {
+      if (isAgeConfirmed && !isWithinGracePeriod && !isVIP) {
+        return NextResponse.json(
+          {
+            error: 'Gender and Date of Birth are locked on profile for Free users after 48 hours. Upgrade to VIP for unlimited edits!',
+            isVipRequired: true,
+          },
+          { status: 403 }
+        );
       }
+      nextConfirmedState = true;
+      if (!isWithinGracePeriod && !isVIP) {
+        nextChangesCount = currentChangesCount + 1;
+      }
+    }
+
+    // Update User model fields if gender/dob updated
+    if (cleanGender || (parsedDob && !isNaN(parsedDob.getTime()))) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          gender: cleanGender !== undefined ? cleanGender : undefined,
+          dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
+        },
+      });
     }
 
     // Update Profile record

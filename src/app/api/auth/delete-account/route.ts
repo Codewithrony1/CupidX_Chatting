@@ -15,9 +15,7 @@ export async function DELETE(req: Request) {
     await prisma.$transaction([
       // Delete user's active/ended chat sessions & messages
       prisma.message.deleteMany({
-        where: {
-          OR: [{ senderId: userId }, { receiverId: userId }],
-        },
+        where: { senderId: userId },
       }),
       prisma.chatSession.deleteMany({
         where: {

@@ -11,18 +11,18 @@ import {
   Loader2,
   ArrowLeft,
   Sparkles,
-  Camera,
-  RefreshCw,
   Clock,
   ChevronRight,
   Lock,
-  Zap,
+  Copy,
+  ExternalLink,
+  Coins,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import confetti from 'canvas-confetti';
 
-export default function ManualUpiPayPage() {
+export default function VipPayPage() {
   const router = useRouter();
 
   // Payment details
@@ -31,29 +31,34 @@ export default function ManualUpiPayPage() {
   const [planName, setPlanName] = useState<string>('VIP Membership');
   const merchantName = 'Lexino Enterprises';
 
-  // State management
+  // Method selection: Option A (qr) vs Option B (btc)
+  const [payMethod, setPayMethod] = useState<'qr' | 'btc'>('qr');
+  const btcAddress = 'bc1q9v4kyf8q5x2k8l5y7x9w3p6r2n8z0a1b2c3d4e';
+  const btcAmount = '0.0011 BTC';
+  const [copiedBtc, setCopiedBtc] = useState<boolean>(false);
+
+  // Stage management
   const [stage, setStage] = useState<'PAY_SCREEN' | 'FORM_SCREEN' | 'STATUS_SCREEN'>('PAY_SCREEN');
   const [status, setStatus] = useState<'PENDING_PAYMENT' | 'UNDER_REVIEW' | 'PAID' | 'REJECTED'>('PENDING_PAYMENT');
   const [rejectionReason, setRejectionReason] = useState<string>('');
 
-  // Form states
+  // Form inputs
   const [utrNumber, setUtrNumber] = useState<string>('');
+  const [txHash, setTxHash] = useState<string>('');
   const [screenshotData, setScreenshotData] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
-  // Loading & error states
+  // Loading & Error states
   const [loadingPayment, setLoadingPayment] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize or fetch manual UPI payment record
   useEffect(() => {
     async function initPayment() {
       try {
         setLoadingPayment(true);
-        // Create or get active manual payment
         const res = await fetch('/api/payments/manual/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -95,11 +100,7 @@ export default function ManualUpiPayPage() {
           if (data.payment.status !== status) {
             setStatus(data.payment.status);
             if (data.payment.status === 'PAID') {
-              confetti({
-                particleCount: 100,
-                spread: 70,
-                origin: { y: 0.6 },
-              });
+              confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
             } else if (data.payment.status === 'REJECTED') {
               setRejectionReason(data.payment.rejectionReason || 'Verification failed');
             }
@@ -113,13 +114,18 @@ export default function ManualUpiPayPage() {
     return () => clearInterval(interval);
   }, [paymentId, stage, status]);
 
-  // Handle Image File Selection
+  const handleCopyBtc = () => {
+    navigator.clipboard.writeText(btcAddress);
+    setCopiedBtc(true);
+    setTimeout(() => setCopiedBtc(false), 2000);
+  };
+
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMsg('Image size must be less than 10MB');
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('Image size exceeds 5MB limit.');
       return;
     }
 
@@ -132,36 +138,30 @@ export default function ManualUpiPayPage() {
     reader.readAsDataURL(file);
   };
 
-  // Submit UTR & Screenshot
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = utrNumber.trim().replace(/\s+/g, '');
-
-    if (!clean || clean.length < 10) {
-      setErrorMsg('Please enter a valid 10-18 digit UTR / Reference number.');
-      return;
-    }
-
-    setSubmitting(true);
     setErrorMsg('');
+    setSubmitting(true);
 
     try {
-      const res = await fetch('/api/payments/manual/submit', {
+      const endpoint = payMethod === 'btc' ? '/api/payments/vip-request' : '/api/payments/manual/submit';
+      const bodyPayload =
+        payMethod === 'btc'
+          ? { method: 'btc', txHash: txHash.trim(), screenshotData, amount }
+          : { paymentId, utrNumber: utrNumber.trim(), screenshotData };
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentId,
-          utrNumber: clean,
-          screenshotData,
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
       const data = await res.json();
-      if (res.ok && data.success) {
+      if (res.ok && (data.success || data.request)) {
         setStatus('UNDER_REVIEW');
         setStage('STATUS_SCREEN');
       } else {
-        setErrorMsg(data.error || 'Submission failed. Please check UTR and try again.');
+        setErrorMsg(data.error || 'Submission failed. Please check your payment details.');
       }
     } catch (err) {
       console.error(err);
@@ -173,11 +173,9 @@ export default function ManualUpiPayPage() {
 
   return (
     <div className="min-h-[100dvh] bg-[#0A1128] text-white flex flex-col items-center justify-center p-3 sm:p-6 relative overflow-x-hidden font-sans">
-      
-      {/* Background Razorpay-style ambient glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-lg h-96 bg-gradient-to-b from-[#0066FF]/20 via-[#0052CC]/10 to-transparent blur-3xl pointer-events-none" />
 
-      {/* Top Header Navigation */}
+      {/* Header */}
       <div className="w-full max-w-md flex items-center justify-between py-3 z-10 mb-2">
         <Link
           href="/dashboard"
@@ -189,22 +187,21 @@ export default function ManualUpiPayPage() {
 
         <div className="flex items-center space-x-1.5 bg-blue-500/10 text-blue-400 text-[11px] font-bold px-3 py-1.5 rounded-full border border-blue-500/20">
           <ShieldCheck className="w-3.5 h-3.5" />
-          <span>Razorpay Verified Merchant</span>
+          <span>Verified Merchant & VIP Gate</span>
         </div>
       </div>
 
-      {/* Main Payment Card Container */}
+      {/* Main Card */}
       <motion.div
         layout
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
         className="w-full max-w-md bg-white text-slate-900 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-blue-500/20 border border-slate-100 z-10 relative overflow-hidden"
       >
-        {/* Top Razorpay Banner Header */}
+        {/* Merchant & Amount Summary */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Merchant Name</span>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Merchant / Brand</span>
             <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-1.5">
               {merchantName}
               <CheckCircle2 className="w-4 h-4 text-blue-600 fill-blue-600/10" />
@@ -217,6 +214,33 @@ export default function ManualUpiPayPage() {
           </div>
         </div>
 
+        {/* Method Toggle Tabs (Option A: QR Code vs Option B: Bitcoin) */}
+        {stage === 'PAY_SCREEN' && (
+          <div className="grid grid-cols-2 gap-2 mb-5 p-1 bg-slate-100 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setPayMethod('qr')}
+              className={`py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                payMethod === 'qr' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <QrCode className="w-4 h-4" />
+              <span>UPI / QR Code</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPayMethod('btc')}
+              className={`py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                payMethod === 'btc' ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <Coins className="w-4 h-4" />
+              <span>Bitcoin (BTC)</span>
+            </button>
+          </div>
+        )}
+
         {loadingPayment ? (
           <div className="py-16 flex flex-col items-center justify-center space-y-3">
             <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
@@ -225,70 +249,93 @@ export default function ManualUpiPayPage() {
         ) : (
           <AnimatePresence mode="wait">
             
-            {/* STAGE 1: SCAN & PAY SCREEN */}
+            {/* STAGE 1: OPTION A (UPI QR) or OPTION B (BITCOIN) */}
             {stage === 'PAY_SCREEN' && (
               <motion.div
-                key="pay_screen"
-                initial={{ opacity: 0, scale: 0.95 }}
+                key={payMethod}
+                initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
+                exit={{ opacity: 0, scale: 0.96 }}
                 className="space-y-6 text-center"
               >
-                {/* Plan Badge */}
-                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-extrabold border border-blue-200">
-                  <Sparkles className="w-3.5 h-3.5 text-blue-600 fill-blue-600" />
-                  <span>{planName}</span>
-                </div>
+                {payMethod === 'qr' ? (
+                  /* OPTION A: UPI QR CODE */
+                  <div className="space-y-5">
+                    <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-extrabold border border-blue-200">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-600 fill-blue-600" />
+                      <span>{planName} • 30 Days Access</span>
+                    </div>
 
-                {/* Floating Razorpay QR Code Container */}
-                <motion.div
-                  animate={{ y: [0, -6, 0] }}
-                  transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                  className="relative w-64 h-80 mx-auto rounded-2xl overflow-hidden shadow-xl border-4 border-slate-100 bg-white p-2 flex flex-col items-center justify-center cursor-pointer group"
-                >
-                  <img
-                    src="/lexino-qr.jpg"
-                    alt="Lexino Enterprises Razorpay QR Code"
-                    className="w-full h-full object-contain rounded-xl transition-transform group-hover:scale-105"
-                  />
-                </motion.div>
+                    <motion.div
+                      animate={{ y: [0, -5, 0] }}
+                      transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+                      className="relative w-64 h-80 mx-auto rounded-2xl overflow-hidden shadow-xl border-4 border-slate-100 bg-white p-2 flex flex-col items-center justify-center"
+                    >
+                      <img
+                        src="/lexino-qr.jpg"
+                        alt="Lexino Enterprises QR Code"
+                        className="w-full h-full object-contain rounded-xl"
+                      />
+                    </motion.div>
 
-                {/* Text Indicator */}
-                <div className="space-y-1">
-                  <p className="text-xs font-black tracking-wider text-slate-700 uppercase">
-                    SCAN & PAY WITH ANY UPI APP
-                  </p>
-                  <p className="text-[11px] text-slate-400 font-medium">
-                    Google Pay • PhonePe • Paytm • BHIM • Cred
-                  </p>
-                </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-black tracking-wider text-slate-700 uppercase">
+                        SCAN & PAY WITH ANY UPI APP
+                      </p>
+                      <p className="text-[11px] text-slate-400 font-medium">GPay • PhonePe • Paytm • BHIM</p>
+                    </div>
+                  </div>
+                ) : (
+                  /* OPTION B: BITCOIN */
+                  <div className="space-y-5">
+                    <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-extrabold border border-amber-200">
+                      <Coins className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Exact Amount: {btcAmount} (₹{amount})</span>
+                    </div>
 
-                {/* Supported Payment App Logos */}
-                <div className="flex items-center justify-center space-x-4 py-2 border-y border-slate-100">
-                  <span className="text-xs font-black text-blue-600">G Pay</span>
-                  <span className="text-xs font-black text-purple-700">PhonePe</span>
-                  <span className="text-xs font-black text-sky-500">Paytm</span>
-                  <span className="text-xs font-black text-emerald-600">BHIM UPI</span>
-                </div>
+                    {/* BTC Wallet Address Box */}
+                    <div className="p-4 rounded-2xl bg-slate-900 text-white space-y-2 text-left relative">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                        BTC Wallet Address
+                      </span>
+                      <p className="font-mono text-xs font-bold text-amber-400 break-all">{btcAddress}</p>
+                      <button
+                        type="button"
+                        onClick={handleCopyBtc}
+                        className="w-full py-2 rounded-xl bg-amber-500/20 text-amber-300 font-bold text-xs hover:bg-amber-500/30 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>{copiedBtc ? 'Copied to Clipboard! ✓' : 'Copy BTC Address'}</span>
+                      </button>
+                    </div>
 
-                {/* Primary Morph Button: "I have already paid" */}
+                    <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-left space-y-1">
+                      <p className="text-xs font-bold text-amber-900">Bitcoin Payment Notes:</p>
+                      <p className="text-[11px] text-amber-800 leading-relaxed">
+                        Send exact amount <span className="font-mono font-bold">{btcAmount}</span> to address above. After sending, copy your 64-character Transaction Hash (txid) and click below.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Primary Button */}
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.96 }}
                   onClick={() => setStage('FORM_SCREEN')}
                   className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-xl shadow-blue-500/30 text-sm flex items-center justify-center space-x-2 transition-all cursor-pointer"
                 >
-                  <span>I have already paid</span>
+                  <span>{payMethod === 'qr' ? 'I have already paid' : 'Submit BTC Tx Hash'}</span>
                   <ChevronRight className="w-4 h-4" />
                 </motion.button>
 
                 <p className="text-[10px] text-slate-400 font-medium">
-                  After payment, click button above to submit UTR for instant access.
+                  VIP subscription lasts 30 days from approval. No partial refunds for unused days.
                 </p>
               </motion.div>
             )}
 
-            {/* STAGE 2: UTR SUBMISSION FORM */}
+            {/* STAGE 2: FORM SUBMISSION */}
             {stage === 'FORM_SCREEN' && (
               <motion.form
                 key="form_screen"
@@ -300,41 +347,64 @@ export default function ManualUpiPayPage() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-base font-black text-slate-900">Payment Verification</h3>
-                    <p className="text-xs text-slate-500">Submit UTR number to complete payment</p>
+                    <h3 className="text-base font-black text-slate-900">
+                      {payMethod === 'qr' ? 'UPI Verification' : 'Bitcoin Verification'}
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      {payMethod === 'qr' ? 'Submit UTR number or screenshot' : 'Submit transaction hash'}
+                    </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setStage('PAY_SCREEN')}
                     className="text-xs font-bold text-blue-600 hover:underline"
                   >
-                    Back to QR
+                    Back to Payment
                   </button>
                 </div>
 
-                {/* UTR Input Field */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">
-                    12-Digit UTR / UPI Reference No. <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={18}
-                    placeholder="e.g. 423984920192"
-                    value={utrNumber}
-                    onChange={(e) => setUtrNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-                    required
-                    className="w-full px-4 py-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/40 uppercase tracking-wider"
-                  />
-                  <p className="text-[10px] text-slate-400 font-medium">
-                    Found in your UPI app payment details (12 numeric/alphanumeric digits).
-                  </p>
-                </div>
+                {/* UPI UTR Field */}
+                {payMethod === 'qr' ? (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">
+                      12-Digit UTR / UPI Reference No.
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={18}
+                      placeholder="e.g. 423984920192"
+                      value={utrNumber}
+                      onChange={(e) => setUtrNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                      className="w-full px-4 py-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/40 uppercase tracking-wider"
+                    />
+                  </div>
+                ) : (
+                  /* BTC Tx Hash Field */
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">
+                      Bitcoin Tx Hash (txid) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"
+                      value={txHash}
+                      onChange={(e) => setTxHash(e.target.value)}
+                      required
+                      className="w-full px-4 py-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-amber-600/40"
+                    />
+                    <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1 pt-1">
+                      <span>Verified on</span>
+                      <a href="https://mempool.space" target="_blank" rel="noreferrer" className="text-blue-600 font-bold underline flex items-center gap-0.5">
+                        mempool.space <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    </p>
+                  </div>
+                )}
 
-                {/* Screenshot Upload (Optional but Recommended) */}
+                {/* Screenshot Upload */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-black text-slate-700 uppercase tracking-wider block">
-                    Payment Screenshot <span className="text-slate-400 font-normal">(Optional)</span>
+                    Proof Screenshot <span className="text-slate-400 font-normal">(Max 5MB)</span>
                   </label>
 
                   <div
@@ -354,50 +424,39 @@ export default function ManualUpiPayPage() {
                           <UploadCloud className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-slate-700">Click to upload screenshot</p>
-                          <p className="text-[10px] text-slate-400">PNG, JPG up to 10MB</p>
+                          <p className="text-xs font-bold text-slate-700">Click to upload screenshot proof</p>
+                          <p className="text-[10px] text-slate-400">JPG, PNG up to 5MB</p>
                         </div>
                       </>
                     )}
                   </div>
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
-                  />
+                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
                 </div>
 
                 {errorMsg && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2"
-                  >
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
                     <span>{errorMsg}</span>
                   </motion.div>
                 )}
 
-                {/* Submit Form Button */}
                 <motion.button
                   whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.98 }}
                   type="submit"
-                  disabled={submitting || !utrNumber.trim()}
-                  className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white shadow-xl shadow-blue-500/30 text-sm flex items-center justify-center space-x-2 transition-all disabled:opacity-40 cursor-pointer"
+                  disabled={submitting}
+                  className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 text-white shadow-xl shadow-blue-500/30 text-sm flex items-center justify-center space-x-2 transition-all cursor-pointer"
                 >
                   {submitting ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Submitting Payment...</span>
+                      <span>Submitting Request...</span>
                     </>
                   ) : (
                     <>
                       <Lock className="w-4 h-4" />
-                      <span>Submit for Instant Verification</span>
+                      <span>Submit Payment Proof</span>
                     </>
                   )}
                 </motion.button>
@@ -412,7 +471,6 @@ export default function ManualUpiPayPage() {
                 animate={{ opacity: 1, scale: 1 }}
                 className="space-y-6 text-center py-2"
               >
-                {/* UNDER REVIEW STATE */}
                 {status === 'UNDER_REVIEW' && (
                   <div className="space-y-4">
                     <motion.div
@@ -426,18 +484,14 @@ export default function ManualUpiPayPage() {
                     <div className="space-y-1">
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-800 font-extrabold text-xs">
                         <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                        UNDER REVIEW
+                        PAYMENT SUBMITTED • UNDER REVIEW
                       </span>
                       <h3 className="text-lg font-black text-slate-900 tracking-tight pt-2">
                         Payment Under Verification
                       </h3>
                       <p className="text-xs text-slate-500 font-medium max-w-xs mx-auto">
-                        Your UTR <span className="font-mono font-bold text-slate-900">{utrNumber}</span> is being verified against Lexino Enterprises merchant account.
+                        Your VIP request is submitted and usually reviewed within 24 hours.
                       </p>
-                    </div>
-
-                    <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 font-medium">
-                      ⏱ Estimated Verification Time: <span className="font-bold text-slate-900">2 - 5 Minutes</span>. Access will unlock automatically once approved.
                     </div>
 
                     <button
@@ -449,46 +503,28 @@ export default function ManualUpiPayPage() {
                   </div>
                 )}
 
-                {/* PAID (SUCCESS) STATE */}
                 {status === 'PAID' && (
                   <div className="space-y-4">
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ type: 'spring', stiffness: 200 }}
-                      className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/20 border-2 border-emerald-400"
-                    >
+                    <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 200 }} className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/20 border-2 border-emerald-400">
                       <CheckCircle2 className="w-10 h-10" />
                     </motion.div>
 
                     <div className="space-y-1">
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-extrabold text-xs">
-                        ✓ PAYMENT SUCCESSFUL
+                        ✓ VIP APPROVED
                       </span>
-                      <h3 className="text-xl font-black text-slate-900 tracking-tight pt-2">
-                        VIP Access Unlocked! 🎉
-                      </h3>
-                      <p className="text-xs text-slate-500 font-medium">
-                        Payment of ₹{amount.toFixed(2)} to Lexino Enterprises verified successfully.
-                      </p>
+                      <h3 className="text-xl font-black text-slate-900 tracking-tight pt-2">VIP Access Unlocked! 🎉</h3>
+                      <p className="text-xs text-slate-500 font-medium">Your 30-day VIP membership is now active.</p>
                     </div>
 
-                    <button
-                      onClick={() => router.push('/dashboard')}
-                      className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xl shadow-emerald-500/30 text-sm hover:scale-105 transition-transform"
-                    >
+                    <button onClick={() => router.push('/dashboard')} className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xl shadow-emerald-500/30 text-sm hover:scale-105 transition-transform">
                       Start Using VIP Features Now →
                     </button>
                   </div>
                 )}
 
-                {/* REJECTED STATE */}
                 {status === 'REJECTED' && (
-                  <motion.div
-                    animate={{ x: [-8, 8, -6, 6, 0] }}
-                    transition={{ duration: 0.5 }}
-                    className="space-y-4"
-                  >
+                  <motion.div animate={{ x: [-8, 8, -6, 6, 0] }} transition={{ duration: 0.5 }} className="space-y-4">
                     <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-lg shadow-rose-500/20 border border-rose-300">
                       <AlertCircle className="w-8 h-8" />
                     </div>
@@ -497,22 +533,14 @@ export default function ManualUpiPayPage() {
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 text-rose-800 font-extrabold text-xs">
                         ✕ PAYMENT REJECTED
                       </span>
-                      <h3 className="text-lg font-black text-slate-900 tracking-tight pt-2">
-                        Verification Failed
-                      </h3>
+                      <h3 className="text-lg font-black text-slate-900 tracking-tight pt-2">Verification Failed</h3>
                       <p className="text-xs text-rose-600 font-bold max-w-xs mx-auto">
-                        Reason: {rejectionReason || 'Invalid UTR or payment not received.'}
+                        Reason: {rejectionReason || 'Invalid proof or payment not received.'}
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setStatus('PENDING_PAYMENT');
-                        setStage('FORM_SCREEN');
-                      }}
-                      className="w-full py-3.5 rounded-2xl font-bold bg-blue-600 text-white text-xs hover:bg-blue-700 transition-colors"
-                    >
-                      Try Submitting UTR Again
+                    <button onClick={() => { setStatus('PENDING_PAYMENT'); setStage('FORM_SCREEN'); }} className="w-full py-3.5 rounded-2xl font-bold bg-blue-600 text-white text-xs hover:bg-blue-700 transition-colors">
+                      Try Submitting Again
                     </button>
                   </motion.div>
                 )}
@@ -525,11 +553,9 @@ export default function ManualUpiPayPage() {
 
       </motion.div>
 
-      {/* Footer Branding */}
-      <p className="text-[11px] text-slate-500 mt-6 font-medium z-10 flex items-center gap-1">
-        <span>Powered by Lexino Enterprises Manual Payment Verification</span>
+      <p className="text-[11px] text-slate-500 mt-6 font-medium z-10">
+        Lexino Enterprises VIP Payment Verification
       </p>
-
     </div>
   );
 }

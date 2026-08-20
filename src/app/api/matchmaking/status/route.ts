@@ -86,7 +86,7 @@ export async function GET(req: Request) {
           userId: { not: user.id },
           updatedAt: { gte: STALE_THRESHOLD },
         },
-        orderBy: [{ isVIP: 'desc' }, { joinedAt: 'asc' }],
+        orderBy: [{ joinedAt: 'asc' }],
         take: 5,
       });
 

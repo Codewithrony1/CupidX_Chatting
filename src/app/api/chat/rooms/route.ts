@@ -9,83 +9,69 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Retrieve all messages for the user ordered by newest
-    const messages = await prisma.message.findMany({
+    // Retrieve active/past chat sessions for the user ordered by startedAt newest
+    const sessions = await prisma.chatSession.findMany({
       where: {
-        OR: [
-          { senderId: user.id },
-          { receiverId: user.id }
-        ]
+        OR: [{ userAId: user.id }, { userBId: user.id }],
       },
       orderBy: {
-        createdAt: 'desc'
+        startedAt: 'desc',
       },
       include: {
-        sender: {
+        userA: {
           select: {
             id: true,
             username: true,
             fullName: true,
-            profile: { select: { avatarUrl: true, isOnline: true } }
-          }
+            displayName: true,
+            profile: { select: { avatarUrl: true, avatarEmoji: true, isOnline: true } },
+          },
         },
-        receiver: {
+        userB: {
           select: {
             id: true,
             username: true,
             fullName: true,
-            profile: { select: { avatarUrl: true, isOnline: true } }
-          }
-        }
-      }
+            displayName: true,
+            profile: { select: { avatarUrl: true, avatarEmoji: true, isOnline: true } },
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
     });
 
-    const recentChatsMap = new Map();
+    const rooms = sessions.map((session) => {
+      const partner = session.userAId === user.id ? session.userB : session.userA;
+      const lastMessage = session.messages[0] || null;
 
-    for (const msg of messages) {
-      const otherUser = msg.senderId === user.id ? msg.receiver : msg.sender;
-      if (!otherUser) continue;
-
-      if (!recentChatsMap.has(otherUser.id)) {
-        recentChatsMap.set(otherUser.id, {
-          userId: otherUser.id,
-          username: otherUser.username,
-          fullName: otherUser.fullName,
-          avatarUrl: otherUser.profile?.avatarUrl || '/default-avatar.png',
-          isOnline: otherUser.profile?.isOnline || false,
-          lastMessage: {
-            id: msg.id,
-            content: msg.isDeleted ? 'This message was deleted' : msg.content,
-            imageUrl: msg.imageUrl,
-            createdAt: msg.createdAt,
-            isRead: msg.isRead,
-            senderId: msg.senderId,
-          }
-        });
-      }
-    }
-
-    const recentChats = Array.from(recentChatsMap.values());
-
-    // Fetch blocks to filter out
-    const blocks = await prisma.block.findMany({
-      where: {
-        OR: [
-          { blockerId: user.id },
-          { blockedId: user.id }
-        ]
-      }
+      return {
+        id: session.id,
+        partner: {
+          id: partner.id,
+          username: partner.username,
+          displayName: partner.displayName || partner.fullName,
+          avatarUrl: partner.profile?.avatarUrl || null,
+          avatarEmoji: partner.profile?.avatarEmoji || '😊',
+          isOnline: partner.profile?.isOnline || false,
+        },
+        lastMessage: lastMessage
+          ? {
+              content: lastMessage.content,
+              createdAt: lastMessage.createdAt.toISOString(),
+              senderId: lastMessage.senderId,
+            }
+          : null,
+        startedAt: session.startedAt.toISOString(),
+        status: session.status,
+      };
     });
 
-    const blockedUserIds = new Set(
-      blocks.map(b => b.blockerId === user.id ? b.blockedId : b.blockerId)
-    );
-
-    const filteredChats = recentChats.filter(chat => !blockedUserIds.has(chat.userId));
-
-    return NextResponse.json({ rooms: filteredChats });
+    return NextResponse.json({ rooms });
   } catch (error) {
-    console.error('Get recent chats error:', error);
+    console.error('Chat rooms fetch error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

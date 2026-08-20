@@ -9,10 +9,58 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { targetUserId, reason } = await req.json();
+    const { targetUserId, reason, chatSessionId } = await req.json();
 
     if (!targetUserId || !reason) {
       return NextResponse.json({ error: 'Missing targetUserId or reason' }, { status: 400 });
+    }
+
+    // Capture snapshot of active conversation messages before wiping ephemeral chat
+    let snapshotMessages: string | null = null;
+    try {
+      let activeSession = null;
+      if (chatSessionId) {
+        activeSession = await prisma.chatSession.findUnique({
+          where: { id: chatSessionId },
+          include: {
+            messages: {
+              orderBy: { createdAt: 'asc' },
+              take: 50,
+            },
+          },
+        });
+      }
+
+      if (!activeSession) {
+        activeSession = await prisma.chatSession.findFirst({
+          where: {
+            OR: [
+              { userAId: user.id, userBId: targetUserId },
+              { userAId: targetUserId, userBId: user.id },
+            ],
+          },
+          orderBy: { startedAt: 'desc' },
+          include: {
+            messages: {
+              orderBy: { createdAt: 'asc' },
+              take: 50,
+            },
+          },
+        });
+      }
+
+      if (activeSession && activeSession.messages.length > 0) {
+        snapshotMessages = JSON.stringify(
+          activeSession.messages.map((m) => ({
+            id: m.id,
+            senderId: m.senderId,
+            content: m.content,
+            createdAt: m.createdAt,
+          }))
+        );
+      }
+    } catch (e) {
+      console.warn('Snapshot capture fallback:', e);
     }
 
     const report = await prisma.report.create({
@@ -20,12 +68,13 @@ export async function POST(req: Request) {
         reporterId: user.id,
         reportedUserId: targetUserId,
         reason,
+        snapshotMessages,
         status: 'PENDING',
-      }
+      },
     });
 
     return NextResponse.json({
-      message: 'Report submitted successfully',
+      message: 'Report submitted successfully. Conversation snapshot captured for review.',
       report,
     });
   } catch (error) {

@@ -100,8 +100,7 @@ export async function POST(req: Request) {
         userAId: user.id,
         userBId: targetUser.id,
         status: 'ACTIVE',
-        lastActivityAt: new Date(),
-        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2 hours expiration
+        startedAt: new Date(),
       },
     });
 

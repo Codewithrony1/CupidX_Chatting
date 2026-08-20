@@ -1,60 +1,29 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser(req);
-    if (!user || user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const admin = await getCurrentUser(req);
+    if (!admin || admin.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
     const reports = await prisma.report.findMany({
+      orderBy: { createdAt: 'desc' },
       include: {
         reporter: {
-          select: { id: true, username: true, fullName: true }
+          select: { username: true, displayName: true },
         },
         reported: {
-          select: { id: true, username: true, fullName: true, isSuspended: true }
-        }
+          select: { username: true, displayName: true, gender: true, dob: true },
+        },
       },
-      orderBy: {
-        createdAt: 'desc'
-      }
     });
 
     return NextResponse.json({ reports });
   } catch (error) {
-    console.error('Admin GET reports error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-  }
-}
-
-export async function PUT(req: Request) {
-  try {
-    const user = await getCurrentUser(req);
-    if (!user || user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
-    const body = await req.json();
-    const { reportId, status } = body;
-
-    if (!reportId || !status) {
-      return NextResponse.json({ error: 'reportId and status are required' }, { status: 400 });
-    }
-
-    const updatedReport = await prisma.report.update({
-      where: { id: reportId },
-      data: { status }
-    });
-
-    return NextResponse.json({
-      message: 'Report status updated successfully',
-      report: updatedReport
-    });
-  } catch (error) {
-    console.error('Admin PUT report error:', error);
+    console.error('Error fetching admin reports:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

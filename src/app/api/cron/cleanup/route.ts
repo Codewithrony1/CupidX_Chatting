@@ -4,15 +4,14 @@ import { prisma } from '@/lib/prisma';
 export async function GET(req: Request) {
   try {
     const now = new Date();
-    // Default 2-hour inactivity cutoff
-    const inactiveCutoff = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    // Default 24-hour cutoff for ephemeral sessions
+    const oldCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    // Find expired or long-inactive sessions
+    // Find ended or old ephemeral sessions
     const expiredSessions = await prisma.chatSession.findMany({
       where: {
         OR: [
-          { expiresAt: { lt: now } },
-          { lastActivityAt: { lt: inactiveCutoff } },
+          { startedAt: { lt: oldCutoff } },
           { status: 'ENDED' },
         ],
       },
@@ -42,7 +41,7 @@ export async function GET(req: Request) {
       timestamp: now.toISOString(),
     });
   } catch (error) {
-    console.error('Error running automatic chat cleanup job:', error);
+    console.error('Error during cleanup cron:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

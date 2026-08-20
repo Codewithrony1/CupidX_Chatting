@@ -37,7 +37,7 @@ export async function POST(req: Request) {
 
     // 3. Idempotency Check: Prevent duplicate messages during retries
     if (clientMessageId) {
-      const existingMessage = await prisma.message.findUnique({
+      const existingMessage = await prisma.message.findFirst({
         where: { clientMessageId },
         include: {
           sender: {
@@ -56,7 +56,6 @@ export async function POST(req: Request) {
             chatSessionId: existingMessage.chatSessionId,
             senderId: existingMessage.senderId,
             senderUsername: existingMessage.sender.username,
-            receiverId: existingMessage.receiverId,
             content: existingMessage.content,
             imageUrl: existingMessage.imageUrl,
             createdAt: existingMessage.createdAt.toISOString(),
@@ -73,7 +72,6 @@ export async function POST(req: Request) {
         chatSessionId,
         clientMessageId: clientMessageId || null,
         senderId: user.id, // Strictly derived from server Clerk session
-        receiverId,
         content: (content || '').trim(),
         imageUrl: imageUrl || null,
       },
@@ -86,12 +84,6 @@ export async function POST(req: Request) {
       },
     });
 
-    // 5. Update last activity timestamp
-    await prisma.chatSession.update({
-      where: { id: chatSessionId },
-      data: { lastActivityAt: new Date() },
-    });
-
     return NextResponse.json({
       success: true,
       message: {
@@ -100,7 +92,6 @@ export async function POST(req: Request) {
         chatSessionId: message.chatSessionId,
         senderId: message.senderId,
         senderUsername: message.sender.username,
-        receiverId: message.receiverId,
         content: message.content,
         imageUrl: message.imageUrl,
         createdAt: message.createdAt.toISOString(),

@@ -116,7 +116,7 @@ export async function POST(req: Request) {
         userId: { notIn: excludeUserIds },
         updatedAt: { gte: STALE_THRESHOLD },
       },
-      orderBy: [{ isVIP: 'desc' }, { joinedAt: 'asc' }],
+      orderBy: [{ joinedAt: 'asc' }],
       take: 10,
     });
 
@@ -164,7 +164,6 @@ export async function POST(req: Request) {
               gender,
               preferredGender,
               language,
-              isVIP,
             },
             create: {
               userId: user.id,
@@ -174,7 +173,6 @@ export async function POST(req: Request) {
               gender,
               preferredGender,
               language,
-              isVIP,
             },
           });
 
@@ -227,7 +225,6 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
-        isVIP,
         updatedAt: new Date(),
       },
       create: {
@@ -236,7 +233,6 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
-        isVIP,
       },
     });
 
