@@ -460,15 +460,23 @@ export default function ProfilePage() {
             {/* Display Name & Username Edit Fields */}
             <div className="space-y-3 text-left pt-2">
               <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Cupidx Display Name</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Cupidx Display Name</label>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-300 font-bold border border-pink-500/20">
+                    {`Name changes left today: ${Math.max(0, 4 - ((user?.profile as any)?.nameChangesCount ?? 0))}/4`}
+                  </span>
+                </div>
                 <input
                   type="text"
+                  maxLength={50}
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="e.g. Rony Rai"
                   className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-semibold"
                 />
-                <p className="text-[10px] text-pink-200/60">Your display name shown on chat headers and profile sheets.</p>
+                <p className="text-[10px] text-pink-200/60">
+                  Your display name shown in chat. You can change your name up to 4 times per day.
+                </p>
               </div>
 
               <div className="space-y-1">

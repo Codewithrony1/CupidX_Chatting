@@ -77,6 +77,9 @@ model Profile {
   isOnline               Boolean   @default(false)
   lastSeen               DateTime  @default(now())
   themePreference        String    @default("system") // "light", "dark", "system"
+  randomChatIntroSeen    Boolean   @default(false)
+  nameChangesCount       Int       @default(0)
+  nameChangesDate        DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 }

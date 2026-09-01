@@ -9,11 +9,11 @@ const isPublicRoute = createRouteMatcher([
   '/privacy(.*)',
   '/terms(.*)',
   '/sso-callback(.*)',
-  '/onboarding(.*)',
   '/api/auth/login(.*)',
   '/api/auth/register(.*)',
-  '/api/auth/onboarding(.*)',
+  '/api/auth/logout(.*)',
   '/api/auth/me(.*)',
+  '/api/payment/qr(.*)',
 ]);
 
 const isAdminRoute = createRouteMatcher([
@@ -26,14 +26,14 @@ export default clerkMiddleware(async (auth, req) => {
     return;
   }
 
-  // Admin Route Protection
+  const isApiRoute = req.nextUrl.pathname.startsWith('/api/');
+
+  // 1. Admin Route Protection
   if (isAdminRoute(req)) {
-    // 1. If running in local admin mode or development, allow access
     if (process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production') {
       return;
     }
 
-    // 2. In production, strictly check Clerk session claims role: "admin"
     const sessionAuth = await auth();
     const claims = sessionAuth.sessionClaims as any;
     const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
@@ -56,20 +56,21 @@ export default clerkMiddleware(async (auth, req) => {
       } catch (e) {}
     }
 
-    // Unauthorized non-admin hitting /admin in production gets redirected
+    if (isApiRoute) {
+      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    }
     const redirectUrl = new URL('/dashboard', req.url);
     return NextResponse.redirect(redirectUrl);
   }
 
-  // Fast-path: Check local token cookie FIRST to avoid remote Edge Middleware latency (~0.1ms)
+  // 2. Protected Routes (Client Pages + APIs)
   const tokenCookie = req.cookies.get('token')?.value;
-  if (tokenCookie) {
-    return;
-  }
-
-  // Fallback: Check Clerk session
   const { userId } = await auth();
-  if (!userId) {
+
+  if (!userId && !tokenCookie) {
+    if (isApiRoute) {
+      return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
+    }
     const loginUrl = new URL('/login', req.url);
     return NextResponse.redirect(loginUrl);
   }

@@ -297,29 +297,24 @@ export default function SelfHostedVipModal({
                   </div>
                 </button>
 
-                {/* International Payment Option */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedRegion('international');
-                    setStep('QR_VIEW');
-                  }}
-                  className="w-full p-4 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-blue-500/5 hover:from-blue-500/20 hover:to-indigo-500/20 border-2 border-blue-500/40 hover:border-blue-500 text-left transition-all cursor-pointer flex items-center justify-between group"
-                >
+                {/* International Payment Option (Disabled / Currently Unavailable) */}
+                <div className="w-full p-4 rounded-2xl bg-white/[0.02] border border-white/10 opacity-60 text-left relative flex items-center justify-between cursor-not-allowed">
                   <div className="flex items-center space-x-3">
-                    <span className="text-2xl">🌍</span>
+                    <span className="text-2xl opacity-50">🌍</span>
                     <div>
-                      <h5 className="text-xs font-black text-white group-hover:text-blue-300 transition-colors">
-                        International Payment
-                      </h5>
-                      <p className="text-[11px] text-slate-400">PayPal, Wise, Global QR & Cards</p>
+                      <div className="flex items-center gap-2">
+                        <h5 className="text-xs font-bold text-slate-300">International Payment</h5>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[9px] font-extrabold uppercase border border-slate-700">
+                          Coming Soon
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5">PayPal / Wise (Currently unavailable)</p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="text-base font-black text-blue-400">${pricing.international.monthly}</span>
-                    <span className="text-[10px] text-slate-400 block">/ 30 days</span>
+                    <span className="text-xs font-bold text-slate-500">Currently Offline</span>
                   </div>
-                </button>
+                </div>
               </div>
             </div>
           )}

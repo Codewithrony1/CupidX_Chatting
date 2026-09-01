@@ -9,23 +9,30 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const payments = await prisma.payment.findMany({
-      where: { userId: user.id },
+    const requests = await prisma.paymentRequest.findMany({
+      where: {
+        OR: [
+          { userId: user.id },
+          ...(user.clerkUserId ? [{ clerkUserId: user.clerkUserId }] : []),
+        ],
+      },
       orderBy: { createdAt: 'desc' },
       take: 20,
-      select: {
-        id: true,
-        razorpayOrderId: true,
-        razorpayPaymentId: true,
-        amount: true,
-        currency: true,
-        plan: true,
-        status: true,
-        createdAt: true,
-      },
     });
 
-    return NextResponse.json({ payments });
+    return NextResponse.json({
+      payments: requests.map((p) => ({
+        id: p.id,
+        requestId: p.requestId,
+        paymentId: p.paymentId,
+        amount: p.amount,
+        currency: p.currency,
+        plan: p.plan,
+        region: p.region,
+        status: p.status,
+        createdAt: p.createdAt.toISOString(),
+      })),
+    });
   } catch (error: any) {
     console.error('Fetch Payment History Error:', error);
     return NextResponse.json({ error: 'Failed to fetch payment history' }, { status: 500 });

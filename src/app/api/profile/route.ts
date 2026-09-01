@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { FREE_AVATARS, isVipAvatar } from '@/lib/avatars';
+import { isVipAvatar } from '@/lib/avatars';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -20,11 +20,32 @@ export async function GET(req: Request) {
         moodExpiresAt: null,
       },
     });
-    user.profile.mood = '';
-    user.profile.moodExpiresAt = null;
+    if (user.profile) {
+      user.profile.mood = '';
+      user.profile.moodExpiresAt = null;
+    }
   }
 
-  return NextResponse.json({ profile: user.profile, subscription: user.subscription, membershipTier: user.membershipTier });
+  // Calculate remaining name changes today (max 4 per day)
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const lastChangeStr = user.profile?.nameChangesDate
+    ? new Date(user.profile.nameChangesDate).toISOString().slice(0, 10)
+    : null;
+
+  const currentDayCount = lastChangeStr === todayStr ? (user.profile?.nameChangesCount ?? 0) : 0;
+  const remainingNameChanges = Math.max(0, 4 - currentDayCount);
+
+  return NextResponse.json({
+    profile: {
+      ...user.profile,
+      nameChangesCount: currentDayCount,
+      remainingNameChangesToday: remainingNameChanges,
+      randomChatIntroSeen: user.profile?.randomChatIntroSeen ?? false,
+    },
+    subscription: user.subscription,
+    membershipTier: user.membershipTier,
+    is_vip: user.is_vip,
+  });
 }
 
 export async function PUT(req: Request) {
@@ -57,14 +78,72 @@ export async function PUT(req: Request) {
       avatarEmoji,
       avatarData,
       avatarUrlPreset,
+      randomChatIntroSeen,
     } = body;
 
-    // Sanitize basic fields
-    const cleanDisplayName = displayName !== undefined ? displayName.trim().slice(0, 50) : undefined;
-    const cleanBio = bio !== undefined ? bio.trim().slice(0, 500) : undefined;
-    const cleanGender = gender !== undefined ? gender.trim() : undefined;
+    // Handle "Don't show again" persistent flag update
+    if (randomChatIntroSeen !== undefined && Object.keys(body).length <= 2) {
+      const updated = await prisma.profile.update({
+        where: { userId: user.id },
+        data: { randomChatIntroSeen: Boolean(randomChatIntroSeen) },
+      });
+      return NextResponse.json({ success: true, profile: updated });
+    }
 
-    // Strict Server-side VIP Protection (Triggers ONLY if active VIP values are passed)
+    // 2. Name Change Limit: Max 4 per calendar day
+    let cleanDisplayName: string | undefined = undefined;
+    let nextNameChangesCount = user.profile?.nameChangesCount ?? 0;
+    let nextNameChangesDate: Date | undefined = undefined;
+
+    if (displayName !== undefined) {
+      const trimmed = displayName.trim();
+
+      // Sanitization & Security Checks
+      if (trimmed.length < 2 || trimmed.length > 50) {
+        return NextResponse.json(
+          { error: 'Display name must be between 2 and 50 characters.' },
+          { status: 400 }
+        );
+      }
+      if (/<[^>]*>|script|javascript:/i.test(trimmed)) {
+        return NextResponse.json(
+          { error: 'Invalid characters in display name.' },
+          { status: 400 }
+        );
+      }
+
+      // If name is actually changing
+      const currentName = user.displayName || user.fullName || user.username;
+      if (trimmed !== currentName) {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const lastChangeStr = user.profile?.nameChangesDate
+          ? new Date(user.profile.nameChangesDate).toISOString().slice(0, 10)
+          : null;
+
+        const countToday = lastChangeStr === todayStr ? (user.profile?.nameChangesCount ?? 0) : 0;
+
+        if (countToday >= 4) {
+          return NextResponse.json(
+            {
+              error: "You have reached today's name change limit (4/4). You can change your name again tomorrow.",
+              limitReached: true,
+              remaining: 0,
+            },
+            { status: 429 }
+          );
+        }
+
+        cleanDisplayName = trimmed;
+        nextNameChangesCount = countToday + 1;
+        nextNameChangesDate = new Date();
+      }
+    }
+
+    // Sanitize basic fields
+    const cleanBio = bio !== undefined ? bio.trim().slice(0, 500) : undefined;
+    const cleanGender = gender !== undefined ? gender.trim().toLowerCase() : undefined;
+
+    // Strict Server-side VIP Protection for premium VIP fields
     const isUpdatingVIPAvatarEmoji = avatarEmoji !== undefined && avatarEmoji !== '' && isVipAvatar(avatarEmoji);
     const isUpdatingVIPAvatarImage = (avatarData && avatarData.startsWith('data:image/')) || avatarType === 'IMAGE';
     const isUpdatingVIPPreferences = preferredGender !== undefined && preferredGender !== '' && preferredGender !== 'auto';
@@ -112,99 +191,61 @@ export async function PUT(req: Request) {
     }
 
     // Update User.displayName if provided
+    const userUpdateData: any = {};
     if (cleanDisplayName) {
+      userUpdateData.displayName = cleanDisplayName;
+      userUpdateData.fullName = cleanDisplayName;
+    }
+    if (cleanGender && ['male', 'female', 'non-binary', 'prefer_not_to_say'].includes(cleanGender)) {
+      userUpdateData.gender = cleanGender;
+    }
+
+    if (Object.keys(userUpdateData).length > 0) {
       await prisma.user.update({
         where: { id: user.id },
-        data: {
-          displayName: cleanDisplayName,
-          fullName: cleanDisplayName,
-        },
-      });
-    }
-
-    // Check Age, DOB & Gender Edit Limits & Grace Period
-    const currentAge = user.profile?.age;
-    const currentGender = user.profile?.gender;
-    const isAgeConfirmed = user.profile?.ageGenderConfirmed ?? false;
-    const currentChangesCount = user.profile?.ageGenderChangesCount ?? 0;
-
-    const parsedAge = age !== undefined ? parseInt(age.toString(), 10) : undefined;
-    const parsedDob = body.dob ? new Date(body.dob) : undefined;
-    const isAgeChanged = parsedAge !== undefined && parsedAge !== currentAge;
-    const isGenderChanged = cleanGender !== undefined && cleanGender !== currentGender;
-    const isDobChanged = parsedDob !== undefined;
-
-    // Admin Lock Override Check
-    if ((isGenderChanged || isDobChanged || isAgeChanged) && user.genderDobLocked) {
-      return NextResponse.json(
-        { error: 'Gender and Date of Birth have been locked by Admin moderation.' },
-        { status: 403 }
-      );
-    }
-
-    // 48-Hour Free Correction Window Calculation
-    const hoursSinceSignup = (Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60);
-    const isWithinGracePeriod = hoursSinceSignup <= 48;
-
-    let nextChangesCount = currentChangesCount;
-    let nextConfirmedState = isAgeConfirmed;
-
-    if (isAgeChanged || isGenderChanged || isDobChanged) {
-      if (isAgeConfirmed && !isWithinGracePeriod && !isVIP) {
-        return NextResponse.json(
-          {
-            error: 'Gender and Date of Birth are locked on profile for Free users after 48 hours. Upgrade to VIP for unlimited edits!',
-            isVipRequired: true,
-          },
-          { status: 403 }
-        );
-      }
-      nextConfirmedState = true;
-      if (!isWithinGracePeriod && !isVIP) {
-        nextChangesCount = currentChangesCount + 1;
-      }
-    }
-
-    // Update User model fields if gender/dob updated
-    if (cleanGender || (parsedDob && !isNaN(parsedDob.getTime()))) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          gender: cleanGender !== undefined ? cleanGender : undefined,
-          dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
-        },
+        data: userUpdateData,
       });
     }
 
     // Update Profile record
+    const profileUpdateData: any = {
+      bio: cleanBio !== undefined ? cleanBio : undefined,
+      showBio: showBio !== undefined ? Boolean(showBio) : undefined,
+      age: age !== undefined ? parseInt(age.toString(), 10) : undefined,
+      gender: cleanGender !== undefined ? cleanGender : undefined,
+      preferredGender: preferredGender !== undefined ? preferredGender : undefined,
+      personalityPreferences: isVIP && personalityPreferences !== undefined ? personalityPreferences : undefined,
+      mood: isVIP && mood !== undefined ? mood : undefined,
+      showMood: showMood !== undefined ? Boolean(showMood) : undefined,
+      moodExpiresAt: isVIP && moodExpiresAt !== undefined ? moodExpiresAt : undefined,
+      language: language !== undefined ? language : undefined,
+      saveChatHistory: saveChatHistory !== undefined ? Boolean(saveChatHistory) : undefined,
+      interests: interests !== undefined ? interests : undefined,
+      themePreference: themePreference !== undefined ? themePreference : undefined,
+      avatarType: avatarType !== undefined ? avatarType : undefined,
+      avatarEmoji: avatarEmoji !== undefined ? avatarEmoji : undefined,
+      avatarUrl: avatarUrl !== undefined ? avatarUrl : undefined,
+    };
+
+    if (nextNameChangesDate) {
+      profileUpdateData.nameChangesCount = nextNameChangesCount;
+      profileUpdateData.nameChangesDate = nextNameChangesDate;
+    }
+
     const updatedProfile = await prisma.profile.update({
       where: { userId: user.id },
-      data: {
-        bio: cleanBio !== undefined ? cleanBio : undefined,
-        showBio: showBio !== undefined ? Boolean(showBio) : undefined,
-        age: parsedAge !== undefined ? parsedAge : undefined,
-        gender: cleanGender !== undefined ? cleanGender : undefined,
-        ageGenderConfirmed: nextConfirmedState,
-        ageGenderChangesCount: nextChangesCount,
-        preferredGender: preferredGender !== undefined ? preferredGender : undefined,
-        personalityPreferences: isVIP && personalityPreferences !== undefined ? personalityPreferences : undefined,
-        mood: isVIP && mood !== undefined ? mood : undefined,
-        showMood: showMood !== undefined ? Boolean(showMood) : undefined,
-        moodExpiresAt: isVIP && moodExpiresAt !== undefined ? moodExpiresAt : undefined,
-        language: language !== undefined ? language : undefined,
-        saveChatHistory: saveChatHistory !== undefined ? Boolean(saveChatHistory) : undefined,
-        interests: interests !== undefined ? interests : undefined,
-        themePreference: themePreference !== undefined ? themePreference : undefined,
-        avatarType: avatarType !== undefined ? avatarType : undefined,
-        avatarEmoji: avatarEmoji !== undefined ? avatarEmoji : undefined,
-        avatarUrl: avatarUrl !== undefined ? avatarUrl : undefined,
-      },
+      data: profileUpdateData,
     });
+
+    const remainingNameChanges = Math.max(0, 4 - (updatedProfile.nameChangesCount ?? 0));
 
     return NextResponse.json({
       success: true,
       message: 'Profile updated successfully',
-      profile: updatedProfile,
+      profile: {
+        ...updatedProfile,
+        remainingNameChangesToday: remainingNameChanges,
+      },
     });
   } catch (error) {
     console.error('Profile update error:', error);
