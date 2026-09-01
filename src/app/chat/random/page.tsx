@@ -64,7 +64,7 @@ interface RandomMessage {
 
 export default function KnotChatRandomPage() {
   const router = useRouter();
-  const { user, refreshUser } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const { socket, isConnected: socketConnected } = useSocket();
 
   // Matchmaking State: "idle" | "searching" | "connected" | "ended"
@@ -118,6 +118,13 @@ export default function KnotChatRandomPage() {
       lastMessageTimestampRef.current = messages[messages.length - 1].createdAt;
     }
   }, [messages]);
+
+  // Auth Redirect Guard
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push('/login');
+    }
+  }, [user, loading, router]);
 
   // Check whether to show Intro Modal or start immediately
   useEffect(() => {

@@ -1,22 +1,26 @@
 import { NextResponse } from 'next/server';
+import { getCurrentUser, signToken } from '@/lib/auth';
 
 export async function GET(req: Request) {
   try {
-    const cookieHeader = req.headers.get('cookie') || '';
-    const cookies = Object.fromEntries(
-      cookieHeader.split(';').map((c) => {
-        const parts = c.trim().split('=');
-        return [parts[0], parts.slice(1).join('=')];
-      })
-    );
-
-    const token = cookies['token'];
-    if (!token) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    return NextResponse.json({ token });
+    const token = signToken({
+      userId: user.id,
+      username: user.username,
+      role: user.role,
+    });
+
+    return NextResponse.json({
+      token,
+      userId: user.id,
+      username: user.username,
+    });
   } catch (error) {
+    console.error('Error generating auth token for socket:', error);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }

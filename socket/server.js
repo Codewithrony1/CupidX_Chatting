@@ -41,7 +41,13 @@ const server = http.createServer((req, res) => {
 
 const io = new Server(server, {
   cors: {
-    origin: [CLIENT_URL, 'http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: [
+      CLIENT_URL,
+      'https://www.cupidxchat.in',
+      'https://cupidxchat.in',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000'
+    ],
     methods: ['GET', 'POST'],
     credentials: true
   }
