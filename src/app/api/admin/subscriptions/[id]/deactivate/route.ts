@@ -21,59 +21,62 @@ export async function POST(
     }
 
     const { id } = await props.params;
-    if (!id) {
-      return NextResponse.json({ error: 'Payment request ID required' }, { status: 400 });
-    }
 
-    const body = await req.json().catch(() => ({}));
-    const reason = body.reason || 'Payment verification failed. UTR or screenshot does not match received transaction.';
-
-    const paymentRequest = await prisma.paymentRequest.findFirst({
+    const user = await prisma.user.findFirst({
       where: {
-        OR: [{ id }, { requestId: id }],
+        OR: [{ id }, { clerkUserId: id }],
       },
     });
 
-    if (!paymentRequest) {
-      return NextResponse.json({ error: 'Payment request not found' }, { status: 404 });
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const now = new Date();
-    const adminIdentifier = admin?.username || claims?.sub || 'admin';
-
-    // Update request to REJECTED
-    const updatedRequest = await prisma.paymentRequest.update({
-      where: { id: paymentRequest.id },
+    await prisma.user.update({
+      where: { id: user.id },
       data: {
-        status: 'REJECTED',
-        rejectionReason: reason,
-        reviewedAt: now,
-        reviewedBy: adminIdentifier,
+        membershipTier: 'FREE',
+        is_vip: false,
+        vip_expires_at: null,
       },
     });
 
-    // Write Audit Log
+    const subscription = await prisma.subscription.upsert({
+      where: { userId: user.id },
+      create: {
+        userId: user.id,
+        plan: 'FREE',
+        isActive: false,
+        subscriptionStatus: 'CANCELLED',
+      },
+      update: {
+        plan: 'FREE',
+        isActive: false,
+        subscriptionStatus: 'CANCELLED',
+      },
+    });
+
     if (admin?.id) {
       await prisma.adminLog.create({
         data: {
           adminUserId: admin.id,
           adminClerkId: claims?.sub || null,
-          action: 'PAYMENT_REJECTED',
-          targetUserId: paymentRequest.userId,
-          entityType: 'PAYMENT',
-          entityId: paymentRequest.id,
-          details: `Rejected payment request ${paymentRequest.requestId}. Reason: ${reason}`,
+          action: 'SUBSCRIPTION_DEACTIVATED',
+          targetUserId: user.id,
+          entityType: 'SUBSCRIPTION',
+          entityId: subscription.id,
+          details: `Manually deactivated subscription for @${user.username}`,
         },
       });
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Payment request rejected.',
-      request: updatedRequest,
+      message: `Subscription deactivated for @${user.username}.`,
+      subscription,
     });
   } catch (error) {
-    console.error('Error rejecting payment request:', error);
+    console.error('Error deactivating subscription:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

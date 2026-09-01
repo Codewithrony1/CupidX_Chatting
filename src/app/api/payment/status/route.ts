@@ -10,48 +10,53 @@ export async function GET(req: Request) {
     }
 
     const { searchParams } = new URL(req.url);
-    const orderId = searchParams.get('orderId');
+    const requestId = searchParams.get('requestId') || searchParams.get('orderId');
 
-    if (!orderId) {
-      // Return latest payment for this user
-      const latestPayment = await prisma.payment.findFirst({
+    if (!requestId) {
+      // Return latest payment request for this user
+      const latestRequest = await prisma.paymentRequest.findFirst({
         where: { userId: user.id },
         orderBy: { createdAt: 'desc' },
       });
-      if (!latestPayment) {
-        return NextResponse.json({ error: 'No payments found' }, { status: 404 });
+      if (!latestRequest) {
+        return NextResponse.json({ error: 'No payment submissions found' }, { status: 404 });
       }
-      const isPaid = latestPayment.status === 'CAPTURED' || latestPayment.status === 'SUCCESS' || latestPayment.status === 'PAID';
+
+      const isApproved = latestRequest.status === 'APPROVED' || latestRequest.status === 'approved';
       return NextResponse.json({
         success: true,
-        orderId: latestPayment.razorpayOrderId,
-        status: isPaid ? 'paid' : latestPayment.status.toLowerCase(),
-        isPaid,
-        plan: latestPayment.plan,
-        amount: latestPayment.amount,
+        requestId: latestRequest.requestId,
+        status: latestRequest.status,
+        isApproved,
+        plan: latestRequest.plan,
+        amount: latestRequest.amount,
+        currency: latestRequest.currency,
+        createdAt: latestRequest.createdAt,
       });
     }
 
-    const payment = await prisma.payment.findFirst({
+    const request = await prisma.paymentRequest.findFirst({
       where: {
-        razorpayOrderId: orderId,
+        OR: [{ id: requestId }, { requestId }],
         userId: user.id,
       },
     });
 
-    if (!payment) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    if (!request) {
+      return NextResponse.json({ error: 'Payment request not found' }, { status: 404 });
     }
 
-    const isPaid = payment.status === 'CAPTURED' || payment.status === 'SUCCESS' || payment.status === 'PAID';
+    const isApproved = request.status === 'APPROVED' || request.status === 'approved';
 
     return NextResponse.json({
       success: true,
-      orderId: payment.razorpayOrderId,
-      status: isPaid ? 'paid' : payment.status.toLowerCase(),
-      isPaid,
-      plan: payment.plan,
-      amount: payment.amount,
+      requestId: request.requestId,
+      status: request.status,
+      isApproved,
+      plan: request.plan,
+      amount: request.amount,
+      currency: request.currency,
+      createdAt: request.createdAt,
     });
   } catch (error) {
     console.error('Error fetching payment status:', error);

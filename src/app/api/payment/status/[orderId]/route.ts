@@ -13,34 +13,32 @@ export async function GET(
     }
 
     const { orderId } = await props.params;
-    if (!orderId) {
-      return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
-    }
 
-    const payment = await prisma.payment.findFirst({
+    const request = await prisma.paymentRequest.findFirst({
       where: {
-        razorpayOrderId: orderId,
+        OR: [{ id: orderId }, { requestId: orderId }],
         userId: user.id,
       },
     });
 
-    if (!payment) {
-      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    if (!request) {
+      return NextResponse.json({ error: 'Payment request not found' }, { status: 404 });
     }
 
-    const isPaid = payment.status === 'CAPTURED' || payment.status === 'SUCCESS' || payment.status === 'PAID';
+    const isApproved = request.status === 'APPROVED' || request.status === 'approved';
 
     return NextResponse.json({
       success: true,
-      orderId: payment.razorpayOrderId,
-      status: isPaid ? 'paid' : payment.status.toLowerCase(),
-      isPaid,
-      plan: payment.plan,
-      amount: payment.amount,
-      updatedAt: payment.updatedAt,
+      requestId: request.requestId,
+      status: request.status,
+      isApproved,
+      plan: request.plan,
+      amount: request.amount,
+      currency: request.currency,
+      createdAt: request.createdAt,
     });
   } catch (error) {
-    console.error('Error fetching payment status:', error);
+    console.error('Error fetching payment status by ID:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

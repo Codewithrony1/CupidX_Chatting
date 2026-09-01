@@ -10,6 +10,7 @@ interface User {
   username: string;
   fullName: string;
   displayName?: string;
+  email?: string | null;
   role: 'USER' | 'ADMIN';
   membershipTier?: string;
   profile?: {

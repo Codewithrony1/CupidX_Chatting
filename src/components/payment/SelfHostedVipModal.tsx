@@ -49,7 +49,7 @@ export default function SelfHostedVipModal({
   // Dynamic QR & Pricing configs from server
   const [paymentQrUrlIndia, setPaymentQrUrlIndia] = useState<string>('/uploads/qr/payment-qr-india.jpg');
   const [paymentQrUrlInternational, setPaymentQrUrlInternational] = useState<string>('/lexino-qr.jpg');
-  const [merchantUpiId, setMerchantUpiId] = useState<string>('lexino@razorpay');
+  const [merchantUpiId, setMerchantUpiId] = useState<string>('cupidxchat@upi');
   const [merchantName, setMerchantName] = useState<string>('Lexino Enterprises');
   const [pricing, setPricing] = useState({
     india: { currency: 'INR', symbol: '₹', monthly: 29, yearly: 199 },
@@ -540,13 +540,13 @@ export default function SelfHostedVipModal({
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="space-y-4 text-center py-2"
+              className="space-y-4"
             >
-              {/* PENDING APPROVAL */}
-              {existingRequest.status === 'pending' && (
-                <div className="space-y-4">
+              {/* UNDER REVIEW / PENDING */}
+              {(existingRequest.status === 'UNDER_REVIEW' || existingRequest.status === 'pending') && (
+                <div className="space-y-4 text-center">
                   <motion.div
-                    animate={{ scale: [1, 1.08, 1] }}
+                    animate={{ scale: [1, 1.05, 1] }}
                     transition={{ duration: 2, repeat: Infinity }}
                     className="w-16 h-16 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30 shadow-lg shadow-amber-500/20"
                   >
@@ -557,33 +557,45 @@ export default function SelfHostedVipModal({
                     <div className="flex items-center justify-center gap-2">
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 font-extrabold text-[11px] border border-amber-500/30">
                         <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                        PENDING APPROVAL
+                        UNDER REVIEW
                       </span>
                       <span className="px-2.5 py-0.5 rounded-full bg-white/10 text-slate-300 text-[10px] font-bold">
-                        {existingRequest.region === 'india' ? '🇮🇳 India' : '🌍 International'}
+                        {existingRequest.region === 'india' ? '🇮🇳 India (UPI)' : '🌍 International'}
                       </span>
                     </div>
 
                     <h3 className="text-base font-black text-white pt-2">
-                      Payment Submitted
+                      Payment Proof Submitted ✓
                     </h3>
                     <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                      Your VIP upgrade request is queued for manual admin verification.
+                      Our team is manually verifying your payment. Your subscription will activate as soon as approved.
                     </p>
                   </div>
 
                   {/* Submitted Details Box */}
                   <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-left space-y-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-400">Payment ID</span>
+                      <span className="font-mono font-bold text-yellow-400">{existingRequest.requestId}</span>
+                    </div>
+
                     <div className="flex justify-between">
                       <span className="text-slate-400">Plan</span>
                       <span className="font-bold text-pink-300 capitalize">
-                        {existingRequest.plan} VIP ({existingRequest.currency === 'USD' ? '$' : '₹'}{existingRequest.amount})
+                        {existingRequest.plan} ({existingRequest.currency === 'USD' ? '$' : '₹'}{existingRequest.amount})
                       </span>
                     </div>
 
+                    {user?.email && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Account Email</span>
+                        <span className="font-mono font-bold text-slate-300">{user.email}</span>
+                      </div>
+                    )}
+
                     {existingRequest.paymentId && (
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Payment / Transaction ID</span>
+                        <span className="text-slate-400">UTR / Reference</span>
                         <span className="font-mono font-bold text-yellow-300">{existingRequest.paymentId}</span>
                       </div>
                     )}
@@ -607,13 +619,13 @@ export default function SelfHostedVipModal({
                   </div>
 
                   <p className="text-[10px] text-slate-400">
-                    ⏱ Usually reviewed within 24 hours. VIP access will automatically unlock once approved.
+                    ⏱ Usually verified in minutes. No need to keep this window open.
                   </p>
                 </div>
               )}
 
               {/* APPROVED */}
-              {existingRequest.status === 'approved' && (
+              {(existingRequest.status === 'APPROVED' || existingRequest.status === 'approved') && (
                 <div className="space-y-4">
                   <motion.div
                     initial={{ scale: 0 }}
@@ -626,16 +638,16 @@ export default function SelfHostedVipModal({
 
                   <div className="space-y-1">
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-extrabold text-[11px] border border-emerald-500/30">
-                      ✓ VIP APPROVED
+                      ✓ SUBSCRIPTION ACTIVE
                     </span>
-                    <h3 className="text-lg font-black text-white pt-2">VIP Access Unlocked! 🎉</h3>
-                    <p className="text-xs text-emerald-300">Your VIP membership is now active.</p>
+                    <h3 className="text-lg font-black text-white pt-2">Payment Verified! 🎉</h3>
+                    <p className="text-xs text-emerald-300">Your paid subscription features are now active.</p>
                   </div>
                 </div>
               )}
 
               {/* REJECTED */}
-              {existingRequest.status === 'rejected' && (
+              {(existingRequest.status === 'REJECTED' || existingRequest.status === 'rejected') && (
                 <div className="space-y-4">
                   <div className="w-14 h-14 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30">
                     <AlertCircle className="w-7 h-7" />

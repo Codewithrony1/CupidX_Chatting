@@ -23,7 +23,7 @@ export async function GET() {
 
     const paymentQrUrlIndia = settingsMap.get('paymentQrUrlIndia') || '/uploads/qr/payment-qr-india.jpg';
     const paymentQrUrlInternational = settingsMap.get('paymentQrUrlInternational') || '/lexino-qr.jpg';
-    const merchantUpiId = settingsMap.get('merchantUpiId') || process.env.MERCHANT_UPI_ID || 'lexino@razorpay';
+    const merchantUpiId = settingsMap.get('merchantUpiId') || process.env.MERCHANT_UPI_ID || 'cupidxchat@upi';
 
     const indiaPriceMonthly = parseFloat(settingsMap.get('indiaPriceMonthly') || '29');
     const indiaPriceYearly = parseFloat(settingsMap.get('indiaPriceYearly') || '199');
@@ -57,7 +57,7 @@ export async function GET() {
       success: true,
       paymentQrUrlIndia: '/uploads/qr/payment-qr-india.jpg',
       paymentQrUrlInternational: '/lexino-qr.jpg',
-      merchantUpiId: 'lexino@razorpay',
+      merchantUpiId: 'cupidxchat@upi',
       merchantName: 'Lexino Enterprises',
       pricing: {
         india: { currency: 'INR', symbol: '₹', monthly: 29, yearly: 199 },

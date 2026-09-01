@@ -265,9 +265,13 @@ model VipRequest {
 model AdminLog {
   id           String   @id @default(uuid())
   adminUserId  String
-  action       String   // e.g. "APPROVE_VIP", "REJECT_VIP", "LOCK_GENDER_DOB", "EDIT_PROFILE"
+  adminClerkId String?
+  action       String   // e.g. "APPROVE_PAYMENT", "REJECT_PAYMENT", "ACTIVATE_SUBSCRIPTION", "DEACTIVATE_SUBSCRIPTION", "UPDATE_QR"
   targetUserId String?
+  entityType   String?  // "PAYMENT", "SUBSCRIPTION", "USER", "SETTING"
+  entityId     String?
   details      String?
+  metadata     String?
   createdAt    DateTime @default(now())
 
   admin User @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
@@ -284,16 +288,22 @@ model PaymentRequest {
   id              String    @id @default(uuid())
   requestId       String    @unique @default(uuid())
   userId          String
+  clerkUserId     String?
+  userEmail       String?
+  userFullName    String?
   username        String
-  plan            String    @default("monthly") // "monthly" | "yearly"
+  plan            String    @default("monthly") // "monthly" | "yearly" | "pro"
+  planId          String    @default("pro_monthly")
   region          String    @default("india") // "india" | "international"
   amount          Float     @default(29.0)
   currency        String    @default("INR") // "INR" | "USD"
   paymentId       String?   // UTR / Payment ID / Transaction ID
-  screenshotUrl   String?   // Uploaded payment screenshot
-  status          String    @default("pending") // "pending" | "approved" | "rejected"
+  screenshotUrl   String?   // Secure screenshot storage path
+  screenshotKey   String?   // Private storage key
+  status          String    @default("UNDER_REVIEW") // "PENDING", "UNDER_REVIEW", "APPROVED", "REJECTED"
   rejectionReason String?
   createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   reviewedAt      DateTime?
   reviewedBy      String?
 
@@ -301,5 +311,7 @@ model PaymentRequest {
 
   @@index([status])
   @@index([userId])
+  @@index([clerkUserId])
 }
+
 

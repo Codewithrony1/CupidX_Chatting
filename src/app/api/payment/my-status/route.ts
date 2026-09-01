@@ -15,10 +15,12 @@ export async function GET(req: Request) {
     });
 
     const isVip = user.is_vip || user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
+    const isUnderReview = latestRequest?.status === 'UNDER_REVIEW' || latestRequest?.status === 'pending';
 
     return NextResponse.json({
       success: true,
-      hasPending: latestRequest?.status === 'pending',
+      hasPending: isUnderReview,
+      isUnderReview,
       request: latestRequest,
       isVip,
       vipExpiresAt: user.vip_expires_at,
