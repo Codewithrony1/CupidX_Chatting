@@ -48,6 +48,8 @@ export default function SelfHostedVipModal({
 
   // Dynamic QR & Pricing configs from server
   const [paymentQrUrlIndia, setPaymentQrUrlIndia] = useState<string>('/uploads/qr/payment-qr-india.jpg');
+  const [paymentQrUrlIndiaMonthly, setPaymentQrUrlIndiaMonthly] = useState<string>('/uploads/qr/payment-qr-india.jpg');
+  const [paymentQrUrlIndiaYearly, setPaymentQrUrlIndiaYearly] = useState<string>('/uploads/qr/payment-qr-india-199.jpg');
   const [paymentQrUrlInternational, setPaymentQrUrlInternational] = useState<string>('/lexino-qr.jpg');
   const [merchantUpiId, setMerchantUpiId] = useState<string>('cupidxchat@upi');
   const [merchantName, setMerchantName] = useState<string>('Lexino Enterprises');
@@ -74,7 +76,10 @@ export default function SelfHostedVipModal({
 
   const activePricing = selectedRegion === 'india' ? pricing.india : pricing.international;
   const activeAmount = selectedPlan === 'yearly' ? activePricing.yearly : activePricing.monthly;
-  const activeQrUrl = selectedRegion === 'india' ? paymentQrUrlIndia : paymentQrUrlInternational;
+  const activeQrUrl =
+    selectedRegion === 'india'
+      ? (selectedPlan === 'yearly' ? paymentQrUrlIndiaYearly : paymentQrUrlIndiaMonthly)
+      : paymentQrUrlInternational;
 
   // Load QR settings and existing user payment status on mount / open
   const loadData = async () => {
@@ -84,6 +89,8 @@ export default function SelfHostedVipModal({
       if (qrRes.ok) {
         const qrData = await qrRes.json();
         if (qrData.paymentQrUrlIndia) setPaymentQrUrlIndia(qrData.paymentQrUrlIndia);
+        if (qrData.paymentQrUrlIndiaMonthly) setPaymentQrUrlIndiaMonthly(qrData.paymentQrUrlIndiaMonthly);
+        if (qrData.paymentQrUrlIndiaYearly) setPaymentQrUrlIndiaYearly(qrData.paymentQrUrlIndiaYearly);
         if (qrData.paymentQrUrlInternational) setPaymentQrUrlInternational(qrData.paymentQrUrlInternational);
         if (qrData.merchantUpiId) setMerchantUpiId(qrData.merchantUpiId);
         if (qrData.merchantName) setMerchantName(qrData.merchantName);
