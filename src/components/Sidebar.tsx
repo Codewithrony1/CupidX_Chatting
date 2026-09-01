@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { detectUserCountry } from '@/lib/countryFlag';
-import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings, MapPin } from 'lucide-react';
+import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings, MapPin, Crown } from 'lucide-react';
 import UserAvatar from '@/components/UserAvatar';
 
 export default function Sidebar({
@@ -73,14 +73,15 @@ export default function Sidebar({
           <div className="flex items-center justify-between pt-1">
             {isVIP ? (
               <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-[10px] font-extrabold uppercase tracking-wide">
-                VIP MEMBER
+                <Crown className="w-3 h-3 fill-current" />
+                <span>VIP MEMBER</span>
               </div>
             ) : (
               <Link
-                href="/dashboard"
-                className="py-1 px-2.5 rounded-lg bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 text-white font-bold text-[11px] shadow-md transition-all active:scale-95 cursor-pointer block text-center"
+                href="/vip"
+                className="py-1.5 px-3 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-extrabold text-[11px] shadow-md transition-all active:scale-95 cursor-pointer block text-center"
               >
-                Get VIP
+                👑 Get VIP
               </Link>
             )}
 
@@ -116,6 +117,18 @@ export default function Sidebar({
           >
             <MessageSquare className="w-4 h-4" />
             <span>Random Chat</span>
+          </Link>
+
+          <Link
+            href="/vip"
+            className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+              pathname === '/vip'
+                ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/20'
+                : 'text-yellow-400 hover:text-yellow-300 hover:bg-white/5'
+            }`}
+          >
+            <Crown className="w-4 h-4 text-yellow-400" />
+            <span>VIP Membership</span>
           </Link>
 
           <Link
@@ -161,7 +174,7 @@ export default function Sidebar({
       {/* Logout Button */}
       <button
         onClick={logout}
-        className="flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-pink-500/10 hover:text-pink-400 transition-all cursor-pointer w-full text-left"
+        className="flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium text-rose-300 hover:text-white hover:bg-rose-500/20 border border-rose-500/20 transition-all cursor-pointer w-full text-left"
       >
         <LogOut className="w-4 h-4" />
         <span>Log Out</span>

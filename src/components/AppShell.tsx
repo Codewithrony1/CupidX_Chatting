@@ -15,7 +15,8 @@ import {
   X,
   Menu,
   Shield,
-  LogOut
+  LogOut,
+  Flame,
 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 import Sidebar from '@/components/Sidebar';
@@ -66,7 +67,9 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
   const isTabActive = (path: string) => {
     if (path === '/dashboard' && pathname === '/dashboard') return true;
     if (path === '/chat' && pathname.startsWith('/chat')) return true;
-    if (path === '/settings' && (pathname === '/settings' || pathname === '/profile')) return true;
+    if (path === '/vip' && pathname === '/vip') return true;
+    if (path === '/profile' && pathname === '/profile') return true;
+    if (path === '/settings' && pathname === '/settings') return true;
     return false;
   };
 
@@ -97,8 +100,7 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
         }`}
       >
         <div className="space-y-6">
-          
-          {/* Sidebar Header: CupidX Logo + Cross (✕) Close Button */}
+          {/* Sidebar Header: CupidX Logo + Close Button */}
           <div className="flex items-center justify-between border-b border-pink-500/20 pb-4">
             <Link href="/dashboard" onClick={() => setDrawerOpen(false)} className="flex items-center space-x-2">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-pink-600 to-rose-500 flex items-center justify-center shadow-md shadow-pink-500/30">
@@ -109,7 +111,6 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
               </span>
             </Link>
 
-            {/* Cross (✕) Close Button: Triggers smooth slide to the left (translateX(-100%)) */}
             <button
               type="button"
               onClick={() => setDrawerOpen(false)}
@@ -136,26 +137,27 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
 
               {isVIP ? (
                 <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-[10px] font-extrabold uppercase tracking-wide">
-                  VIP MEMBER 💎
+                  <Crown className="w-3 h-3 fill-current" />
+                  <span>VIP MEMBER ACTIVE</span>
                 </div>
               ) : (
                 <Link
-                  href="/dashboard"
+                  href="/vip"
                   onClick={() => setDrawerOpen(false)}
-                  className="w-full py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 font-bold text-xs shadow-md transition-all active:scale-95 block text-center"
+                  className="w-full py-2 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 font-bold text-xs shadow-md transition-all active:scale-95 block text-center"
                 >
-                  Get VIP Membership 💎
+                  👑 Upgrade to CupidX VIP
                 </Link>
               )}
             </div>
           )}
 
           {/* Drawer Nav Links */}
-          <nav className="space-y-2">
+          <nav className="space-y-1.5">
             <Link
               href="/dashboard"
               onClick={() => setDrawerOpen(false)}
-              className={`flex items-center space-x-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
                 pathname === '/dashboard'
                   ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
                   : 'text-pink-100/80 hover:text-white hover:bg-white/5'
@@ -168,7 +170,7 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
             <Link
               href="/chat/random"
               onClick={() => setDrawerOpen(false)}
-              className={`flex items-center space-x-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
                 pathname.startsWith('/chat')
                   ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
                   : 'text-pink-100/80 hover:text-white hover:bg-white/5'
@@ -179,9 +181,22 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
             </Link>
 
             <Link
+              href="/vip"
+              onClick={() => setDrawerOpen(false)}
+              className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
+                pathname === '/vip'
+                  ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30'
+                  : 'text-yellow-400 hover:text-yellow-300 hover:bg-white/5'
+              }`}
+            >
+              <Crown className="w-4 h-4 text-yellow-400" />
+              <span>VIP Membership</span>
+            </Link>
+
+            <Link
               href="/profile"
               onClick={() => setDrawerOpen(false)}
-              className={`flex items-center space-x-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
                 pathname === '/profile'
                   ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
                   : 'text-pink-100/80 hover:text-white hover:bg-white/5'
@@ -194,7 +209,7 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
             <Link
               href="/settings"
               onClick={() => setDrawerOpen(false)}
-              className={`flex items-center space-x-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all ${
+              className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
                 pathname === '/settings'
                   ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
                   : 'text-pink-100/80 hover:text-white hover:bg-white/5'
@@ -208,14 +223,14 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
               <Link
                 href="/admin"
                 onClick={() => setDrawerOpen(false)}
-                className={`flex items-center space-x-3 px-4 py-3.5 rounded-2xl text-xs font-bold transition-all ${
+                className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
                   pathname === '/admin'
                     ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
                     : 'text-pink-100/80 hover:text-white hover:bg-white/5'
                 }`}
               >
                 <Shield className="w-4 h-4 text-pink-400" />
-                <span>Admin Panel</span>
+                <span>Admin Command Center</span>
               </Link>
             )}
           </nav>
@@ -262,8 +277,8 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
 
           <div className="flex items-center space-x-3">
             <Link
-              href="/dashboard"
-              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-sm"
+              href="/vip"
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-sm transition-all"
             >
               <Crown className="w-3 h-3 fill-current" />
               <span>VIP</span>
@@ -287,8 +302,8 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
 
       {/* Mobile Fixed Bottom Navigation Bar */}
       {showNav && (
-        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#120019]/90 backdrop-blur-xl border-t border-pink-500/20 px-6 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:hidden">
-          <div className="max-w-md mx-auto flex items-center justify-around">
+        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#120019]/90 backdrop-blur-xl border-t border-pink-500/20 px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:hidden">
+          <div className="max-w-md mx-auto flex items-center justify-between">
             {/* Home Tab */}
             <Link
               href="/dashboard"
@@ -314,15 +329,37 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
               <span className="text-[10px]">Chat</span>
             </Link>
 
-            {/* Profile / Settings Tab */}
+            {/* VIP Tab */}
+            <Link
+              href="/vip"
+              className={`flex flex-col items-center space-y-1 transition-all ${
+                isTabActive('/vip') ? 'text-yellow-400 scale-105 font-bold' : 'text-yellow-500/70 hover:text-yellow-300'
+              }`}
+            >
+              <Crown className="w-5 h-5" />
+              <span className="text-[10px]">VIP</span>
+            </Link>
+
+            {/* Profile Tab */}
             <Link
               href="/profile"
               className={`flex flex-col items-center space-y-1 transition-all ${
-                isTabActive('/settings') ? 'text-pink-400 scale-105 font-bold' : 'text-pink-200/60 hover:text-white'
+                isTabActive('/profile') ? 'text-pink-400 scale-105 font-bold' : 'text-pink-200/60 hover:text-white'
               }`}
             >
               <User className="w-5 h-5" />
               <span className="text-[10px]">Profile</span>
+            </Link>
+
+            {/* Settings Tab */}
+            <Link
+              href="/settings"
+              className={`flex flex-col items-center space-y-1 transition-all ${
+                isTabActive('/settings') ? 'text-pink-400 scale-105 font-bold' : 'text-pink-200/60 hover:text-white'
+              }`}
+            >
+              <Settings className="w-5 h-5" />
+              <span className="text-[10px]">Settings</span>
             </Link>
           </div>
         </nav>

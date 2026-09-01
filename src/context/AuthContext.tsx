@@ -66,6 +66,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = await res.json();
         if (data.user) {
           setUser(data.user);
+        } else {
+          setUser(null);
         }
       } else {
         setUser(null);
@@ -109,14 +111,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      if (clerk) {
-        await clerk.signOut();
+      // 1. Client-side cookie purge
+      if (typeof document !== 'undefined') {
+        document.cookie = 'token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;';
       }
-      await fetch('/api/auth/logout', { method: 'POST' });
+
+      // 2. Server-side logout route
+      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+
+      // 3. Clerk Sign Out
+      if (clerk && typeof clerk.signOut === 'function') {
+        await clerk.signOut().catch(() => {});
+      }
+
       setUser(null);
-      router.push('/login');
+
+      // 4. Clean window redirect to /login
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      } else {
+        router.push('/login');
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Logout error:', e);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     }
   };
 

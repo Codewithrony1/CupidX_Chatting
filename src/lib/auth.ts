@@ -27,7 +27,36 @@ export function verifyToken(token: string): { userId: string; username: string; 
 
 export async function getCurrentUser(req?: Request) {
   try {
-    // 1. Check local JWT cookie token first for INSTANT zero-latency response (<1ms)
+    // 1. Check Clerk session first if present
+    let clerkAuth: any = null;
+    try {
+      clerkAuth = await auth();
+    } catch (e) {}
+
+    if (clerkAuth && clerkAuth.userId) {
+      let user = await prisma.user.findUnique({
+        where: { clerkUserId: clerkAuth.userId },
+        include: {
+          profile: true,
+          subscription: true,
+        },
+      });
+
+      if (user && !user.isSuspended) {
+        // Auto-downgrade ONLY if an expiry date is set AND has passed
+        if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= Date.now()) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { is_vip: false, membershipTier: 'FREE' },
+          });
+          user.is_vip = false;
+          user.membershipTier = 'FREE';
+        }
+        return user;
+      }
+    }
+
+    // 2. Check local JWT cookie token if Clerk user wasn't directly found
     if (req) {
       const cookieHeader = req.headers.get('cookie') || '';
       const cookieMatch = cookieHeader.match(/(?:^|;\s*)token=([^;]*)/);
@@ -35,7 +64,7 @@ export async function getCurrentUser(req?: Request) {
 
       if (token) {
         const payload = verifyToken(token);
-        if (payload) {
+        if (payload && payload.userId) {
           const user = await prisma.user.findUnique({
             where: { id: payload.userId },
             include: {
@@ -43,9 +72,19 @@ export async function getCurrentUser(req?: Request) {
               subscription: true,
             },
           });
+
           if (user && !user.isSuspended) {
-            // Auto-downgrade if VIP expired
-            if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) <= new Date()) {
+            // Auto-link clerkUserId if current session has clerkAuth
+            if (clerkAuth && clerkAuth.userId && !user.clerkUserId) {
+              await prisma.user.update({
+                where: { id: user.id },
+                data: { clerkUserId: clerkAuth.userId },
+              });
+              user.clerkUserId = clerkAuth.userId;
+            }
+
+            // Auto-downgrade ONLY if an expiry date is set AND has passed
+            if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= Date.now()) {
               await prisma.user.update({
                 where: { id: user.id },
                 data: { is_vip: false, membershipTier: 'FREE' },
@@ -59,55 +98,9 @@ export async function getCurrentUser(req?: Request) {
       }
     }
 
-    // 2. Fallback check Clerk authentication
-    try {
-      const clerkAuth = await auth();
-      if (clerkAuth && clerkAuth.userId) {
-        let user = await prisma.user.findUnique({
-          where: { clerkUserId: clerkAuth.userId },
-          include: {
-            profile: true,
-            subscription: true,
-          },
-        });
-
-        // If not found by clerkUserId, check token cookie user and auto-link clerkUserId
-        if (!user && req) {
-          const cookieHeader = req.headers.get('cookie') || '';
-          const cookieMatch = cookieHeader.match(/(?:^|;\s*)token=([^;]*)/);
-          const token = cookieMatch ? cookieMatch[1] : null;
-          if (token) {
-            const payload = verifyToken(token);
-            if (payload) {
-              user = await prisma.user.update({
-                where: { id: payload.userId },
-                data: { clerkUserId: clerkAuth.userId },
-                include: { profile: true, subscription: true },
-              });
-            }
-          }
-        }
-
-        if (user && !user.isSuspended) {
-          // Auto-downgrade if VIP expired
-          if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) <= new Date()) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { is_vip: false, membershipTier: 'FREE' },
-            });
-            user.is_vip = false;
-            user.membershipTier = 'FREE';
-          }
-          return user;
-        }
-      }
-    } catch (e) {
-      // Clerk auth fallback
-    }
-
     return null;
   } catch (error) {
-    console.error('Error in getCurrentUser:', error);
+    console.error('getCurrentUser error:', error);
     return null;
   }
 }
