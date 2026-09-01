@@ -31,6 +31,7 @@ model User {
   payments          Payment[]
   manualUpiPayments ManualUpiPayment[]
   vipRequests       VipRequest[]
+  paymentRequests   PaymentRequest[]
   notifications     Notification[]
   adminLogs         AdminLog[]
 
@@ -178,7 +179,9 @@ model Payment {
   amount            Int
   currency          String   @default("INR")
   plan              String   @default("VIP")
-  status            String   @default("PENDING") // PENDING, CREATED, SUCCESS, FAILED, CANCELLED, REFUNDED
+  status            String   @default("PENDING") // PENDING, CREATED, SUCCESS, FAILED, CANCELLED, REFUNDED, CAPTURED
+  qrImageUrl        String?
+  qrCodeId          String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -269,3 +272,34 @@ model AdminLog {
 
   admin User @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
 }
+
+model AppSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model PaymentRequest {
+  id              String    @id @default(uuid())
+  requestId       String    @unique @default(uuid())
+  userId          String
+  username        String
+  plan            String    @default("monthly") // "monthly" | "yearly"
+  region          String    @default("india") // "india" | "international"
+  amount          Float     @default(29.0)
+  currency        String    @default("INR") // "INR" | "USD"
+  paymentId       String?   // UTR / Payment ID / Transaction ID
+  screenshotUrl   String?   // Uploaded payment screenshot
+  status          String    @default("pending") // "pending" | "approved" | "rejected"
+  rejectionReason String?
+  createdAt       DateTime  @default(now())
+  reviewedAt      DateTime?
+  reviewedBy      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([userId])
+}
+

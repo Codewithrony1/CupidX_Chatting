@@ -74,140 +74,177 @@ io.use((socket, next) => {
   }
 });
 
-// Helper function to check if two users can be matched based on preferences & blocks
-async function canUsersMatch(candidateA, candidateB) {
-  if (candidateA.userId === candidateB.userId) return false;
+// Mood Compatibility Map
+const MOOD_COMPATIBILITY = {
+  romantic: ['romantic', 'flirty', 'deep'],
+  flirty: ['flirty', 'romantic', 'funny'],
+  friendly: ['friendly', 'chill', 'funny'],
+  chill: ['chill', 'friendly', 'deep', 'music'],
+  deep: ['deep', 'romantic', 'chill'],
+  funny: ['funny', 'friendly', 'flirty'],
+};
 
-  // Enforce VIP restriction: non-VIP users are forced to 'auto' mode
-  const prefA = candidateA.isVIP ? (candidateA.preferredGender || 'auto') : 'auto';
-  const prefB = candidateB.isVIP ? (candidateB.preferredGender || 'auto') : 'auto';
+function areMoodsCompatible(moodA, moodB) {
+  if (!moodA || !moodB) return true;
+  const mA = moodA.toLowerCase();
+  const mB = moodB.toLowerCase();
+  if (mA === mB) return true;
+  const list = MOOD_COMPATIBILITY[mA];
+  return Boolean(list && list.includes(mB));
+}
 
-  // Specific gender filter check (VIP only)
-  if (prefA !== 'auto' && prefA !== 'any' && prefA !== candidateB.gender) {
-    return false;
-  }
-  if (prefB !== 'auto' && prefB !== 'any' && prefB !== candidateA.gender) {
-    return false;
-  }
-
-  // Auto matching ratio logic:
-  // Non-VIP Auto: 70% chance Male target, 30% Female/Non-Binary target
-  // VIP Auto: 40% chance Male target, 60% Female/Non-Binary target
-  if (prefA === 'auto') {
-    const isMaleTarget = Math.random() < (candidateA.isVIP ? 0.40 : 0.70);
-    const targetGender = isMaleTarget ? 'male' : 'female';
-    if (candidateB.gender !== 'unspecified' && candidateB.gender !== targetGender && candidateB.gender !== 'nonbinary') {
-      // Allow instant match if queue is small (<= 2 users)
-      if (randomMatchQueue.length > 2 && Math.random() < 0.65) return false;
-    }
+// Calculate pairwise compatibility and smart matching score
+async function calculateMatchScore(candidateA, candidateB, now) {
+  if (candidateA.userId === candidateB.userId) {
+    return { canMatch: false, score: -1 };
   }
 
-  if (prefB === 'auto') {
-    const isMaleTarget = Math.random() < (candidateB.isVIP ? 0.40 : 0.70);
-    const targetGender = isMaleTarget ? 'male' : 'female';
-    if (candidateA.gender !== 'unspecified' && candidateA.gender !== targetGender && candidateA.gender !== 'nonbinary') {
-      if (randomMatchQueue.length > 2 && Math.random() < 0.65) return false;
-    }
-  }
-
-  // Language check if specified
-  if (candidateA.language !== 'any' && candidateB.language !== 'any' && candidateA.language !== candidateB.language) {
-    return false;
-  }
-
-  // Block & Personal VIP Ban checks
+  // 1. Abuse prevention: Block & VIP Ban check (Never re-suggest banned pairings)
   try {
     const blockRelation = await prisma.block.findFirst({
       where: {
         OR: [
           { blockerId: candidateA.userId, blockedId: candidateB.userId },
-          { blockerId: candidateB.userId, blockedId: candidateA.userId }
-        ]
-      }
+          { blockerId: candidateB.userId, blockedId: candidateA.userId },
+        ],
+      },
     });
-    if (blockRelation) return false;
+    if (blockRelation) return { canMatch: false, score: -1 };
 
     const banRelation = await prisma.userBan.findFirst({
       where: {
         OR: [
           { bannedByUserId: candidateA.userId, bannedUserId: candidateB.userId },
-          { bannedByUserId: candidateB.userId, bannedUserId: candidateA.userId }
-        ]
-      }
+          { bannedByUserId: candidateB.userId, bannedUserId: candidateA.userId },
+        ],
+      },
     });
-    if (banRelation) return false;
+    if (banRelation) return { canMatch: false, score: -1 };
   } catch (e) {
-    console.error('Error checking block/ban relation during match:', e);
+    console.error('Error checking block/ban in socket matching:', e);
   }
 
-  return true;
+  let score = 0;
+  const waitTimeA = now - candidateA.joinTime;
+  const waitTimeB = now - candidateB.joinTime;
+
+  // 2. Gender Preference Scoring & Strict 8s / Fallback Logic
+  const prefA = candidateA.isVIP ? (candidateA.genderPref || 'auto') : 'auto';
+  const prefB = candidateB.isVIP ? (candidateB.genderPref || 'auto') : 'auto';
+
+  // Candidate A preference check
+  if (candidateA.isVIP && prefA !== 'auto' && prefA !== 'any') {
+    const isGenderMatch = prefA.toLowerCase() === (candidateB.gender || '').toLowerCase();
+    if (isGenderMatch) {
+      score += 3;
+    } else if (waitTimeA < 8000) {
+      // Under 8 seconds, VIP waits strictly for preferred gender
+      return { canMatch: false, score: -1 };
+    }
+    // After 8s: Fall back to random match without gender bonus
+  }
+
+  // Candidate B preference check
+  if (candidateB.isVIP && prefB !== 'auto' && prefB !== 'any') {
+    const isGenderMatch = prefB.toLowerCase() === (candidateA.gender || '').toLowerCase();
+    if (isGenderMatch) {
+      score += 3;
+    } else if (waitTimeB < 8000) {
+      return { canMatch: false, score: -1 };
+    }
+  }
+
+  // 3. Shared Personality Tags (+2 per shared tag)
+  const tagsA = candidateA.tags || [];
+  const tagsB = candidateB.tags || [];
+  const sharedTags = tagsA.filter((t) => tagsB.includes(t));
+  score += sharedTags.length * 2;
+
+  // 4. Mood Compatibility (+1 if compatible)
+  if (areMoodsCompatible(candidateA.mood, candidateB.mood)) {
+    score += 1;
+  }
+
+  // 5. VIP Priority Bonus
+  if (candidateA.isVIP || candidateB.isVIP) {
+    score += 1;
+  }
+
+  // 6. Tie-breaker: Longer wait time gets slight score boost
+  const longestWaitSeconds = Math.max(waitTimeA, waitTimeB) / 1000;
+  score += longestWaitSeconds * 0.01;
+
+  return { canMatch: true, score };
 }
 
-// Function to process queue matching
+// Function to process queue matching with Smart Priority Scoring
 async function processMatchQueue() {
   if (randomMatchQueue.length < 2) return;
 
-  // Sort queue so VIP users get priority matching at the top
-  randomMatchQueue.sort((a, b) => {
-    if (a.isVIP && !b.isVIP) return -1;
-    if (!a.isVIP && b.isVIP) return 1;
-    return a.joinTime - b.joinTime;
-  });
+  const now = Date.now();
+  let bestPair = null;
+  let highestScore = -1;
 
   for (let i = 0; i < randomMatchQueue.length; i++) {
     const candidateA = randomMatchQueue[i];
     for (let j = i + 1; j < randomMatchQueue.length; j++) {
       const candidateB = randomMatchQueue[j];
 
-      const matched = await canUsersMatch(candidateA, candidateB);
-      if (matched) {
-        // Remove both from queue
-        randomMatchQueue = randomMatchQueue.filter(
-          (c) => c.socketId !== candidateA.socketId && c.socketId !== candidateB.socketId
-        );
-
-        // Record pair in active random chats map
-        activeRandomChats.set(candidateA.socketId, candidateB.socketId);
-        activeRandomChats.set(candidateB.socketId, candidateA.socketId);
-
-        const roomId = `room_${candidateA.socketId}_${candidateB.socketId}`;
-
-        const socketA = io.sockets.sockets.get(candidateA.socketId);
-        const socketB = io.sockets.sockets.get(candidateB.socketId);
-
-        if (socketA) socketA.join(roomId);
-        if (socketB) socketB.join(roomId);
-
-        // Notify User A
-        io.to(candidateA.socketId).emit('random_match_found', {
-          roomId,
-          partner: {
-            id: candidateB.userId,
-            username: candidateB.username,
-            fullName: candidateB.fullName,
-            avatarUrl: candidateB.avatarUrl,
-            gender: candidateB.gender,
-            isVIP: candidateB.isVIP,
-          }
-        });
-
-        // Notify User B
-        io.to(candidateB.socketId).emit('random_match_found', {
-          roomId,
-          partner: {
-            id: candidateA.userId,
-            username: candidateA.username,
-            fullName: candidateA.fullName,
-            avatarUrl: candidateA.avatarUrl,
-            gender: candidateA.gender,
-            isVIP: candidateA.isVIP,
-          }
-        });
-
-        console.log(`Matched @${candidateA.username} with @${candidateB.username} in ${roomId}`);
-        return;
+      const { canMatch, score } = await calculateMatchScore(candidateA, candidateB, now);
+      if (canMatch && score > highestScore) {
+        highestScore = score;
+        bestPair = [candidateA, candidateB];
       }
     }
+  }
+
+  if (bestPair) {
+    const [candidateA, candidateB] = bestPair;
+
+    // Remove both from queue
+    randomMatchQueue = randomMatchQueue.filter(
+      (c) => c.socketId !== candidateA.socketId && c.socketId !== candidateB.socketId
+    );
+
+    // Record pair in active random chats map
+    activeRandomChats.set(candidateA.socketId, candidateB.socketId);
+    activeRandomChats.set(candidateB.socketId, candidateA.socketId);
+
+    const roomId = `room_${candidateA.socketId}_${candidateB.socketId}`;
+
+    const socketA = io.sockets.sockets.get(candidateA.socketId);
+    const socketB = io.sockets.sockets.get(candidateB.socketId);
+
+    if (socketA) socketA.join(roomId);
+    if (socketB) socketB.join(roomId);
+
+    // Notify User A
+    io.to(candidateA.socketId).emit('random_match_found', {
+      roomId,
+      partner: {
+        id: candidateB.userId,
+        username: candidateB.username,
+        fullName: candidateB.fullName,
+        avatarUrl: candidateB.avatarUrl,
+        gender: candidateB.gender,
+        isVIP: candidateB.isVIP,
+      },
+    });
+
+    // Notify User B
+    io.to(candidateB.socketId).emit('random_match_found', {
+      roomId,
+      partner: {
+        id: candidateA.userId,
+        username: candidateA.username,
+        fullName: candidateA.fullName,
+        avatarUrl: candidateA.avatarUrl,
+        gender: candidateA.gender,
+        isVIP: candidateA.isVIP,
+      },
+    });
+
+    console.log(`[SMART MATCH] Matched @${candidateA.username} (${candidateA.plan}) with @${candidateB.username} (${candidateB.plan}) [Score: ${highestScore.toFixed(2)}] in ${roomId}`);
   }
 }
 
@@ -221,21 +258,20 @@ io.on('connection', async (socket) => {
       where: { userId },
       data: { isOnline: true, lastSeen: new Date() }
     });
-    io.emit('user_status_changed', { userId, username, isOnline: true });
   } catch (e) {}
 
-  // 1. Join Random Match Queue
+  // 1. Join Random Chat Queue with smart preferences
   socket.on('join_random_queue', async (preferences = {}) => {
     // Remove if already in queue
     randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id);
 
-    // Fetch user profile & subscription
     const userDb = await prisma.user.findUnique({
       where: { id: userId },
-      include: { profile: true, subscription: true }
+      include: { profile: true, subscription: true },
     });
 
-    const isVIP = userDb?.membershipTier === 'VIP' || (userDb?.subscription?.isActive === true && userDb?.subscription?.plan === 'VIP');
+    const isVIP = userDb?.is_vip || userDb?.membershipTier === 'VIP' || (userDb?.subscription?.isActive === true && userDb?.subscription?.plan === 'VIP');
+    const userInterests = userDb?.profile?.interests ? userDb.profile.interests.split(',').map((s) => s.trim().toLowerCase()) : [];
 
     const candidate = {
       socketId: socket.id,
@@ -244,14 +280,17 @@ io.on('connection', async (socket) => {
       fullName: userDb?.fullName || username,
       avatarUrl: userDb?.profile?.avatarUrl || '/default-avatar.png',
       gender: preferences.gender || userDb?.profile?.gender || 'unspecified',
-      preferredGender: preferences.preferredGender || userDb?.profile?.preferredGender || 'any',
+      genderPref: preferences.preferredGender || preferences.genderPref || userDb?.profile?.preferredGender || 'auto',
+      mood: preferences.mood || userDb?.profile?.mood || 'chill',
+      tags: preferences.tags && Array.isArray(preferences.tags) ? preferences.tags : userInterests,
       language: preferences.language || userDb?.profile?.language || 'english',
+      plan: isVIP ? 'vip' : 'free',
       isVIP,
-      joinTime: Date.now()
+      joinTime: Date.now(),
     };
 
     randomMatchQueue.push(candidate);
-    socket.emit('queue_joined', { status: 'searching', isVIP });
+    socket.emit('queue_joined', { status: 'searching', isVIP, plan: candidate.plan });
 
     // Process matching immediately
     processMatchQueue();

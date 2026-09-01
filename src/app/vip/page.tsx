@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/AppShell';
+import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
 import {
   Crown,
   Sparkles,
@@ -20,149 +21,18 @@ import {
   MessageSquare,
   Loader2,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  QrCode,
 } from 'lucide-react';
-
-type PaymentState = 'IDLE' | 'CREATING_ORDER' | 'RAZORPAY_OPEN' | 'VERIFYING_PAYMENT' | 'SUCCESS' | 'FAILED' | 'CANCELLED';
 
 export default function VIPPage() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
 
-  const [paymentState, setPaymentState] = useState<PaymentState>('IDLE');
-  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [showModal, setShowModal] = useState<boolean>(false);
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly');
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
-
-  const loadRazorpayScript = (): Promise<boolean> => {
-    return new Promise((resolve) => {
-      if (typeof window !== 'undefined' && (window as any).Razorpay) {
-        resolve(true);
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  };
-
-  const handleGetVIP = async () => {
-    setPaymentState('CREATING_ORDER');
-    setStatusMessage('');
-
-    try {
-      const isScriptLoaded = await loadRazorpayScript();
-      if (!isScriptLoaded) {
-        setPaymentState('FAILED');
-        setStatusMessage('Failed to load Razorpay SDK. Please check your internet connection.');
-        return;
-      }
-
-      // Step 1: Create Order via Server Endpoint
-      const orderRes = await fetch('/api/payments/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const orderData = await orderRes.json();
-
-      if (!orderRes.ok || (!orderData.orderId && !orderData.order_id)) {
-        if (orderData.isAlreadyVIP) {
-          await refreshUser();
-          router.replace('/dashboard');
-          return;
-        }
-        setPaymentState('FAILED');
-        setStatusMessage(orderData.error || 'Failed to create payment order');
-        return;
-      }
-
-      const orderId = orderData.order_id || orderData.orderId;
-      const keyId = orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_TNfnCTokMe0Xh0';
-
-      setPaymentState('RAZORPAY_OPEN');
-
-      // Step 2: Open Razorpay Standard Checkout Modal
-      const options = {
-        key: keyId,
-        amount: orderData.amount,
-        currency: orderData.currency || 'INR',
-        name: 'CupidX VIP',
-        description: '1 Month VIP Membership Subscription',
-        order_id: orderId,
-        handler: async function (response: any) {
-          try {
-            setPaymentState('VERIFYING_PAYMENT');
-            setStatusMessage('Verifying payment signature with server...');
-
-            // Step 3: Verify Payment Signature & Activation via Server Endpoint
-            const verifyRes = await fetch('/api/payments/verify-payment', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              }),
-            });
-
-            const verifyData = await verifyRes.json();
-            if (verifyRes.ok && verifyData.success) {
-              setPaymentState('SUCCESS');
-              setStatusMessage('💎 VIP ACTIVATED! Welcome to Cupidx VIP.');
-
-              // Refresh Auth Context state & Redirect to Home immediately
-              await refreshUser();
-              setTimeout(() => {
-                router.replace('/dashboard');
-                router.refresh();
-              }, 1200);
-            } else {
-              setPaymentState('FAILED');
-              setStatusMessage(verifyData.error || 'Payment signature verification failed.');
-            }
-          } catch (err) {
-            console.error('Verification error:', err);
-            setPaymentState('FAILED');
-            setStatusMessage('Error verifying payment signature.');
-          }
-        },
-        modal: {
-          ondismiss: function () {
-            setPaymentState('CANCELLED');
-            setStatusMessage('Payment cancelled.');
-          },
-        },
-        prefill: {
-          name: user?.fullName || user?.username || 'CupidX User',
-          email: `${user?.username || 'user'}@cupidx.com`,
-        },
-        theme: {
-          color: '#e11d48',
-        },
-      };
-
-      const razorpayInstance = new (window as any).Razorpay(options);
-
-      razorpayInstance.on('payment.failed', function (response: any) {
-        console.error('Razorpay Payment Failed:', response.error);
-        const desc = response.error?.description || response.error?.reason || '';
-        setPaymentState('FAILED');
-        if (desc.toLowerCase().includes('international')) {
-          setStatusMessage('💳 International cards disabled. Please select UPI, Netbanking, or an Indian Debit/Credit Card.');
-        } else {
-          setStatusMessage(`Payment could not be completed. ${desc}`);
-        }
-      });
-
-      razorpayInstance.open();
-    } catch (err) {
-      console.error('Checkout error:', err);
-      setPaymentState('FAILED');
-      setStatusMessage('Error initiating checkout process.');
-    }
-  };
 
   return (
     <AppShell>
@@ -183,102 +53,77 @@ export default function VIPPage() {
           <div className="w-9" />
         </div>
 
-        {/* Status Notification Alerts */}
-        {paymentState === 'SUCCESS' && (
-          <div className="p-4 rounded-3xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-sm font-bold text-center flex items-center justify-center space-x-2 animate-in fade-in duration-300 shadow-xl shadow-emerald-500/20">
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-            <span>{statusMessage}</span>
-          </div>
-        )}
-
-        {paymentState === 'CANCELLED' && (
-          <div className="p-4 rounded-3xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-sm font-bold text-center flex items-center justify-center space-x-2 animate-in fade-in duration-300">
-            <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
-            <span>{statusMessage}</span>
-          </div>
-        )}
-
-        {paymentState === 'FAILED' && (
-          <div className="p-4 rounded-3xl bg-rose-500/20 border border-rose-500/40 text-rose-300 text-sm font-bold text-center flex items-center justify-center space-x-2 animate-in fade-in duration-300">
-            <X className="w-5 h-5 text-rose-400 shrink-0" />
-            <span>{statusMessage}</span>
-          </div>
-        )}
-
         {/* Hero Card */}
-        <div className="glass-romantic rounded-3xl p-6 text-center space-y-4 border border-yellow-500/30 relative overflow-hidden bg-gradient-to-b from-yellow-950/30 via-pink-950/20 to-slate-950">
-          <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-yellow-500/10 rounded-full blur-2xl" />
-          
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-yellow-500 via-amber-500 to-yellow-600 flex items-center justify-center mx-auto shadow-xl shadow-yellow-500/30 border border-yellow-300/40">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-pink-600/30 via-purple-600/20 to-pink-900/40 p-6 border border-pink-500/30 text-center space-y-4 shadow-2xl shadow-pink-500/10">
+          <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-yellow-400 to-amber-500 flex items-center justify-center mx-auto shadow-xl shadow-yellow-500/30">
             <Crown className="w-9 h-9 text-slate-950 fill-current" />
           </div>
 
-          <div className="space-y-1.5">
-            <h1 className="text-2xl font-black text-white tracking-tight">
-              Unlock <span className="text-yellow-400">CupidX VIP</span>
-            </h1>
+          <div className="space-y-1">
+            <h2 className="text-2xl font-black text-white tracking-tight">Unlock CupidX VIP</h2>
             <p className="text-xs text-pink-200/70 max-w-xs mx-auto">
-              Unlock custom profile DP, gender preferences, personality matching & VIP badges for less than ₹1/day.
+              Scan UPI QR code, pay via any UPI app & submit your UTR / screenshot for VIP activation.
             </p>
           </div>
 
-          {/* Pricing Box */}
-          <div className="p-4 rounded-2xl bg-white/5 border border-yellow-500/20 max-w-xs mx-auto space-y-1">
-            <div className="flex items-baseline justify-center space-x-1.5">
-              <span className="text-3xl font-black text-yellow-400">₹29</span>
-              <span className="text-xs text-pink-200/70 font-semibold">/ month</span>
+          {/* Pricing Plans Grid */}
+          <div className="grid grid-cols-2 gap-3 pt-2 text-left">
+            <div
+              onClick={() => {
+                setSelectedPlan('monthly');
+                setShowModal(true);
+              }}
+              className="p-4 rounded-2xl bg-white/5 border-2 border-pink-500/40 hover:border-pink-500 cursor-pointer transition-all hover:scale-[1.02] relative group"
+            >
+              <span className="text-[10px] font-black uppercase text-pink-400 tracking-wider block">1 Month Pass</span>
+              <div className="flex items-baseline space-x-1 my-1">
+                <span className="text-2xl font-black text-white">₹29</span>
+                <span className="text-[11px] text-slate-400">/ 30 days</span>
+              </div>
+              <p className="text-[10px] text-slate-300">Scan & submit UTR</p>
             </div>
-            <p className="text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider">
-              ✨ 85% OFF SPECIAL LAUNCH OFFER
-            </p>
+
+            <div
+              onClick={() => {
+                setSelectedPlan('yearly');
+                setShowModal(true);
+              }}
+              className="p-4 rounded-2xl bg-gradient-to-br from-pink-500/20 to-purple-600/20 border-2 border-yellow-400/60 hover:border-yellow-400 cursor-pointer transition-all hover:scale-[1.02] relative group shadow-lg shadow-yellow-500/10"
+            >
+              <span className="absolute -top-2.5 right-2 px-2 py-0.5 rounded-full bg-gradient-to-r from-yellow-400 to-amber-500 text-[9px] font-black text-slate-950 uppercase tracking-wider">
+                Best Value
+              </span>
+              <span className="text-[10px] font-black uppercase text-yellow-400 tracking-wider block">6 Months VIP</span>
+              <div className="flex items-baseline space-x-1 my-1">
+                <span className="text-2xl font-black text-white">₹199</span>
+                <span className="text-[11px] text-slate-400">/ 180 days</span>
+              </div>
+              <p className="text-[10px] text-slate-300">Save over 60%</p>
+            </div>
           </div>
 
-          {/* Subscribe CTA Button */}
+          {/* Action Button */}
           {isVIP ? (
-            <div className="w-full py-4 rounded-2xl font-black bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-sm flex items-center justify-center space-x-2">
-              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-              <span>💎 VIP MEMBERSHIP ACTIVE</span>
+            <div className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-sm flex items-center justify-center space-x-2 shadow-xl shadow-emerald-500/30">
+              <CheckCircle2 className="w-5 h-5" />
+              <span>YOU ARE CURRENTLY A VIP MEMBER ✨</span>
             </div>
           ) : (
             <button
-              onClick={handleGetVIP}
-              disabled={paymentState === 'CREATING_ORDER' || paymentState === 'RAZORPAY_OPEN' || paymentState === 'VERIFYING_PAYMENT'}
-              className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 shadow-xl shadow-yellow-500/30 transition-all text-sm flex items-center justify-center space-x-2 cursor-pointer active:scale-95 disabled:opacity-50 border border-yellow-300/50"
+              onClick={() => setShowModal(true)}
+              className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-500 hover:from-yellow-300 hover:to-amber-400 text-slate-950 shadow-2xl shadow-yellow-500/40 text-sm flex items-center justify-center space-x-2 transition-all active:scale-[0.98] cursor-pointer"
             >
-              {paymentState === 'CREATING_ORDER' && (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-950" /> Creating Order...
-                </span>
-              )}
-              {paymentState === 'RAZORPAY_OPEN' && (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-950" /> Opening Checkout...
-                </span>
-              )}
-              {paymentState === 'VERIFYING_PAYMENT' && (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-950" /> Verifying Signature...
-                </span>
-              )}
-              {paymentState === 'SUCCESS' && (
-                <span className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-slate-950" /> VIP Activated!
-                </span>
-              )}
-              {(paymentState === 'IDLE' || paymentState === 'FAILED' || paymentState === 'CANCELLED') && (
-                <span className="flex items-center gap-2">
-                  <Crown className="w-5 h-5 fill-current" />
-                  <span>SUBSCRIBE TO VIP FOR ₹29</span>
-                </span>
-              )}
+              <QrCode className="w-5 h-5" />
+              <span>UNLOCK VIP WITH UPI QR (₹29)</span>
             </button>
           )}
         </div>
 
         {/* Feature Comparison List */}
         <div className="glass-romantic rounded-3xl p-5 space-y-4 border border-pink-500/20">
-          <h3 className="text-sm font-black text-white uppercase tracking-wider border-b border-pink-500/15 pb-3">
-            💎 What's Included in VIP
+          <h3 className="text-sm font-black text-white uppercase tracking-wider border-b border-pink-500/15 pb-3 flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4 text-pink-400" />
+            <span>What's Included in VIP</span>
           </h3>
 
           <div className="space-y-3 text-xs">
@@ -297,8 +142,8 @@ export default function VIPPage() {
                 <UserCheck className="w-4 h-4" />
               </div>
               <div>
-                <p className="font-extrabold text-white">Target Gender & Match Preferences</p>
-                <p className="text-pink-200/60 text-[11px]">Choose whether to match with Women, Men, or Anyone in Random Chat.</p>
+                <p className="font-extrabold text-white">Smart Match & Gender Preferences</p>
+                <p className="text-pink-200/60 text-[11px]">Match with preferred gender, moods, and personality tags.</p>
               </div>
             </div>
 
@@ -325,6 +170,17 @@ export default function VIPPage() {
         </div>
 
       </div>
+
+      {/* Self-Hosted QR Payment Modal */}
+      <SelfHostedVipModal
+        isOpen={showModal}
+        defaultPlan={selectedPlan}
+        onClose={() => setShowModal(false)}
+        onSuccess={() => {
+          refreshUser();
+          router.replace('/dashboard');
+        }}
+      />
     </AppShell>
   );
 }

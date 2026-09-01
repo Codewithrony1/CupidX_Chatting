@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "admin": "cross-env ADMIN_MODE=true next dev -p 4000",
     "build": "prisma generate && next build",
     "postinstall": "prisma generate",
     "start": "next start",
@@ -20,6 +21,7 @@
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.11.1",
     "canvas-confetti": "^1.9.4",
+    "cross-env": "^10.1.0",
     "framer-motion": "^12.42.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.25.0",

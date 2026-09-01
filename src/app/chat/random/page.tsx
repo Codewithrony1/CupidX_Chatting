@@ -265,15 +265,25 @@ export default function KnotChatRandomPage() {
     setMatchStatus('searching');
     setPartner(null);
 
+    const userInterests = user?.profile?.interests ? user.profile.interests.split(',').map((s) => s.trim().toLowerCase()) : [];
+    const payload = {
+      gender: user?.profile?.gender || 'unspecified',
+      preferredGender: isVIP ? user?.profile?.preferredGender || 'auto' : 'auto',
+      genderPref: isVIP ? user?.profile?.preferredGender || 'auto' : 'auto',
+      mood: user?.profile?.mood || 'chill',
+      tags: userInterests,
+      language: user?.profile?.language || 'english',
+    };
+
+    if (socket && socketConnected) {
+      socket.emit('join_random_queue', payload);
+    }
+
     try {
       const res = await fetch('/api/matchmaking/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          gender: user?.profile?.gender || 'unspecified',
-          preferredGender: isVIP ? user?.profile?.preferredGender || 'auto' : 'auto',
-          language: user?.profile?.language || 'english',
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();

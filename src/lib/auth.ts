@@ -43,7 +43,18 @@ export async function getCurrentUser(req?: Request) {
               subscription: true,
             },
           });
-          if (user && !user.isSuspended) return user;
+          if (user && !user.isSuspended) {
+            // Auto-downgrade if VIP expired
+            if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) <= new Date()) {
+              await prisma.user.update({
+                where: { id: user.id },
+                data: { is_vip: false, membershipTier: 'FREE' },
+              });
+              user.is_vip = false;
+              user.membershipTier = 'FREE';
+            }
+            return user;
+          }
         }
       }
     }
@@ -78,6 +89,15 @@ export async function getCurrentUser(req?: Request) {
         }
 
         if (user && !user.isSuspended) {
+          // Auto-downgrade if VIP expired
+          if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) <= new Date()) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { is_vip: false, membershipTier: 'FREE' },
+            });
+            user.is_vip = false;
+            user.membershipTier = 'FREE';
+          }
           return user;
         }
       }

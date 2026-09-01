@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { calculateMatchScore } from '@/lib/inMemoryQueue';
 import crypto from 'crypto';
 
 export async function POST(req: Request) {
@@ -117,11 +118,59 @@ export async function POST(req: Request) {
         updatedAt: { gte: STALE_THRESHOLD },
       },
       orderBy: [{ joinedAt: 'asc' }],
-      take: 10,
+      take: 20,
     });
 
-    // Attempt atomic match claim with first available candidate
-    for (const candidate of candidates) {
+    const userInterests = userProfile?.interests ? userProfile.interests.split(',').map((s) => s.trim().toLowerCase()) : [];
+    const currentUserCandidate = {
+      userId: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      displayName: user.displayName || user.fullName,
+      gender,
+      plan: (isVIP ? 'vip' : 'free') as 'free' | 'vip',
+      isVIP,
+      genderPref: preferredGender,
+      mood: body.mood || userProfile?.mood || 'chill',
+      tags: body.tags && Array.isArray(body.tags) ? body.tags : userInterests,
+      language,
+      joinedAt: Date.now(),
+      blockedUserIds,
+      bannedUserIds,
+    };
+
+    // Sort candidates using calculateMatchScore
+    const now = Date.now();
+    const scoredCandidates = [];
+
+    for (const c of candidates) {
+      const candidateObj = {
+        userId: c.userId,
+        username: '',
+        fullName: '',
+        displayName: '',
+        gender: c.gender || 'unspecified',
+        plan: 'free' as 'free' | 'vip',
+        isVIP: false,
+        genderPref: c.preferredGender || 'auto',
+        mood: 'chill',
+        tags: [],
+        language: c.language || 'english',
+        joinedAt: c.joinedAt.getTime(),
+        blockedUserIds: [],
+        bannedUserIds: [],
+      };
+
+      const { canMatch, score } = calculateMatchScore(currentUserCandidate, candidateObj, now);
+      if (canMatch) {
+        scoredCandidates.push({ candidate: c, score });
+      }
+    }
+
+    scoredCandidates.sort((a, b) => b.score - a.score);
+
+    // Attempt atomic match claim with highest scoring candidate
+    for (const { candidate } of scoredCandidates) {
       // Check candidate isn't currently in an active session
       const candidateActiveChat = await prisma.chatSession.findFirst({
         where: {
