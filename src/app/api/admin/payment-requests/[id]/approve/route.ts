@@ -1,22 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { auth } from '@clerk/nextjs/server';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function POST(
   req: Request,
   props: { params: Promise<{ id: string }> }
 ) {
   try {
-    const admin = await getCurrentUser(req);
-    const sessionAuth = await auth().catch(() => null);
-    const claims = sessionAuth?.sessionClaims as any;
-    const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
+    const { authorized, user: admin, adminFirebaseUid } = await verifyAdminAccess(req);
 
-    const isLocalAdminMode = process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production';
-    const isAdmin = isLocalAdminMode || admin?.role === 'ADMIN' || clerkRole === 'admin';
-
-    if (!isAdmin) {
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
@@ -46,10 +39,7 @@ export async function POST(
     const isYearly = paymentRequest.plan === 'yearly' || paymentRequest.plan === 'pro_yearly' || paymentRequest.plan === 'VIP_YEARLY';
     const durationDays = isYearly ? 365 : 30;
 
-    // Subscription extension logic:
-    // If existing user has VIP expiring in the future, extend from that future date!
     const targetUser = paymentRequest.user;
-    let baseStartDate = now;
     let baseExpiryDate = now;
 
     if (targetUser && targetUser.is_vip && targetUser.vip_expires_at && new Date(targetUser.vip_expires_at) > now) {
@@ -57,22 +47,18 @@ export async function POST(
     }
 
     const newExpiresAt = new Date(baseExpiryDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
-    const adminIdentifier = admin?.username || claims?.sub || 'admin';
+    const adminIdentifier = admin?.username || adminFirebaseUid || 'admin';
 
-    // ATOMIC TRANSACTION: Prevent race conditions or double activation
-    const result = await prisma.$transaction(async (tx) => {
-      // 1. Mark request as APPROVED
-      const updatedReq = await tx.paymentRequest.update({
+    await prisma.$transaction([
+      prisma.paymentRequest.update({
         where: { id: paymentRequest.id },
         data: {
-          status: 'APPROVED',
+          status: 'approved',
+          reviewedBy: admin?.id || 'admin',
           reviewedAt: now,
-          reviewedBy: adminIdentifier,
         },
-      });
-
-      // 2. Upgrade User to VIP
-      const updatedUser = await tx.user.update({
+      }),
+      prisma.user.update({
         where: { id: paymentRequest.userId },
         data: {
           membershipTier: 'VIP',
@@ -80,51 +66,49 @@ export async function POST(
           vip_started_at: targetUser.vip_started_at || now,
           vip_expires_at: newExpiresAt,
         },
-      });
-
-      // 3. Upsert Active Subscription
-      await tx.subscription.upsert({
+      }),
+      prisma.subscription.upsert({
         where: { userId: paymentRequest.userId },
+        update: {
+          plan: 'VIP',
+          isActive: true,
+          subscriptionStatus: 'ACTIVE',
+          startDate: now,
+          endDate: newExpiresAt,
+        },
         create: {
           userId: paymentRequest.userId,
-          plan: isYearly ? 'PRO_YEARLY' : 'PRO_MONTHLY',
+          plan: 'VIP',
           isActive: true,
           subscriptionStatus: 'ACTIVE',
-          startDate: baseStartDate,
+          startDate: now,
           endDate: newExpiresAt,
         },
-        update: {
-          plan: isYearly ? 'PRO_YEARLY' : 'PRO_MONTHLY',
-          isActive: true,
-          subscriptionStatus: 'ACTIVE',
-          startDate: baseStartDate,
-          endDate: newExpiresAt,
+      }),
+      prisma.notification.create({
+        data: {
+          userId: paymentRequest.userId,
+          type: 'PAYMENT_APPROVED',
+          content: `👑 VIP Activated! Your payment for ${paymentRequest.plan || 'VIP Plan'} was verified. Active until ${newExpiresAt.toLocaleDateString()}.`,
         },
-      });
-
-      // 4. Audit Log
-      if (admin?.id) {
-        await tx.adminLog.create({
-          data: {
-            adminUserId: admin.id,
-            adminClerkId: claims?.sub || null,
-            action: 'PAYMENT_APPROVED',
-            targetUserId: paymentRequest.userId,
-            entityType: 'PAYMENT',
-            entityId: paymentRequest.id,
-            details: `Approved payment ${paymentRequest.requestId} (${paymentRequest.plan}) for ₹${paymentRequest.amount}. Activated subscription until ${newExpiresAt.toISOString()}`,
-          },
-        });
-      }
-
-      return { updatedReq, updatedUser };
-    });
+      }),
+      prisma.adminLog.create({
+        data: {
+          adminUserId: admin?.id || 'admin',
+          adminFirebaseUid: adminFirebaseUid || null,
+          action: 'APPROVE_PAYMENT',
+          targetUserId: paymentRequest.userId,
+          entityType: 'PAYMENT',
+          entityId: paymentRequest.id,
+          details: `Approved payment request ${paymentRequest.requestId || paymentRequest.id} for user ${targetUser.username} (${targetUser.email || 'no-email'}) by ${adminIdentifier}. Expiry: ${newExpiresAt.toISOString()}`,
+        },
+      }),
+    ]);
 
     return NextResponse.json({
       success: true,
-      message: `Payment request approved. Subscription activated for ${durationDays} days (Expires: ${newExpiresAt.toLocaleDateString()}).`,
-      request: result.updatedReq,
-      user: result.updatedUser,
+      message: 'Payment approved and VIP activated successfully',
+      vip_expires_at: newExpiresAt,
     });
   } catch (error) {
     console.error('Error approving payment request:', error);

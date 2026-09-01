@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from './prisma';
-import { auth } from '@clerk/nextjs/server';
+import { verifyFirebaseIdToken } from './firebaseAdmin';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cupidx_fallback_jwt_secret';
 
@@ -27,36 +27,7 @@ export function verifyToken(token: string): { userId: string; username: string; 
 
 export async function getCurrentUser(req?: Request) {
   try {
-    // 1. Check Clerk session first if present
-    let clerkAuth: any = null;
-    try {
-      clerkAuth = await auth();
-    } catch (e) {}
-
-    if (clerkAuth && clerkAuth.userId) {
-      let user = await prisma.user.findUnique({
-        where: { clerkUserId: clerkAuth.userId },
-        include: {
-          profile: true,
-          subscription: true,
-        },
-      });
-
-      if (user && !user.isSuspended) {
-        // Auto-downgrade ONLY if an expiry date is set AND has passed
-        if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= Date.now()) {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { is_vip: false, membershipTier: 'FREE' },
-          });
-          user.is_vip = false;
-          user.membershipTier = 'FREE';
-        }
-        return user;
-      }
-    }
-
-    // 2. Check local JWT cookie token if Clerk user wasn't directly found
+    // 1. Check local JWT cookie token first
     if (req) {
       const cookieHeader = req.headers.get('cookie') || '';
       const cookieMatch = cookieHeader.match(/(?:^|;\s*)token=([^;]*)/);
@@ -74,15 +45,6 @@ export async function getCurrentUser(req?: Request) {
           });
 
           if (user && !user.isSuspended) {
-            // Auto-link clerkUserId if current session has clerkAuth
-            if (clerkAuth && clerkAuth.userId && !user.clerkUserId) {
-              await prisma.user.update({
-                where: { id: user.id },
-                data: { clerkUserId: clerkAuth.userId },
-              });
-              user.clerkUserId = clerkAuth.userId;
-            }
-
             // Auto-downgrade ONLY if an expiry date is set AND has passed
             if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= Date.now()) {
               await prisma.user.update({
@@ -91,6 +53,38 @@ export async function getCurrentUser(req?: Request) {
               });
               user.is_vip = false;
               user.membershipTier = 'FREE';
+            }
+            return user;
+          }
+        }
+      }
+
+      // 2. Check Authorization Bearer Header (Firebase ID Token)
+      const authHeader = req.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const idToken = authHeader.substring(7);
+        const decoded = await verifyFirebaseIdToken(idToken);
+        if (decoded && decoded.uid) {
+          const user = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { firebaseUid: decoded.uid },
+                ...(decoded.email ? [{ email: decoded.email }] : []),
+              ],
+            },
+            include: {
+              profile: true,
+              subscription: true,
+            },
+          });
+
+          if (user && !user.isSuspended) {
+            if (!user.firebaseUid) {
+              await prisma.user.update({
+                where: { id: user.id },
+                data: { firebaseUid: decoded.uid },
+              });
+              user.firebaseUid = decoded.uid;
             }
             return user;
           }

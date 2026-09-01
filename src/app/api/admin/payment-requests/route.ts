@@ -1,19 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { auth } from '@clerk/nextjs/server';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function GET(req: Request) {
   try {
-    const admin = await getCurrentUser(req);
-    const sessionAuth = await auth().catch(() => null);
-    const claims = sessionAuth?.sessionClaims as any;
-    const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
+    const { authorized } = await verifyAdminAccess(req);
 
-    const isLocalAdminMode = process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production';
-    const isAdmin = isLocalAdminMode || admin?.role === 'ADMIN' || clerkRole === 'admin';
-
-    if (!isAdmin) {
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
@@ -43,7 +36,7 @@ export async function GET(req: Request) {
         user: {
           select: {
             id: true,
-            clerkUserId: true,
+            firebaseUid: true,
             username: true,
             fullName: true,
             displayName: true,
@@ -57,33 +50,19 @@ export async function GET(req: Request) {
       },
     });
 
-    // Populate Clerk metadata if user record has it
-    const formattedRequests = requests.map((r) => ({
-      id: r.id,
-      requestId: r.requestId,
-      userId: r.userId,
-      clerkUserId: r.clerkUserId || r.user?.clerkUserId || 'N/A',
-      userEmail: r.userEmail || r.user?.email || 'N/A',
-      userName: r.userFullName || r.user?.fullName || r.username,
-      username: r.username,
-      plan: r.plan,
-      planId: r.planId,
-      region: r.region,
-      amount: r.amount,
-      currency: r.currency,
-      paymentId: r.paymentId,
-      screenshotUrl: r.screenshotUrl,
-      status: r.status,
-      rejectionReason: r.rejectionReason,
-      createdAt: r.createdAt,
-      reviewedAt: r.reviewedAt,
-      reviewedBy: r.reviewedBy,
-      user: r.user,
+    const enrichedRequests = requests.map((item) => ({
+      ...item,
+      clerkUser: {
+        id: item.user.id,
+        email: item.user.email || null,
+        name: item.user.fullName || item.user.username,
+        avatar: null,
+      },
     }));
 
-    return NextResponse.json({ requests: formattedRequests });
+    return NextResponse.json({ requests: enrichedRequests });
   } catch (error) {
-    console.error('Error fetching admin payment requests:', error);
+    console.error('Error fetching manual payment requests for admin:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

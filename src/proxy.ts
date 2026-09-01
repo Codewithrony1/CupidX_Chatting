@@ -1,56 +1,64 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-const isPublicRoute = createRouteMatcher([
+const PUBLIC_PATHS = [
   '/',
-  '/login(.*)',
-  '/register(.*)',
-  '/signup(.*)',
-  '/privacy(.*)',
-  '/terms(.*)',
-  '/sso-callback(.*)',
-  '/api/auth/login(.*)',
-  '/api/auth/register(.*)',
-  '/api/auth/logout(.*)',
-  '/api/auth/me(.*)',
-  '/api/payment/qr(.*)',
-]);
+  '/login',
+  '/register',
+  '/signup',
+  '/privacy',
+  '/terms',
+  '/sso-callback',
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/logout',
+  '/api/auth/me',
+  '/api/payment/qr',
+];
 
-const isAdminRoute = createRouteMatcher([
-  '/admin(.*)',
-  '/api/admin(.*)',
-]);
+function isPublic(pathname: string): boolean {
+  if (PUBLIC_PATHS.includes(pathname)) return true;
+  return PUBLIC_PATHS.some((p) => p !== '/' && pathname.startsWith(p + '/'));
+}
 
-export default clerkMiddleware(async (auth, req) => {
-  if (isPublicRoute(req)) {
-    return;
+function isAdmin(pathname: string): boolean {
+  return pathname === '/admin' || pathname.startsWith('/admin/') || pathname.startsWith('/api/admin/');
+}
+
+export default function proxy(req: NextRequest) {
+  const pathname = req.nextUrl.pathname;
+
+  // 1. Static asset bypass
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/static') ||
+    pathname.match(/\.(png|jpg|jpeg|gif|svg|ico|webp|json|css|js|txt)$/)
+  ) {
+    return NextResponse.next();
   }
 
-  const isApiRoute = req.nextUrl.pathname.startsWith('/api/');
+  // 2. Allow public routes
+  if (isPublic(pathname)) {
+    return NextResponse.next();
+  }
 
-  // 1. Admin Route Protection
-  if (isAdminRoute(req)) {
+  const isApiRoute = pathname.startsWith('/api/');
+  const tokenCookie = req.cookies.get('token')?.value;
+  const authHeader = req.headers.get('authorization');
+
+  // 3. Admin routes gate
+  if (isAdmin(pathname)) {
     if (process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production') {
-      return;
+      return NextResponse.next();
     }
 
-    const sessionAuth = await auth();
-    const claims = sessionAuth.sessionClaims as any;
-    const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
-
-    if (clerkRole === 'admin') {
-      return;
-    }
-
-    // Check local token cookie for ADMIN role
-    const tokenCookie = req.cookies.get('token')?.value;
     if (tokenCookie) {
       try {
         const parts = tokenCookie.split('.');
         if (parts.length === 3) {
           const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
           if (payload && payload.role === 'ADMIN') {
-            return;
+            return NextResponse.next();
           }
         }
       } catch (e) {}
@@ -63,22 +71,20 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // 2. Protected Routes (Client Pages + APIs)
-  const tokenCookie = req.cookies.get('token')?.value;
-  const { userId } = await auth();
-
-  if (!userId && !tokenCookie) {
+  // 4. Protected Routes gate (Strict verification)
+  if (!tokenCookie && !authHeader) {
     if (isApiRoute) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
     const loginUrl = new URL('/login', req.url);
     return NextResponse.redirect(loginUrl);
   }
-});
+
+  return NextResponse.next();
+}
 
 export const config = {
   matcher: [
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    '/(api|trpc)(.*)',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 };

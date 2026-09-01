@@ -1,48 +1,48 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, signToken } from '@/lib/auth';
-import { auth, currentUser } from '@clerk/nextjs/server';
+import { verifyFirebaseIdToken } from '@/lib/firebaseAdmin';
 import { prisma } from '@/lib/prisma';
 
 export async function GET(req: Request) {
   try {
     let user: any = await getCurrentUser(req);
 
-    // If user is not found via cookie or clerkUserId, check Clerk details & auto-provision immediately
+    // If not found via cookie, check Authorization header (Firebase ID token)
     if (!user) {
-      try {
-        const clerkAuth = await auth();
-        if (clerkAuth && clerkAuth.userId) {
-          // Check if DB user exists by clerkUserId
-          user = await prisma.user.findUnique({
-            where: { clerkUserId: clerkAuth.userId },
+      const authHeader = req.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const idToken = authHeader.substring(7);
+        const decoded = await verifyFirebaseIdToken(idToken);
+
+        if (decoded && decoded.uid) {
+          user = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { firebaseUid: decoded.uid },
+                ...(decoded.email ? [{ email: decoded.email }] : []),
+              ],
+            },
             include: { profile: true, subscription: true },
           });
 
-          // If still not found, auto-provision user immediately
+          // Auto-provision user if first time logging in
           if (!user) {
-            let clerkUser: any = null;
-            try {
-              clerkUser = await currentUser();
-            } catch (e) {
-              console.warn('Could not fetch detailed Clerk user profile, using fallback');
-            }
-
-            const email = clerkUser?.emailAddresses?.[0]?.emailAddress || '';
-            const rawName = clerkUser?.username || (email ? email.split('@')[0] : '') || `user_${clerkAuth.userId.slice(-6)}`;
+            const email = decoded.email || '';
+            const rawName = decoded.name || (email ? email.split('@')[0] : '') || `user_${decoded.uid.slice(-6)}`;
             let cleanUsername = rawName.toLowerCase().replace(/[^a-z0-9_]/g, '');
             if (cleanUsername.length < 3) cleanUsername = `user_${Date.now().toString().slice(-4)}`;
 
-            // Check if username is already in DB
             const existing = await prisma.user.findFirst({
               where: { username: cleanUsername },
             });
 
             const finalUsername = existing ? `${cleanUsername}_${Math.floor(100 + Math.random() * 900)}` : cleanUsername;
-            const displayName = finalUsername;
+            const displayName = decoded.name || finalUsername;
 
             user = await prisma.user.create({
               data: {
-                clerkUserId: clerkAuth.userId,
+                firebaseUid: decoded.uid,
+                email: email || null,
                 username: finalUsername,
                 fullName: displayName,
                 displayName: displayName,
@@ -51,9 +51,9 @@ export async function GET(req: Request) {
                 membershipTier: 'FREE',
                 profile: {
                   create: {
-                    avatarType: 'EMOJI',
+                    avatarType: decoded.picture ? 'IMAGE' : 'EMOJI',
                     avatarEmoji: '😊',
-                    avatarUrl: null,
+                    avatarUrl: decoded.picture || null,
                     bio: 'Hey there! I am using Cupidx.',
                   },
                 },
@@ -67,10 +67,14 @@ export async function GET(req: Request) {
               },
               include: { profile: true, subscription: true },
             });
+          } else if (!user.firebaseUid) {
+            user = await prisma.user.update({
+              where: { id: user.id },
+              data: { firebaseUid: decoded.uid },
+              include: { profile: true, subscription: true },
+            });
           }
         }
-      } catch (e) {
-        console.warn('Auto-provisioning check fallback error:', e);
       }
     }
 
@@ -85,17 +89,19 @@ export async function GET(req: Request) {
       const response = NextResponse.json({
         user: {
           id: user.id,
-          clerkUserId: user.clerkUserId,
+          firebaseUid: user.firebaseUid,
           username: user.username,
           fullName: user.fullName,
+          displayName: user.displayName || user.fullName,
+          email: user.email,
           role: user.role,
           membershipTier: isVIP ? 'VIP' : 'FREE',
+          is_vip: isVIP,
           profile: user.profile,
           subscription: user.subscription,
         },
       });
 
-      // Set cookie token for 30 days so subsequent page refreshes hit fast-path
       response.cookies.set('token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',

@@ -1,19 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { auth } from '@clerk/nextjs/server';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser(req);
-    const sessionAuth = await auth().catch(() => null);
-    const claims = sessionAuth?.sessionClaims as any;
-    const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
+    const { authorized, user, adminFirebaseUid } = await verifyAdminAccess(req);
 
-    const isLocalAdminMode = process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production';
-    const isAdmin = isLocalAdminMode || user?.role === 'ADMIN' || clerkRole === 'admin';
-
-    if (!isAdmin) {
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
@@ -37,16 +30,15 @@ export async function POST(req: Request) {
       data: { isSuspended },
     });
 
-    if (user?.id) {
-      await prisma.adminLog.create({
-        data: {
-          adminUserId: user.id,
-          action: isSuspended ? 'BAN_USER' : 'UNBAN_USER',
-          targetUserId: userId,
-          details: `${isSuspended ? 'Suspended' : 'Unbanned'} user @${targetUser.username}`,
-        },
-      });
-    }
+    await prisma.adminLog.create({
+      data: {
+        adminUserId: user?.id || 'admin',
+        adminFirebaseUid: adminFirebaseUid || null,
+        action: isSuspended ? 'BAN_USER' : 'UNBAN_USER',
+        targetUserId: userId,
+        details: `${isSuspended ? 'Suspended' : 'Unbanned'} user @${targetUser.username}`,
+      },
+    });
 
     return NextResponse.json({
       success: true,

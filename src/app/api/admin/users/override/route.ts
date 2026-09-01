@@ -1,19 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { auth } from '@clerk/nextjs/server';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function POST(req: Request) {
   try {
-    const admin = await getCurrentUser(req);
-    const sessionAuth = await auth().catch(() => null);
-    const claims = sessionAuth?.sessionClaims as any;
-    const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
+    const { authorized, user: admin, adminFirebaseUid } = await verifyAdminAccess(req);
 
-    const isLocalAdminMode = process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production';
-    const isAdmin = isLocalAdminMode || admin?.role === 'ADMIN' || clerkRole === 'admin';
-
-    if (!isAdmin) {
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
@@ -58,38 +51,45 @@ export async function POST(req: Request) {
       data: updateData,
     });
 
-    // Update Profile record for consistency if profile fields changed
-    const profileUpdate: any = {};
-    if (cleanGender !== undefined) profileUpdate.gender = cleanGender;
-    if (parsedDob && !isNaN(parsedDob.getTime())) profileUpdate.dob = parsedDob;
-
-    if (Object.keys(profileUpdate).length > 0) {
-      await prisma.profile.update({
+    // Mirror gender update to Profile record if exists
+    if (cleanGender) {
+      await prisma.profile.upsert({
         where: { userId },
-        data: profileUpdate,
-      });
-    }
-
-    // Log admin audit action
-    if (admin?.id) {
-      await prisma.adminLog.create({
-        data: {
-          adminUserId: admin.id,
-          adminClerkId: claims?.sub || null,
-          action: 'EDIT_USER_PROFILE_OVERRIDE',
-          targetUserId: userId,
-          details: `Updated profile overrides for @${targetUser.username}`,
+        update: {
+          gender: cleanGender,
+          ageGenderConfirmed: true,
+        },
+        create: {
+          userId,
+          gender: cleanGender,
+          ageGenderConfirmed: true,
+          bio: '',
+          interests: '',
+          themePreference: 'dark',
         },
       });
     }
 
+    // Log admin action in AdminLog
+    await prisma.adminLog.create({
+      data: {
+        adminUserId: admin?.id || 'admin',
+        adminFirebaseUid: adminFirebaseUid || null,
+        action: 'OVERRIDE_USER_ATTRIBUTES',
+        targetUserId: userId,
+        entityType: 'USER',
+        entityId: userId,
+        details: `Updated attributes for user @${targetUser.username}: ${JSON.stringify(updateData)}`,
+      },
+    });
+
     return NextResponse.json({
       success: true,
-      message: 'User profile override applied successfully.',
+      message: 'User attributes updated successfully.',
       user: updatedUser,
     });
   } catch (error) {
-    console.error('Error applying user override:', error);
+    console.error('Error updating user override attributes:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

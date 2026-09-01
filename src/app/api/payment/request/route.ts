@@ -1,47 +1,21 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { auth, currentUser } from '@clerk/nextjs/server';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user server-side via Clerk / local auth
+    // 1. Authenticate user server-side
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
 
-    // Fetch authoritative Clerk User details if available
-    let clerkEmail: string | null = user.email || null;
-    let clerkName: string | null = user.fullName || user.displayName || user.username;
-    let clerkId: string | null = user.clerkUserId || null;
-
-    try {
-      const session = await auth().catch(() => null);
-      if (session && session.userId) {
-        clerkId = session.userId;
-      }
-      const clerk = await currentUser().catch(() => null);
-      if (clerk) {
-        if (clerk.emailAddresses && clerk.emailAddresses.length > 0) {
-          clerkEmail = clerk.emailAddresses[0].emailAddress;
-        }
-        if (clerk.firstName || clerk.lastName) {
-          clerkName = `${clerk.firstName || ''} ${clerk.lastName || ''}`.trim();
-        }
-        if (!user.clerkUserId && clerk.id) {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { clerkUserId: clerk.id, email: clerkEmail || user.email },
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('Clerk user profile lookup note:', e);
-    }
+    const clerkEmail: string | null = user.email || null;
+    const clerkName: string | null = user.fullName || user.displayName || user.username;
+    const clerkId: string | null = user.firebaseUid || user.clerkUserId || user.id;
 
     const body = await req.json().catch(() => ({}));
     const { plan = 'monthly', region, paymentId, screenshot } = body;

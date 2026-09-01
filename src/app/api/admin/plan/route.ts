@@ -1,19 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { auth } from '@clerk/nextjs/server';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser(req);
-    const sessionAuth = await auth().catch(() => null);
-    const claims = sessionAuth?.sessionClaims as any;
-    const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
+    const { authorized, user, adminFirebaseUid } = await verifyAdminAccess(req);
 
-    const isLocalAdminMode = process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production';
-    const isAdmin = isLocalAdminMode || user?.role === 'ADMIN' || clerkRole === 'admin';
-
-    if (!isAdmin) {
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
@@ -33,7 +26,7 @@ export async function POST(req: Request) {
     }
 
     const now = new Date();
-    const adminIdentifier = user?.username || 'admin';
+    const adminIdentifier = user?.username || adminFirebaseUid || 'admin';
 
     if (action === 'grant') {
       const grantDays = parseInt(days.toString(), 10) || 30;
@@ -68,25 +61,39 @@ export async function POST(req: Request) {
         },
       });
 
-      // Log admin action
-      if (user?.id) {
-        await prisma.adminLog.create({
-          data: {
-            adminUserId: user.id,
-            action: 'GRANT_VIP',
-            targetUserId: userId,
-            details: `Manually granted ${grantDays} days VIP access to @${targetUser.username}`,
-          },
-        });
-      }
+      await prisma.notification.create({
+        data: {
+          userId,
+          type: 'VIP_UPGRADED',
+          content: `👑 VIP Granted! Your account was upgraded to VIP by Admin for ${grantDays} days (expires ${expiresAt.toLocaleDateString()}).`,
+        },
+      });
+
+      await prisma.adminLog.create({
+        data: {
+          adminUserId: user?.id || 'admin',
+          adminFirebaseUid: adminFirebaseUid || null,
+          action: 'GRANT_VIP',
+          targetUserId: userId,
+          entityType: 'SUBSCRIPTION',
+          entityId: userId,
+          details: `Admin ${adminIdentifier} manually granted VIP to @${targetUser.username} (${grantDays} days, expires ${expiresAt.toISOString()})`,
+        },
+      });
 
       return NextResponse.json({
         success: true,
-        message: `Granted ${grantDays} days VIP to @${targetUser.username}`,
-        user: updatedUser,
+        message: `VIP successfully granted to ${targetUser.username} for ${grantDays} days.`,
+        user: {
+          id: updatedUser.id,
+          username: updatedUser.username,
+          membershipTier: updatedUser.membershipTier,
+          vip_expires_at: updatedUser.vip_expires_at,
+        },
       });
-    } else {
-      // Revoke VIP
+    }
+
+    if (action === 'revoke') {
       const updatedUser = await prisma.user.update({
         where: { id: userId },
         data: {
@@ -111,26 +118,38 @@ export async function POST(req: Request) {
         },
       });
 
-      // Log admin action
-      if (user?.id) {
-        await prisma.adminLog.create({
-          data: {
-            adminUserId: user.id,
-            action: 'REVOKE_VIP',
-            targetUserId: userId,
-            details: `Manually revoked VIP access for @${targetUser.username}`,
-          },
-        });
-      }
+      await prisma.notification.create({
+        data: {
+          userId,
+          type: 'VIP_REVOKED',
+          content: '⚠️ VIP Status Changed: Your VIP subscription has been revoked by administration.',
+        },
+      });
+
+      await prisma.adminLog.create({
+        data: {
+          adminUserId: user?.id || 'admin',
+          adminFirebaseUid: adminFirebaseUid || null,
+          action: 'REVOKE_VIP',
+          targetUserId: userId,
+          entityType: 'SUBSCRIPTION',
+          entityId: userId,
+          details: `Admin ${adminIdentifier} manually revoked VIP from @${targetUser.username}`,
+        },
+      });
 
       return NextResponse.json({
         success: true,
-        message: `Revoked VIP from @${targetUser.username}`,
-        user: updatedUser,
+        message: `VIP revoked from ${targetUser.username}.`,
+        user: {
+          id: updatedUser.id,
+          username: updatedUser.username,
+          membershipTier: updatedUser.membershipTier,
+        },
       });
     }
   } catch (error) {
-    console.error('Error updating user VIP plan:', error);
+    console.error('Admin plan modification error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

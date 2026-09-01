@@ -7,7 +7,6 @@ import { Heart, Shield, User, MessageCircle, Lock, ArrowRight, FastForward, Chec
 import FloatingHearts from '@/components/FloatingHearts';
 import CupidXLogo from '@/components/CupidXLogo';
 import { useAuth } from '@/context/AuthContext';
-import { useUser } from '@clerk/nextjs';
 
 const Canvas3D = dynamic(() => import('@/components/Canvas3D'), {
   ssr: false,
@@ -15,10 +14,9 @@ const Canvas3D = dynamic(() => import('@/components/Canvas3D'), {
 });
 
 export default function Home() {
-  const { user, loading } = useAuth();
-  const { isSignedIn, isLoaded } = useUser();
+  const { user, firebaseUser, loading } = useAuth();
 
-  const isAuthenticated = !loading && isLoaded && (!!user || isSignedIn);
+  const isAuthenticated = !loading && (!!user || !!firebaseUser);
   const needsOnboarding = isAuthenticated && user && !user.username;
 
   // Authentication-aware routing URLs

@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Outfit } from 'next/font/google';
 import './globals.css';
-import { ClerkProvider } from '@clerk/nextjs';
 import { AuthProvider } from '@/context/AuthContext';
 import { SocketProvider } from '@/context/SocketContext';
 import PWAInstallPrompt from '@/components/PWAInstallPrompt';
@@ -40,14 +39,12 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${outfit.variable} dark h-full antialiased`}>
       <body className="font-sans min-h-full flex flex-col bg-slate-950 text-slate-100 overflow-x-hidden">
-        <ClerkProvider>
-          <AuthProvider>
-            <SocketProvider>
-              <PWAInstallPrompt />
-              {children}
-            </SocketProvider>
-          </AuthProvider>
-        </ClerkProvider>
+        <AuthProvider>
+          <SocketProvider>
+            <PWAInstallPrompt />
+            {children}
+          </SocketProvider>
+        </AuthProvider>
       </body>
     </html>
   );

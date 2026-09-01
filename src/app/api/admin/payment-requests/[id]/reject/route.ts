@@ -1,22 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { auth } from '@clerk/nextjs/server';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function POST(
   req: Request,
   props: { params: Promise<{ id: string }> }
 ) {
   try {
-    const admin = await getCurrentUser(req);
-    const sessionAuth = await auth().catch(() => null);
-    const claims = sessionAuth?.sessionClaims as any;
-    const clerkRole = claims?.metadata?.role || claims?.role || claims?.publicMetadata?.role;
+    const { authorized, user: admin, adminFirebaseUid } = await verifyAdminAccess(req);
 
-    const isLocalAdminMode = process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production';
-    const isAdmin = isLocalAdminMode || admin?.role === 'ADMIN' || clerkRole === 'admin';
-
-    if (!isAdmin) {
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
@@ -39,10 +32,10 @@ export async function POST(
     }
 
     const now = new Date();
-    const adminIdentifier = admin?.username || claims?.sub || 'admin';
+    const adminIdentifier = admin?.username || adminFirebaseUid || 'admin';
 
     // Update request to REJECTED
-    const updatedRequest = await prisma.paymentRequest.update({
+    await prisma.paymentRequest.update({
       where: { id: paymentRequest.id },
       data: {
         status: 'REJECTED',
@@ -53,24 +46,21 @@ export async function POST(
     });
 
     // Write Audit Log
-    if (admin?.id) {
-      await prisma.adminLog.create({
-        data: {
-          adminUserId: admin.id,
-          adminClerkId: claims?.sub || null,
-          action: 'PAYMENT_REJECTED',
-          targetUserId: paymentRequest.userId,
-          entityType: 'PAYMENT',
-          entityId: paymentRequest.id,
-          details: `Rejected payment request ${paymentRequest.requestId}. Reason: ${reason}`,
-        },
-      });
-    }
+    await prisma.adminLog.create({
+      data: {
+        adminUserId: admin?.id || 'admin',
+        adminFirebaseUid: adminFirebaseUid || null,
+        action: 'REJECT_PAYMENT',
+        targetUserId: paymentRequest.userId,
+        entityType: 'PAYMENT',
+        entityId: paymentRequest.id,
+        details: `Rejected payment request ${paymentRequest.requestId || paymentRequest.id} by ${adminIdentifier}. Reason: ${reason}`,
+      },
+    });
 
     return NextResponse.json({
       success: true,
-      message: 'Payment request rejected.',
-      request: updatedRequest,
+      message: 'Payment request rejected',
     });
   } catch (error) {
     console.error('Error rejecting payment request:', error);

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { auth, currentUser } from '@clerk/nextjs/server';
 import { usernameSchema } from '@/lib/validation/username';
 import { signToken, getCurrentUser } from '@/lib/auth';
+import { verifyFirebaseIdToken } from '@/lib/firebaseAdmin';
 
 export async function GET(req: Request) {
   try {
@@ -55,7 +55,6 @@ export async function POST(req: Request) {
     const cleanGender = inputGender ? inputGender.toString().trim().toLowerCase() : 'unspecified';
     const parsedDob = inputDob ? new Date(inputDob) : null;
     
-    // Calculate age from DOB if available
     let parsedAge = 18;
     if (parsedDob && !isNaN(parsedDob.getTime())) {
       const today = new Date();
@@ -77,55 +76,89 @@ export async function POST(req: Request) {
       );
     }
 
-    let clerkUserId: string | null = null;
+    let user = await getCurrentUser(req);
 
-    try {
-      const clerkAuth = await auth();
-      if (clerkAuth && clerkAuth.userId) {
-        clerkUserId = clerkAuth.userId;
+    // If not found from cookie, check Firebase Bearer token
+    if (!user) {
+      const authHeader = req.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const idToken = authHeader.substring(7);
+        const decoded = await verifyFirebaseIdToken(idToken);
+        if (decoded && decoded.uid) {
+          user = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { firebaseUid: decoded.uid },
+                ...(decoded.email ? [{ email: decoded.email }] : []),
+              ],
+            },
+            include: { profile: true, subscription: true },
+          });
+
+          if (!user) {
+            user = await prisma.user.create({
+              data: {
+                firebaseUid: decoded.uid,
+                email: decoded.email || inputEmail || null,
+                username: cleanUsername,
+                fullName: cleanDisplayName,
+                displayName: cleanDisplayName,
+                passwordHash: '',
+                role: 'USER',
+                membershipTier: 'FREE',
+                dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
+                gender: cleanGender,
+                profile: {
+                  create: {
+                    avatarType: 'EMOJI',
+                    avatarEmoji: selectedEmoji,
+                    age: parsedAge,
+                    gender: cleanGender,
+                    dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
+                    ageGenderConfirmed: true,
+                    bio: 'Hey there! I am using Cupidx.',
+                  },
+                },
+                subscription: {
+                  create: {
+                    plan: 'FREE',
+                    isActive: false,
+                    subscriptionStatus: 'INACTIVE',
+                  },
+                },
+              },
+              include: { profile: true, subscription: true },
+            });
+          }
+        }
       }
-    } catch (e) {
-      console.warn('Clerk auth check fallback:', e);
     }
 
-    const existingCookieUser = await getCurrentUser(req);
-
-    if (!clerkUserId && !existingCookieUser) {
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
 
-    // 1. Check if user already exists by Clerk ID or DB ID
-    let user = null;
-    if (clerkUserId) {
-      user = await prisma.user.findUnique({
-        where: { clerkUserId },
-        include: { profile: true, subscription: true },
+    if (user.username !== cleanUsername) {
+      const taken = await prisma.user.findFirst({
+        where: { username: cleanUsername, id: { not: user.id } },
       });
-    } else if (existingCookieUser) {
-      user = existingCookieUser;
+
+      if (taken) {
+        return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
+      }
     }
 
-    if (user) {
-      if (user.username !== cleanUsername) {
-        const taken = await prisma.user.findFirst({
-          where: { username: cleanUsername, id: { not: user.id } },
-        });
-
-        if (taken) {
-          return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
-        }
-      }
-
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          username: cleanUsername,
-          displayName: cleanDisplayName,
-          fullName: cleanDisplayName,
-          gender: cleanGender,
-          dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
-          email: inputEmail ? inputEmail.trim() : undefined,
-          profile: {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        username: cleanUsername,
+        displayName: cleanDisplayName,
+        fullName: cleanDisplayName,
+        gender: cleanGender,
+        dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
+        email: inputEmail ? inputEmail.trim() : user.email,
+        profile: {
+          upsert: {
             update: {
               avatarType: 'EMOJI',
               avatarEmoji: selectedEmoji,
@@ -134,93 +167,56 @@ export async function POST(req: Request) {
               dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
               ageGenderConfirmed: true,
             },
-          },
-        },
-        include: { profile: true, subscription: true },
-      });
-
-      const token = signToken({
-        userId: user.id,
-        username: user.username,
-        role: user.role,
-      });
-
-      const response = NextResponse.json({ success: true, user });
-      response.cookies.set('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60,
-        path: '/',
-      });
-      return response;
-    }
-
-    // 2. Check if username is taken by anyone
-    const usernameTaken = await prisma.user.findFirst({
-      where: { username: cleanUsername },
-    });
-
-    if (usernameTaken) {
-      return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
-    }
-
-    // 3. Create new user in database
-    const newUser = await prisma.user.create({
-      data: {
-        clerkUserId: clerkUserId || null,
-        username: cleanUsername,
-        fullName: cleanDisplayName,
-        displayName: cleanDisplayName,
-        gender: cleanGender,
-        dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : null,
-        email: inputEmail ? inputEmail.trim() : null,
-        passwordHash: '',
-        role: 'USER',
-        profile: {
-          create: {
-            avatarType: 'EMOJI',
-            avatarEmoji: selectedEmoji,
-            avatarUrl: null,
-            age: parsedAge,
-            gender: cleanGender,
-            dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : null,
-            ageGenderConfirmed: true,
-            bio: 'Hey there! I am using Cupidx.',
-          },
-        },
-        subscription: {
-          create: {
-            plan: 'FREE',
-            isActive: false,
-            subscriptionStatus: 'INACTIVE',
+            create: {
+              avatarType: 'EMOJI',
+              avatarEmoji: selectedEmoji,
+              age: parsedAge,
+              gender: cleanGender,
+              dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
+              ageGenderConfirmed: true,
+              bio: 'Hey there! I am using Cupidx.',
+            },
           },
         },
       },
-      include: {
-        profile: true,
-        subscription: true,
-      },
+      include: { profile: true, subscription: true },
     });
 
+    const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
     const token = signToken({
-      userId: newUser.id,
-      username: newUser.username,
-      role: newUser.role,
+      userId: user.id,
+      username: user.username,
+      role: user.role,
     });
 
-    const response = NextResponse.json({ success: true, user: newUser });
+    const response = NextResponse.json({
+      success: true,
+      message: 'Profile onboarded successfully',
+      user: {
+        id: user.id,
+        username: user.username,
+        fullName: user.fullName,
+        displayName: user.displayName,
+        email: user.email,
+        role: user.role,
+        membershipTier: isVIP ? 'VIP' : 'FREE',
+        is_vip: isVIP,
+        profile: user.profile,
+        subscription: user.subscription,
+      },
+    });
+
     response.cookies.set('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
+      maxAge: 30 * 24 * 60 * 60,
       path: '/',
     });
 
     return response;
-  } catch (error: any) {
-    console.error('Onboarding POST error:', error);
-    return NextResponse.json({ error: error?.message || 'Internal Server Error' }, { status: 500 });
+  } catch (error) {
+    console.error('Onboarding save error:', error);
+    return NextResponse.json({ error: 'Failed to complete onboarding' }, { status: 500 });
   }
 }
