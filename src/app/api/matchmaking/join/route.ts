@@ -1,94 +1,34 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { calculateMatchScore } from '@/lib/inMemoryQueue';
 import crypto from 'crypto';
 
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));
     const userProfile = user.profile;
     const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
 
-    const gender = body.gender || userProfile?.gender || 'unspecified';
+    const gender = body.gender || userProfile?.gender || user.gender || 'unspecified';
     const preferredGender = body.preferredGender || userProfile?.preferredGender || 'auto';
     const language = body.language || userProfile?.language || 'english';
 
-    // Mandatory Age & Gender Gate Check
-    if (!userProfile?.ageGenderConfirmed || userProfile?.gender === 'unspecified') {
-      return NextResponse.json(
-        {
-          error: 'Mandatory Age & Gender confirmation required before joining random chat.',
-          requiresConfirmation: true,
-        },
-        { status: 403 }
-      );
-    }
-
-    // 1. Check if user already has an ACTIVE ChatSession
-    const activeChat = await prisma.chatSession.findFirst({
+    // 1. Clean up / end any prior ACTIVE chat sessions for this user so they get fresh matches
+    await prisma.chatSession.updateMany({
       where: {
         status: 'ACTIVE',
         OR: [{ userAId: user.id }, { userBId: user.id }],
       },
-      include: {
-        userA: { include: { profile: true } },
-        userB: { include: { profile: true } },
-      },
+      data: { status: 'ENDED' },
     });
 
-    if (activeChat) {
-      const partner = activeChat.userAId === user.id ? activeChat.userB : activeChat.userA;
-      return NextResponse.json({
-        matched: true,
-        chatSessionId: activeChat.id,
-        partner: {
-          id: partner.id,
-          username: partner.username,
-          fullName: partner.fullName,
-          avatarUrl: partner.profile?.avatarUrl || '/default-avatar.png',
-          gender: partner.profile?.gender || 'unspecified',
-          isVIP: partner.membershipTier === 'VIP',
-        },
-      });
-    }
-
-    // 2. Check if user's queue entry is already MATCHED
-    const existingQueue = await prisma.matchmakingQueue.findUnique({
-      where: { userId: user.id },
-    });
-
-    if (existingQueue && existingQueue.status === 'MATCHED' && existingQueue.chatSessionId) {
-      const partnerUser = existingQueue.partnerUserId
-        ? await prisma.user.findUnique({
-            where: { id: existingQueue.partnerUserId },
-            include: { profile: true },
-          })
-        : null;
-
-      return NextResponse.json({
-        matched: true,
-        chatSessionId: existingQueue.chatSessionId,
-        partner: partnerUser
-          ? {
-              id: partnerUser.id,
-              username: partnerUser.username,
-              fullName: partnerUser.fullName,
-              avatarUrl: partnerUser.profile?.avatarUrl || '/default-avatar.png',
-              gender: partnerUser.profile?.gender || 'unspecified',
-              isVIP: partnerUser.membershipTier === 'VIP',
-            }
-          : null,
-      });
-    }
-
-    // 3. Clean up stale WAITING queue entries (>45s inactive)
-    const STALE_THRESHOLD = new Date(Date.now() - 45 * 1000);
+    // 2. Clean up stale WAITING queue entries (>60s inactive)
+    const STALE_THRESHOLD = new Date(Date.now() - 60 * 1000);
     await prisma.matchmakingQueue.updateMany({
       where: {
         status: 'WAITING',
@@ -97,8 +37,7 @@ export async function POST(req: Request) {
       data: { status: 'EXPIRED' },
     });
 
-    // 4. Find compatible WAITING candidate
-    // Exclude users blocked or banned by current user or vice versa
+    // 3. Find list of blocked or banned user IDs
     const blockedRelations = await prisma.block.findMany({
       where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
     });
@@ -111,6 +50,7 @@ export async function POST(req: Request) {
 
     const excludeUserIds = Array.from(new Set([user.id, ...blockedUserIds, ...bannedUserIds]));
 
+    // 4. Find all active WAITING candidates currently on the website
     const candidates = await prisma.matchmakingQueue.findMany({
       where: {
         status: 'WAITING',
@@ -118,75 +58,16 @@ export async function POST(req: Request) {
         updatedAt: { gte: STALE_THRESHOLD },
       },
       orderBy: [{ joinedAt: 'asc' }],
-      take: 20,
+      take: 10,
     });
 
-    const userInterests = userProfile?.interests ? userProfile.interests.split(',').map((s) => s.trim().toLowerCase()) : [];
-    const currentUserCandidate = {
-      userId: user.id,
-      username: user.username,
-      fullName: user.fullName,
-      displayName: user.displayName || user.fullName,
-      gender,
-      plan: (isVIP ? 'vip' : 'free') as 'free' | 'vip',
-      isVIP,
-      genderPref: preferredGender,
-      mood: body.mood || userProfile?.mood || 'chill',
-      tags: body.tags && Array.isArray(body.tags) ? body.tags : userInterests,
-      language,
-      joinedAt: Date.now(),
-      blockedUserIds,
-      bannedUserIds,
-    };
-
-    // Sort candidates using calculateMatchScore
-    const now = Date.now();
-    const scoredCandidates = [];
-
-    for (const c of candidates) {
-      const candidateObj = {
-        userId: c.userId,
-        username: '',
-        fullName: '',
-        displayName: '',
-        gender: c.gender || 'unspecified',
-        plan: 'free' as 'free' | 'vip',
-        isVIP: false,
-        genderPref: c.preferredGender || 'auto',
-        mood: 'chill',
-        tags: [],
-        language: c.language || 'english',
-        joinedAt: c.joinedAt.getTime(),
-        blockedUserIds: [],
-        bannedUserIds: [],
-      };
-
-      const { canMatch, score } = calculateMatchScore(currentUserCandidate, candidateObj, now);
-      if (canMatch) {
-        scoredCandidates.push({ candidate: c, score });
-      }
-    }
-
-    scoredCandidates.sort((a, b) => b.score - a.score);
-
-    // Attempt atomic match claim with highest scoring candidate
-    for (const { candidate } of scoredCandidates) {
-      // Check candidate isn't currently in an active session
-      const candidateActiveChat = await prisma.chatSession.findFirst({
-        where: {
-          status: 'ACTIVE',
-          OR: [{ userAId: candidate.userId }, { userBId: candidate.userId }],
-        },
-      });
-
-      if (candidateActiveChat) continue;
-
+    // 5. Try to match with the earliest waiting candidate
+    for (const candidate of candidates) {
       const newChatSessionId = crypto.randomUUID();
 
       try {
-        // Atomic Match Claim
         const matchResult = await prisma.$transaction(async (tx) => {
-          // Double check candidate is still WAITING inside transaction
+          // Verify candidate is still WAITING inside transaction
           const updatedCandidate = await tx.matchmakingQueue.updateMany({
             where: {
               userId: candidate.userId,
@@ -196,14 +77,15 @@ export async function POST(req: Request) {
               status: 'MATCHED',
               chatSessionId: newChatSessionId,
               partnerUserId: user.id,
+              updatedAt: new Date(),
             },
           });
 
           if (updatedCandidate.count === 0) {
-            return null; // Candidate was already matched by concurrent request
+            return null; // Candidate was already taken by someone else
           }
 
-          // Upsert current user queue entry to MATCHED
+          // Mark current user as MATCHED
           await tx.matchmakingQueue.upsert({
             where: { userId: user.id },
             update: {
@@ -213,6 +95,7 @@ export async function POST(req: Request) {
               gender,
               preferredGender,
               language,
+              updatedAt: new Date(),
             },
             create: {
               userId: user.id,
@@ -225,7 +108,7 @@ export async function POST(req: Request) {
             },
           });
 
-          // Create single ChatSession
+          // Create active ChatSession
           const session = await tx.chatSession.create({
             data: {
               id: newChatSessionId,
@@ -252,19 +135,21 @@ export async function POST(req: Request) {
                   id: partnerUser.id,
                   username: partnerUser.username,
                   fullName: partnerUser.fullName,
-                  avatarUrl: partnerUser.profile?.avatarUrl || '/default-avatar.png',
-                  gender: partnerUser.profile?.gender || 'unspecified',
-                  isVIP: partnerUser.membershipTier === 'VIP',
+                  displayName: partnerUser.displayName || partnerUser.fullName,
+                  avatarUrl: partnerUser.profile?.avatarUrl || null,
+                  avatarEmoji: partnerUser.profile?.avatarEmoji || '😊',
+                  gender: partnerUser.profile?.gender || partnerUser.gender || 'unspecified',
+                  isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
                 }
               : null,
           });
         }
       } catch (err) {
-        console.warn('Matchmaking transaction contention, trying next candidate:', err);
+        console.warn('Matchmaking contention, checking next candidate:', err);
       }
     }
 
-    // No immediate match found: Put user in WAITING queue
+    // 6. No immediate candidate available: Put user into WAITING queue
     await prisma.matchmakingQueue.upsert({
       where: { userId: user.id },
       update: {
@@ -274,6 +159,7 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        joinedAt: new Date(),
         updatedAt: new Date(),
       },
       create: {
@@ -282,13 +168,15 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        joinedAt: new Date(),
+        updatedAt: new Date(),
       },
     });
 
     return NextResponse.json({
       matched: false,
       status: 'WAITING',
-      message: 'Looking for a person to chat with you.',
+      message: 'Looking for a person to chat with you...',
     });
   } catch (error: any) {
     console.error('Matchmaking Join Error:', error);

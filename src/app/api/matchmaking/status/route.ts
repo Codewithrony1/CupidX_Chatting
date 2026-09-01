@@ -10,35 +10,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 1. Check if user has an active ChatSession
-    const activeChat = await prisma.chatSession.findFirst({
-      where: {
-        status: 'ACTIVE',
-        OR: [{ userAId: user.id }, { userBId: user.id }],
-      },
-      include: {
-        userA: { include: { profile: true } },
-        userB: { include: { profile: true } },
-      },
-    });
-
-    if (activeChat) {
-      const partner = activeChat.userAId === user.id ? activeChat.userB : activeChat.userA;
-      return NextResponse.json({
-        matched: true,
-        chatSessionId: activeChat.id,
-        partner: {
-          id: partner.id,
-          username: partner.username,
-          fullName: partner.fullName,
-          avatarUrl: partner.profile?.avatarUrl || '/default-avatar.png',
-          gender: partner.profile?.gender || 'unspecified',
-          isVIP: partner.membershipTier === 'VIP',
-        },
-      });
-    }
-
-    // 2. Check user's MatchmakingQueue entry
+    // 1. Check user's MatchmakingQueue entry
     const userQueue = await prisma.matchmakingQueue.findUnique({
       where: { userId: user.id },
     });
@@ -47,59 +19,64 @@ export async function GET(req: Request) {
       return NextResponse.json({ matched: false, status: 'IDLE' });
     }
 
+    // 2. If already MATCHED, fetch partner details and return
     if (userQueue.status === 'MATCHED' && userQueue.chatSessionId) {
-      const partnerUser = userQueue.partnerUserId
-        ? await prisma.user.findUnique({
-            where: { id: userQueue.partnerUserId },
-            include: { profile: true },
-          })
-        : null;
-
-      return NextResponse.json({
-        matched: true,
-        chatSessionId: userQueue.chatSessionId,
-        partner: partnerUser
-          ? {
-              id: partnerUser.id,
-              username: partnerUser.username,
-              fullName: partnerUser.fullName,
-              avatarUrl: partnerUser.profile?.avatarUrl || '/default-avatar.png',
-              gender: partnerUser.profile?.gender || 'unspecified',
-              isVIP: partnerUser.membershipTier === 'VIP',
-            }
-          : null,
+      // Ensure chat session is still active
+      const session = await prisma.chatSession.findUnique({
+        where: { id: userQueue.chatSessionId },
       });
+
+      if (session && session.status === 'ACTIVE') {
+        const partnerId = session.userAId === user.id ? session.userBId : session.userAId;
+        const partnerUser = await prisma.user.findUnique({
+          where: { id: partnerId },
+          include: { profile: true },
+        });
+
+        return NextResponse.json({
+          matched: true,
+          chatSessionId: userQueue.chatSessionId,
+          partner: partnerUser
+            ? {
+                id: partnerUser.id,
+                username: partnerUser.username,
+                fullName: partnerUser.fullName,
+                displayName: partnerUser.displayName || partnerUser.fullName,
+                avatarUrl: partnerUser.profile?.avatarUrl || null,
+                avatarEmoji: partnerUser.profile?.avatarEmoji || '😊',
+                gender: partnerUser.profile?.gender || partnerUser.gender || 'unspecified',
+                isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
+              }
+            : null,
+        });
+      }
     }
 
+    // 3. If user is WAITING in queue:
     if (userQueue.status === 'WAITING') {
-      // Send Heartbeat: update updatedAt so user isn't marked as stale
+      // Send Heartbeat (keep updatedAt fresh)
       await prisma.matchmakingQueue.update({
         where: { userId: user.id },
         data: { updatedAt: new Date() },
       });
 
-      // Try atomic match check during poll
-      const STALE_THRESHOLD = new Date(Date.now() - 45 * 1000);
-      const candidates = await prisma.matchmakingQueue.findMany({
+      // Check if there is another WAITING candidate online right now
+      const STALE_THRESHOLD = new Date(Date.now() - 60 * 1000);
+      const blockedRelations = await prisma.block.findMany({
+        where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
+      });
+      const blockedUserIds = blockedRelations.map((b) => (b.blockerId === user.id ? b.blockedId : b.blockerId));
+
+      const candidate = await prisma.matchmakingQueue.findFirst({
         where: {
           status: 'WAITING',
-          userId: { not: user.id },
+          userId: { notIn: [user.id, ...blockedUserIds] },
           updatedAt: { gte: STALE_THRESHOLD },
         },
         orderBy: [{ joinedAt: 'asc' }],
-        take: 5,
       });
 
-      for (const candidate of candidates) {
-        const candidateActiveChat = await prisma.chatSession.findFirst({
-          where: {
-            status: 'ACTIVE',
-            OR: [{ userAId: candidate.userId }, { userBId: candidate.userId }],
-          },
-        });
-
-        if (candidateActiveChat) continue;
-
+      if (candidate) {
         const newChatSessionId = crypto.randomUUID();
 
         try {
@@ -113,6 +90,7 @@ export async function GET(req: Request) {
                 status: 'MATCHED',
                 chatSessionId: newChatSessionId,
                 partnerUserId: user.id,
+                updatedAt: new Date(),
               },
             });
 
@@ -124,6 +102,7 @@ export async function GET(req: Request) {
                 status: 'MATCHED',
                 chatSessionId: newChatSessionId,
                 partnerUserId: candidate.userId,
+                updatedAt: new Date(),
               },
             });
 
@@ -153,15 +132,17 @@ export async function GET(req: Request) {
                     id: partnerUser.id,
                     username: partnerUser.username,
                     fullName: partnerUser.fullName,
-                    avatarUrl: partnerUser.profile?.avatarUrl || '/default-avatar.png',
-                    gender: partnerUser.profile?.gender || 'unspecified',
-                    isVIP: partnerUser.membershipTier === 'VIP',
+                    displayName: partnerUser.displayName || partnerUser.fullName,
+                    avatarUrl: partnerUser.profile?.avatarUrl || null,
+                    avatarEmoji: partnerUser.profile?.avatarEmoji || '😊',
+                    gender: partnerUser.profile?.gender || partnerUser.gender || 'unspecified',
+                    isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
                   }
                 : null,
             });
           }
         } catch (e) {
-          // Contention, continue polling
+          console.warn('Matchmaking poll transaction collision:', e);
         }
       }
 
@@ -171,6 +152,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ matched: false, status: userQueue.status });
   } catch (error: any) {
     console.error('Matchmaking Status Error:', error);
-    return NextResponse.json({ error: 'Failed to check status' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch matchmaking status' }, { status: 500 });
   }
 }

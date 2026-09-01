@@ -151,12 +151,12 @@ export default function KnotChatRandomPage() {
       } catch (e) {
         console.error('Matchmaking poll error:', e);
       }
-    }, 2000);
+    }, 1000);
 
     return () => clearInterval(pollInterval);
   }, [matchStatus]);
 
-  // Realtime Active Chat Sync
+  // Realtime Active Chat Sync (Fast 800ms polling for instant responses)
   useEffect(() => {
     if (matchStatus !== 'connected' || !chatSessionId) return;
 
@@ -198,7 +198,7 @@ export default function KnotChatRandomPage() {
       } catch (e) {
         setReconnecting(true);
       }
-    }, 1500);
+    }, 800);
 
     return () => clearInterval(chatSyncInterval);
   }, [matchStatus, chatSessionId]);
