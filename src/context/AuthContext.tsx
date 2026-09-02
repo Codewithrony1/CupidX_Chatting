@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import {
   onAuthStateChanged,
@@ -41,92 +41,83 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  // Track initialization to guarantee execution happens ONCE per user
+  const currentInitUidRef = useRef<string | null>(null);
+  const isNavigatingRef = useRef<boolean>(false);
+
   /**
    * Helper to check if a user has completed the mandatory onboarding profile
    */
   const checkProfileCompletion = (u: User | null): boolean => {
-    if (!u) return false;
+    console.log('[AUTH-08] Onboarding check started for:', u?.username || 'null');
+    if (!u) {
+      console.log('[AUTH-09] Onboarding check completed: isComplete = false (no user)');
+      return false;
+    }
     const isComp = Boolean(
       u.profileCompleted === true ||
       (u.dateOfBirth && u.gender && u.gender !== 'unspecified') ||
       (u.profile?.dateOfBirth && u.profile?.gender && u.profile?.gender !== 'unspecified')
     );
-    console.log('[AUTH] PROFILE COMPLETED =', isComp, 'for user:', u.username);
+    console.log('[AUTH-09] Onboarding check completed: isComplete =', isComp, 'for UID:', u.uid);
     return isComp;
   };
 
   /**
-   * Sync user with both Firestore and backend /api/auth/me
+   * Initialize user profile once from Firestore.
+   * Firestore is the single source of truth — SQLite sync is fire-and-forget and does NOT overwrite profile state.
    */
-  const handleUserSession = async (fbUser: FirebaseUser | null) => {
+  const initializeUserSession = async (fbUser: FirebaseUser | null): Promise<UserProfile | null> => {
     if (!fbUser) {
+      currentInitUidRef.current = null;
       setUser(null);
       return null;
     }
 
-    console.log('[AUTH] LOADING USER PROFILE for UID:', fbUser.uid);
+    // Prevent duplicate concurrent initialization for the same user
+    if (currentInitUidRef.current === fbUser.uid && user) {
+      return user;
+    }
+    currentInitUidRef.current = fbUser.uid;
+
+    console.log('[AUTH-04] Profile request started for UID:', fbUser.uid);
+    console.log('[AUTH-06] Profile initialization started');
     try {
       const firestoreProfile = await getOrCreateFirestoreUser(fbUser);
-      console.log('[AUTH] PROFILE RESULT =', firestoreProfile.username, 'profileCompleted =', firestoreProfile.profileCompleted);
+      console.log('[AUTH-05] Profile request completed. Username:', firestoreProfile.username);
+      console.log('[AUTH-07] Profile initialization completed. profileCompleted:', firestoreProfile.profileCompleted);
+      
       setUser(firestoreProfile);
 
-      // Background non-blocking sync with backend
+      // Fire-and-forget JWT session cookie sync for API routes (does NOT mutate state)
       fbUser.getIdToken().then((idToken) => {
         fetch('/api/auth/me', {
           headers: { Authorization: `Bearer ${idToken}` },
-        })
-          .then((res) => (res.ok ? res.json() : null))
-          .then((data) => {
-            if (data?.user) {
-              const dynamicAge = calculateAge(
-                data.user.dob || data.user.profile?.dob || firestoreProfile.dateOfBirth
-              );
-              setUser((prev) => {
-                if (!prev) return firestoreProfile;
-                return {
-                  ...firestoreProfile,
-                  ...data.user,
-                  profileCompleted: Boolean(
-                    firestoreProfile.profileCompleted ||
-                    (data.user.profile?.ageGenderConfirmed && data.user.gender !== 'unspecified')
-                  ),
-                  dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
-                  gender: firestoreProfile.gender || data.user.gender || 'unspecified',
-                  profile: {
-                    ...firestoreProfile.profile,
-                    ...(data.user.profile || {}),
-                    age: dynamicAge,
-                    dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
-                  },
-                };
-              });
-            }
-          })
-          .catch(() => {});
+        }).catch(() => {});
       }).catch(() => {});
 
       return firestoreProfile;
     } catch (err) {
-      console.error('[AUTH] Error loading user session:', err);
+      console.error('[AUTH-ERROR] Profile initialization error:', err);
       return null;
     }
   };
 
   const refreshUser = async () => {
     if (auth.currentUser) {
-      await handleUserSession(auth.currentUser);
+      currentInitUidRef.current = null; // Force reload
+      await initializeUserSession(auth.currentUser);
     }
   };
 
   // ─── Firebase Auth State Listener (Single Source of Truth) ───────────────────
   useEffect(() => {
-    console.log('[AUTH] Initializing onAuthStateChanged listener');
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      console.log('[AUTH] AUTH STATE CHANGED, uid =', fbUser?.uid || 'null');
-      console.log('[AUTH] auth.currentUser =', auth.currentUser?.uid || 'null');
+      console.log('[AUTH-03] Auth state changed. UID:', fbUser?.uid || 'null');
       setFirebaseUser(fbUser);
       if (fbUser) {
-        await handleUserSession(fbUser);
+        console.log('[AUTH-02] Firebase UID received:', fbUser.uid);
+        await initializeUserSession(fbUser);
       } else {
         setUser(null);
       }
@@ -136,67 +127,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // ─── Strict Route Guard (Single Authoritative State-Machine Guard) ─────────────
+  // ─── Single Authoritative Route Guard ─────────────────────────────────────────
   useEffect(() => {
-    console.log('[ROUTER] CURRENT PATH =', pathname, 'loading =', loading, 'user =', user?.username || 'null');
-    
     // WHILE AUTH_LOADING: NEVER REDIRECT
     if (loading) return;
 
     const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback'];
     const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
-    const hasTokenCookie = typeof document !== 'undefined' && document.cookie.includes('token=');
-    const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser || hasTokenCookie);
+    const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser);
 
-    // 1. Unauthenticated users trying to access protected routes -> redirect to /login
+    // 1. Unauthenticated users trying to access protected routes -> send to /login
     if (!isAuthenticated && !isPublic && pathname !== '/onboarding') {
-      console.log('[AUTH] Unauthenticated on private route, redirecting to /login');
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      } else {
-        router.replace('/login');
-      }
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+      console.log('[AUTH-REDIRECT] Unauthenticated user accessing private route:', pathname, '-> redirecting to /login');
+      router.replace('/login');
+      setTimeout(() => { isNavigatingRef.current = false; }, 500);
       return;
     }
 
-    // 2. Authenticated users on auth pages (/login, /signup, /register)
-    if (isAuthenticated) {
+    // 2. Authenticated users
+    if (isAuthenticated && user) {
       const isComplete = checkProfileCompletion(user);
 
+      // A. Authenticated on login / signup / register
       if (pathname === '/login' || pathname === '/register' || pathname === '/signup') {
+        if (isNavigatingRef.current) return;
+        isNavigatingRef.current = true;
         const target = isComplete ? '/dashboard' : '/onboarding';
-        console.log('[AUTH] REDIRECTING TO', target);
-        console.log('[ROUTER] PUSH', target);
-        if (typeof window !== 'undefined') {
-          window.location.href = target;
-        } else {
-          router.replace(target);
-        }
+        console.log('[AUTH-10] Dashboard redirect started -> Target:', target);
+        router.replace(target);
+        console.log('[AUTH-11] Dashboard redirect completed');
+        setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // If user is on /onboarding but profile is already complete -> redirect to /dashboard
+      // B. Completed user on /onboarding -> send to /dashboard
       if (pathname === '/onboarding' && isComplete) {
-        console.log('[AUTH] REDIRECTING TO DASHBOARD (profile already complete)');
-        console.log('[ROUTER] PUSH /dashboard');
-        if (typeof window !== 'undefined') {
-          window.location.href = '/dashboard';
-        } else {
-          router.replace('/dashboard');
-        }
+        if (isNavigatingRef.current) return;
+        isNavigatingRef.current = true;
+        console.log('[AUTH-10] Dashboard redirect started (user already completed onboarding)');
+        router.replace('/dashboard');
+        console.log('[AUTH-11] Dashboard redirect completed');
+        setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // If user is on private route (/dashboard, /chat/*) but profile is incomplete -> redirect to /onboarding
-      if (!isPublic && pathname !== '/onboarding' && !isComplete && user) {
-        console.log('[AUTH] REDIRECTING TO /onboarding (profile incomplete)');
-        console.log('[ROUTER] PUSH /onboarding');
-        if (typeof window !== 'undefined') {
-          window.location.href = '/onboarding';
-        } else {
-          router.replace('/onboarding');
-        }
+      // C. Incomplete user trying to access /dashboard or /chat/* -> send to /onboarding
+      if (!isPublic && pathname !== '/onboarding' && !isComplete) {
+        if (isNavigatingRef.current) return;
+        isNavigatingRef.current = true;
+        console.log('[AUTH-REDIRECT] Incomplete profile on protected route -> redirecting to /onboarding');
+        router.replace('/onboarding');
+        setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
     }
@@ -205,37 +189,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── 1. Google 1-Click Sign-in ────────────────────────────────────────────────
   const loginWithGoogle = async () => {
     setLoading(true);
-    console.log('[AUTH] SIGN IN STARTED');
+    console.log('[AUTH-01] Google authentication started');
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      console.log('[AUTH] GOOGLE SIGN IN SUCCESS, uid =', result.user?.uid);
-      console.log('[AUTH] auth.currentUser =', auth.currentUser?.uid);
+      console.log('[AUTH-01] Google authentication successful');
+      console.log('[AUTH-02] Firebase UID received:', result.user?.uid);
 
       if (result.user) {
         setFirebaseUser(result.user);
-        console.log('[AUTH] LOADING USER PROFILE');
-        const profile = await getOrCreateFirestoreUser(result.user);
-        console.log('[AUTH] PROFILE RESULT =', profile.username, 'profileCompleted =', profile.profileCompleted);
-        setUser(profile);
-        handleUserSession(result.user).catch(() => {});
+        const profile = await initializeUserSession(result.user);
+        setLoading(false);
 
-        const isComplete = checkProfileCompletion(profile);
-        const target = isComplete ? '/dashboard' : '/onboarding';
-        console.log('[AUTH] REDIRECTING TO', target);
-        console.log('[ROUTER] PUSH', target);
-
-        if (typeof window !== 'undefined') {
-          window.location.href = target;
-        } else {
+        if (profile) {
+          const isComplete = checkProfileCompletion(profile);
+          const target = isComplete ? '/dashboard' : '/onboarding';
+          console.log('[AUTH-10] Dashboard redirect started -> Target:', target);
           router.replace(target);
+          console.log('[AUTH-11] Dashboard redirect completed');
         }
       }
     } catch (err: any) {
       setLoading(false);
-      console.error('[AUTH] GOOGLE SIGN IN ERROR:', err?.code, err?.message);
+      console.error('[AUTH-ERROR] Google sign-in failed:', err?.code, err?.message);
       throw err;
     }
-    setLoading(false);
   };
 
   // ─── 2. Email / Username Sign-in ──────────────────────────────────────────────
@@ -248,18 +225,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const result = await signInWithEmailAndPassword(auth, identifier, pass);
         if (result.user) {
           setFirebaseUser(result.user);
-          const profile = await getOrCreateFirestoreUser(result.user);
-          setUser(profile);
-          handleUserSession(result.user).catch(() => {});
+          const profile = await initializeUserSession(result.user);
+          setLoading(false);
 
-          const isComplete = checkProfileCompletion(profile);
-          const target = isComplete ? '/dashboard' : '/onboarding';
-          if (typeof window !== 'undefined') {
-            window.location.href = target;
-          } else {
+          if (profile) {
+            const isComplete = checkProfileCompletion(profile);
+            const target = isComplete ? '/dashboard' : '/onboarding';
             router.replace(target);
           }
-          setLoading(false);
           return;
         }
       } catch (fbErr: any) {
@@ -284,11 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           ensureFirebaseAuth().catch(() => {});
           const isComplete = checkProfileCompletion(data.user);
           const target = isComplete ? '/dashboard' : '/onboarding';
-          if (typeof window !== 'undefined') {
-            window.location.href = target;
-          } else {
-            router.replace(target);
-          }
+          router.replace(target);
           setLoading(false);
           return;
         }
@@ -300,7 +269,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       throw new Error(dbErr?.message || 'Invalid credentials. Please check your username and password.');
     }
-    setLoading(false);
   };
 
   // ─── 3. Email / Username Sign-up ──────────────────────────────────────────────
@@ -316,9 +284,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const result = await createUserWithEmailAndPassword(auth, effectiveEmail, pass);
       if (result.user) {
         setFirebaseUser(result.user);
-        const profile = await getOrCreateFirestoreUser(result.user);
-        setUser(profile);
-        handleUserSession(result.user).catch(() => {});
+        await initializeUserSession(result.user);
         fbSuccess = true;
       }
     } catch (fbErr: any) {
@@ -341,11 +307,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setUser(data.user);
           ensureFirebaseAuth().catch(() => {});
-          if (typeof window !== 'undefined') {
-            window.location.href = '/onboarding';
-          } else {
-            router.replace('/onboarding');
-          }
+          router.replace('/onboarding');
           setLoading(false);
           return;
         }
@@ -362,11 +324,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    if (typeof window !== 'undefined') {
-      window.location.href = '/onboarding';
-    } else {
-      router.replace('/onboarding');
-    }
+    router.replace('/onboarding');
     setLoading(false);
   };
 
@@ -384,21 +342,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       await firebaseSignOut(auth).catch(() => {});
 
+      currentInitUidRef.current = null;
       setUser(null);
       setFirebaseUser(null);
 
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      } else {
-        router.replace('/login');
-      }
+      router.replace('/login');
     } catch (e) {
-      console.error('[AUTH] Logout error:', e);
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      } else {
-        router.replace('/login');
-      }
+      console.error('[AUTH-ERROR] Logout error:', e);
+      router.replace('/login');
     }
   };
 

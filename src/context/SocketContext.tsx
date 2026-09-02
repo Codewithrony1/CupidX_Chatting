@@ -47,19 +47,17 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
     const initSocket = async () => {
       try {
-        const res = await fetch('/api/auth/token');
-        if (!res.ok) {
-          console.info('Socket: auth token unavailable, skipping socket connection');
-          return;
-        }
-        const { token } = await res.json();
-
         const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
         // Don't try to connect if no socket URL configured or it's localhost in production
         if (!socketUrl || (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && socketUrl.includes('localhost'))) {
-          console.info('Socket: no valid socket URL configured — using Firestore for real-time features');
           return;
         }
+
+        const res = await fetch('/api/auth/token');
+        if (!res.ok) {
+          return;
+        }
+        const { token } = await res.json();
 
         activeSocket = io(socketUrl, {
           auth: { token },

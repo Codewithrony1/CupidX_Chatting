@@ -59,6 +59,14 @@ export default function DashboardPage() {
   const { user, loading, refreshUser } = useAuth();
   const router = useRouter();
 
+  useEffect(() => {
+    console.log('[AUTH-12] Dashboard mounted');
+    console.log('[AUTH-13] Dashboard auth check: loading =', loading, 'user =', user?.username || 'null');
+    if (!loading && user) {
+      console.log('[AUTH-14] Dashboard auth check completed for user:', user.username);
+    }
+  }, [loading, user]);
+
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   const [searchQuery, setSearchQuery] = useState('');
