@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -34,7 +34,24 @@ import {
 } from 'lucide-react';
 import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
 
+// Firestore matchmaking (replaces broken socket+SQLite system)
+import {
+  joinQueue,
+  leaveQueue,
+  findAndMatch,
+  listenToMyQueueEntry,
+  listenToMatch,
+  listenToMessages,
+  sendFirestoreMessage,
+  cleanupSession,
+  resolveTimestamp,
+  type MatchDoc,
+  type FirestoreMessage,
+} from '@/lib/firestoreMatchmaking';
+
 const ProfilePreviewSheet = dynamic(() => import('@/components/chat/ProfilePreviewSheet'), { ssr: false });
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface RandomPartner {
   id: string;
@@ -54,7 +71,7 @@ interface RandomPartner {
 interface RandomMessage {
   id: string;
   clientMessageId?: string | null;
-  senderId: string;
+  senderId: string;       // Firebase UID
   senderUsername: string;
   content: string;
   imageUrl: string | null;
@@ -62,35 +79,37 @@ interface RandomMessage {
   status?: 'SENDING' | 'SENT' | 'FAILED';
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function KnotChatRandomPage() {
   const router = useRouter();
-  const { user, loading, refreshUser } = useAuth();
+  const { user, firebaseUser, loading, refreshUser } = useAuth();
   const { socket, isConnected: socketConnected } = useSocket();
 
-  // Matchmaking State: "idle" | "searching" | "connected" | "ended"
+  // ── Core state ──
   const [matchStatus, setMatchStatus] = useState<'idle' | 'searching' | 'connected' | 'ended'>('idle');
   const [partner, setPartner] = useState<RandomPartner | null>(null);
-  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
+  const [matchId, setMatchId] = useState<string | null>(null);       // Firestore match doc ID
   const [messages, setMessages] = useState<RandomMessage[]>([]);
   const [reconnecting, setReconnecting] = useState(false);
 
-  // Input & Messaging states
+  // ── Input & messaging ──
   const [inputText, setInputText] = useState('');
   const [sendingMsg, setSendingMsg] = useState(false);
   const [partnerTyping, setPartnerTyping] = useState(false);
 
-  // "Don't show again" Tutorial Modal
+  // ── Intro modal ──
   const [showIntroModal, setShowIntroModal] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(true);
 
-  // VIP Image Attachment States
+  // ── Image attachment ──
   const [showVipModal, setShowVipModal] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedFullImage, setSelectedFullImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Options & Safety Modals
+  // ── Options & safety modals ──
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -98,35 +117,35 @@ export default function KnotChatRandomPage() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportSuccess, setReportSuccess] = useState(false);
 
+  // ── Refs ──
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
-  const lastMessageTimestampRef = useRef<string | null>(null);
 
-  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
+  // Firestore listener cleanup refs
+  const queueListenerRef = useRef<(() => void) | null>(null);
+  const matchListenerRef = useRef<(() => void) | null>(null);
+  const messagesListenerRef = useRef<(() => void) | null>(null);
+  const matchingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const matchStatusRef = useRef(matchStatus);
 
-  // Auto-scroll helper
+  // Keep ref in sync with state (for use inside intervals/closures)
+  useEffect(() => { matchStatusRef.current = matchStatus; }, [matchStatus]);
+
+  const isVIP = user?.membershipTier === 'VIP' ||
+    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
+
+  // ─── Auto scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, partnerTyping, matchStatus]);
 
-  // Track latest message timestamp for recovery
+  // ─── Auth redirect guard ───────────────────────────────────────────────────
   useEffect(() => {
-    if (messages.length > 0) {
-      lastMessageTimestampRef.current = messages[messages.length - 1].createdAt;
-    }
-  }, [messages]);
-
-  // Auth Redirect Guard
-  useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login');
-    }
+    if (!loading && !user) router.push('/login');
   }, [user, loading, router]);
 
-  // Check whether to show Intro Modal or start immediately
+  // ─── Check intro modal on mount ────────────────────────────────────────────
   useEffect(() => {
     if (user) {
       const hasSeenIntro = (user as any)?.profile?.randomChatIntroSeen;
@@ -136,200 +155,220 @@ export default function KnotChatRandomPage() {
         handleStartMatch();
       }
     }
-  }, [user]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);  // Only run once when user loads
 
-  // Persistent Queue Status Polling during searching state
-  useEffect(() => {
-    if (matchStatus !== 'searching') return;
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch('/api/matchmaking/status');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.matched && data.chatSessionId) {
-            setMatchStatus('connected');
-            setPartner(data.partner);
-            setChatSessionId(data.chatSessionId);
-            setMessages([]);
-            clearInterval(pollInterval);
-          }
-        }
-      } catch (e) {
-        console.error('Matchmaking poll error:', e);
-      }
-    }, 1000);
-
-    return () => clearInterval(pollInterval);
-  }, [matchStatus]);
-
-  // Realtime Active Chat Sync (Fast 800ms polling for instant responses)
-  useEffect(() => {
-    if (matchStatus !== 'connected' || !chatSessionId) return;
-
-    const chatSyncInterval = setInterval(async () => {
-      try {
-        const sinceParam = lastMessageTimestampRef.current ? `&since=${encodeURIComponent(lastMessageTimestampRef.current)}` : '';
-        const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(chatSessionId)}${sinceParam}`);
-
-        if (res.ok) {
-          const data = await res.json();
-
-          if (data.sessionStatus === 'ENDED') {
-            setMatchStatus('ended');
-            return;
-          }
-
-          if (data.messages && data.messages.length > 0) {
-            setMessages((prev) => {
-              const existingIds = new Set(prev.map((m) => m.id || m.clientMessageId));
-              const newMsgs = data.messages.filter((m: any) => !existingIds.has(m.id) && !existingIds.has(m.clientMessageId));
-              if (newMsgs.length === 0) return prev;
-
-              const updated = prev.map((m) => {
-                const match = data.messages.find((serverMsg: any) => serverMsg.clientMessageId && serverMsg.clientMessageId === m.clientMessageId);
-                return match ? { ...match, status: 'SENT' as const } : m;
-              });
-
-              return [...updated, ...newMsgs.map((m: any) => ({ ...m, status: 'SENT' as const }))];
-            });
-          }
-
-          if (data.partner) {
-            setPartner(data.partner);
-          }
-          setReconnecting(false);
-        } else if (res.status === 404) {
-          setMatchStatus('ended');
-        }
-      } catch (e) {
-        setReconnecting(true);
-      }
-    }, 800);
-
-    return () => clearInterval(chatSyncInterval);
-  }, [matchStatus, chatSessionId]);
-
-  // Socket Realtime Event Listeners
+  // ─── Socket typing indicator (bonus when socket is available) ─────────────
   useEffect(() => {
     if (!socket) return;
-
-    const handleMatchFound = (data: { roomId: string; partner: RandomPartner }) => {
-      setMatchStatus('connected');
-      setPartner(data.partner);
-      setMessages([]);
-    };
-
-    const handleReceiveMessage = (msg: RandomMessage) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id || (m.clientMessageId && m.clientMessageId === msg.clientMessageId))) {
-          return prev.map((m) => (m.clientMessageId && m.clientMessageId === msg.clientMessageId ? { ...msg, status: 'SENT' } : m));
-        }
-        return [...prev, { ...msg, status: 'SENT' }];
-      });
-    };
-
-    const handlePartnerTyping = (data: { isTyping: boolean }) => {
-      setPartnerTyping(data.isTyping);
-    };
-
-    const handlePartnerLeft = () => {
-      setMatchStatus('ended');
-    };
-
-    socket.on('random_match_found', handleMatchFound);
-    socket.on('receive_random_message', handleReceiveMessage);
+    const handlePartnerTyping = (data: { isTyping: boolean }) => setPartnerTyping(data.isTyping);
     socket.on('partner_typing_status', handlePartnerTyping);
-    socket.on('partner_left', handlePartnerLeft);
-
-    return () => {
-      socket.off('random_match_found', handleMatchFound);
-      socket.off('receive_random_message', handleReceiveMessage);
-      socket.off('partner_typing_status', handlePartnerTyping);
-      socket.off('partner_left', handlePartnerLeft);
-    };
+    return () => { socket.off('partner_typing_status', handlePartnerTyping); };
   }, [socket]);
 
-  // START MATCHMAKING
-  const handleStartMatch = async () => {
+  // ─── Cleanup all Firestore listeners on unmount ───────────────────────────
+  useEffect(() => {
+    return () => {
+      queueListenerRef.current?.();
+      matchListenerRef.current?.();
+      messagesListenerRef.current?.();
+      if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+    };
+  }, []);
+
+  // ─── Build partner object from MatchDoc ────────────────────────────────────
+  function buildPartner(matchDoc: MatchDoc, myUid: string): RandomPartner {
+    const isUser1 = matchDoc.user1Uid === myUid;
+    return {
+      id: isUser1 ? matchDoc.user2Uid : matchDoc.user1Uid,
+      username: isUser1 ? matchDoc.user2Username : matchDoc.user1Username,
+      fullName: isUser1 ? matchDoc.user2DisplayName : matchDoc.user1DisplayName,
+      displayName: isUser1 ? matchDoc.user2DisplayName : matchDoc.user1DisplayName,
+      avatarUrl: isUser1 ? matchDoc.user2AvatarUrl : matchDoc.user1AvatarUrl,
+      avatarEmoji: isUser1 ? matchDoc.user2AvatarEmoji : matchDoc.user1AvatarEmoji,
+      gender: isUser1 ? matchDoc.user2Gender : matchDoc.user1Gender,
+      isVIP: isUser1 ? matchDoc.user2IsVIP : matchDoc.user1IsVIP,
+    };
+  }
+
+  // ─── Attach Firestore message listener for a matchId ─────────────────────
+  function attachMessageListener(mid: string, myUid: string) {
+    messagesListenerRef.current?.();
+    messagesListenerRef.current = listenToMessages(
+      mid,
+      (firestoreMsgs: FirestoreMessage[]) => {
+        const mapped: RandomMessage[] = firestoreMsgs.map(m => ({
+          id: m.id,
+          senderId: m.senderUid,
+          senderUsername: m.senderUsername,
+          content: m.content,
+          imageUrl: m.imageUrl,
+          createdAt: resolveTimestamp(m.createdAt),
+          status: 'SENT' as const,
+        }));
+        setMessages(mapped);
+        setReconnecting(false);
+      },
+      () => setReconnecting(true)
+    );
+  }
+
+  // ─── Attach Firestore match listener ──────────────────────────────────────
+  function attachMatchListener(mid: string, myUid: string) {
+    matchListenerRef.current?.();
+    matchListenerRef.current = listenToMatch(
+      mid,
+      (matchDoc: MatchDoc) => {
+        if (matchDoc.status === 'ended') {
+          setMatchStatus('ended');
+          return;
+        }
+        // Still active — update partner info
+        setPartner(buildPartner(matchDoc, myUid));
+        setMatchStatus('connected');
+      }
+    );
+  }
+
+  // ─── START MATCHMAKING ────────────────────────────────────────────────────
+  const handleStartMatch = useCallback(async () => {
+    const fbUser = firebaseUser;
+    const appUser = user;
+    if (!fbUser || !appUser) return;
+
     setMatchStatus('searching');
     setPartner(null);
     setMessages([]);
-    setChatSessionId(null);
+    setMatchId(null);
+    setReconnecting(false);
 
-    // 1. Socket join queue
-    if (socket && socketConnected) {
-      socket.emit('join_random_queue', {
-        gender: user?.profile?.gender,
-        preferredGender: user?.profile?.preferredGender,
-        mood: user?.profile?.mood,
-      });
-    }
+    // Cleanup previous listeners & intervals
+    queueListenerRef.current?.();
+    matchListenerRef.current?.();
+    messagesListenerRef.current?.();
+    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
 
-    // 2. HTTP Join Queue Fallback
+    const fbUid = fbUser.uid;
+
+    const prefs = {
+      firebaseUid: fbUid,
+      userId: appUser.id,
+      username: appUser.username,
+      displayName: appUser.displayName || appUser.fullName || appUser.username,
+      avatarUrl: appUser.profile?.avatarUrl || null,
+      avatarEmoji: appUser.profile?.avatarEmoji || '😊',
+      gender: appUser.profile?.gender || 'unspecified',
+      genderPref: appUser.profile?.preferredGender || 'auto',
+      mood: appUser.profile?.mood || '',
+      isVIP,
+    };
+
     try {
-      const res = await fetch('/api/matchmaking/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preferredGender: user?.profile?.preferredGender || 'auto',
-          mood: user?.profile?.mood,
-          tags: user?.profile?.personalityPreferences ? user.profile.personalityPreferences.split(',') : [],
-        }),
-      });
+      // 1. Write queue entry to Firestore
+      await joinQueue(prefs);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.matched && data.chatSessionId) {
-          setMatchStatus('connected');
-          setPartner(data.partner);
-          setChatSessionId(data.chatSessionId);
+      // 2. Listen to own queue entry — fires when someone ELSE matches us
+      queueListenerRef.current = listenToMyQueueEntry(
+        fbUid,
+        (mid, _partnerUid) => {
+          if (matchStatusRef.current !== 'searching') return; // Already matched
+          setMatchId(mid);
+          if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+          attachMatchListener(mid, fbUid);
+          attachMessageListener(mid, fbUid);
         }
+      );
+
+      // 3. Immediately try to find and atomically match with someone already waiting
+      const immediateMatchId = await findAndMatch(prefs);
+      if (immediateMatchId) {
+        setMatchId(immediateMatchId);
+        if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+        attachMatchListener(immediateMatchId, fbUid);
+        attachMessageListener(immediateMatchId, fbUid);
+        return;
       }
-    } catch (e) {
-      console.error('Matchmaking join error:', e);
+
+      // 4. If no immediate match, poll every 2 seconds
+      matchingIntervalRef.current = setInterval(async () => {
+        if (matchStatusRef.current !== 'searching') {
+          clearInterval(matchingIntervalRef.current!);
+          return;
+        }
+        try {
+          const mid = await findAndMatch(prefs);
+          if (mid) {
+            setMatchId(mid);
+            clearInterval(matchingIntervalRef.current!);
+            attachMatchListener(mid, fbUid);
+            attachMessageListener(mid, fbUid);
+          }
+        } catch {
+          // Keep polling
+        }
+      }, 2000);
+
+    } catch (err) {
+      console.error('Matchmaking error:', err);
+      setMatchStatus('idle');
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser, user, isVIP]);
 
-  // NEXT PARTNER (Instant 1-Click skip & auto-reconnect)
-  const handleNextPartner = async () => {
-    // 1. Inform socket
-    if (socket && socketConnected) {
-      socket.emit('next_partner');
-    }
-
-    // 2. End current HTTP session if active
-    if (chatSessionId) {
-      fetch(`/api/chat/${chatSessionId}/next`, { method: 'POST' }).catch(() => {});
-    }
-
-    // 3. Immediately transition to searching next user
-    handleStartMatch();
-  };
-
-  // CANCEL SEARCHING
+  // ─── CANCEL SEARCH ────────────────────────────────────────────────────────
   const handleCancelSearch = async () => {
-    if (socket && socketConnected) {
-      socket.emit('leave_random_queue');
+    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+    queueListenerRef.current?.();
+    matchListenerRef.current?.();
+    messagesListenerRef.current?.();
+
+    if (firebaseUser?.uid) {
+      await leaveQueue(firebaseUser.uid).catch(() => {});
     }
-    fetch('/api/matchmaking/cancel', { method: 'POST' }).catch(() => {});
+    // Socket path cleanup
+    if (socket && socketConnected) socket.emit('leave_random_queue');
     setMatchStatus('idle');
   };
 
-  // SEND MESSAGE
+  // ─── NEXT PARTNER ─────────────────────────────────────────────────────────
+  const handleNextPartner = async () => {
+    const fbUid = firebaseUser?.uid;
+    if (!fbUid) return;
+
+    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+    queueListenerRef.current?.();
+    matchListenerRef.current?.();
+    messagesListenerRef.current?.();
+
+    // End current match in Firestore (notifies partner via their listener)
+    if (matchId) {
+      await cleanupSession(fbUid, matchId).catch(() => {});
+    } else {
+      await leaveQueue(fbUid).catch(() => {});
+    }
+
+    // Also notify via socket if connected
+    if (socket && socketConnected) socket.emit('next_partner');
+
+    // Restart matching
+    handleStartMatch();
+  };
+
+  // ─── SEND MESSAGE ─────────────────────────────────────────────────────────
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if ((!inputText.trim() && !selectedImageFile) || matchStatus !== 'connected' || sendingMsg) return;
+    if (!firebaseUser?.uid || !matchId) return;
 
-    const clientMsgId = `cmsg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const textToSend = inputText.trim();
     const imageToSend = selectedImageFile;
 
-    // Optimistic message bubble
+    // Optimistic bubble
+    const tempId = `temp_${Date.now()}`;
     const tempMessage: RandomMessage = {
-      id: clientMsgId,
-      clientMessageId: clientMsgId,
-      senderId: user?.id || 'me',
+      id: tempId,
+      clientMessageId: tempId,
+      senderId: firebaseUser.uid,
       senderUsername: user?.username || 'me',
       content: textToSend,
       imageUrl: imagePreview || null,
@@ -337,62 +376,38 @@ export default function KnotChatRandomPage() {
       status: 'SENDING',
     };
 
-    setMessages((prev) => [...prev, tempMessage]);
+    setMessages(prev => [...prev, tempMessage]);
     setInputText('');
     setSelectedImageFile(null);
     setImagePreview(null);
     setSendingMsg(true);
 
-    // Broadcast typing stopped
-    if (socket && socketConnected) {
-      socket.emit('random_typing_status', { isTyping: false });
-    }
+    // Stop typing indicator
+    if (socket && socketConnected) socket.emit('random_typing_status', { isTyping: false });
     isCurrentlyTypingRef.current = false;
 
-    // 1. Send via WebSocket
-    if (socket && socketConnected) {
-      socket.emit(
-        'send_random_message',
-        { content: textToSend, imageUrl: imageToSend, clientMessageId: clientMsgId },
-        (res: any) => {
-          if (res?.success) {
-            setMessages((prev) =>
-              prev.map((m) => (m.clientMessageId === clientMsgId ? { ...m, status: 'SENT' } : m))
-            );
-          }
-        }
+    try {
+      // Write to Firestore — both users receive via their onSnapshot listener
+      await sendFirestoreMessage(
+        matchId,
+        firebaseUser.uid,
+        user?.username || 'user',
+        textToSend,
+        imageToSend
       );
+      // Remove optimistic bubble (real one comes via listener)
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    } catch (err) {
+      console.error('Send message error:', err);
+      setMessages(prev =>
+        prev.map(m => m.id === tempId ? { ...m, status: 'FAILED' as const } : m)
+      );
+    } finally {
+      setSendingMsg(false);
     }
-
-    // 2. Persist via HTTP API
-    if (chatSessionId) {
-      try {
-        const res = await fetch('/api/chat/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chatSessionId,
-            clientMessageId: clientMsgId,
-            content: textToSend,
-            imageData: imageToSend,
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          setMessages((prev) =>
-            prev.map((m) => (m.clientMessageId === clientMsgId ? { ...data.message, status: 'SENT' } : m))
-          );
-        }
-      } catch (e) {
-        console.error('HTTP message persist error:', e);
-      }
-    }
-
-    setSendingMsg(false);
   };
 
-  // TYPING INDICATOR HANDLER
+  // ─── TYPING INDICATOR ─────────────────────────────────────────────────────
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputText(e.target.value);
 
@@ -401,7 +416,6 @@ export default function KnotChatRandomPage() {
         isCurrentlyTypingRef.current = true;
         socket.emit('random_typing_status', { isTyping: true });
       }
-
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
         isCurrentlyTypingRef.current = false;
@@ -410,25 +424,16 @@ export default function KnotChatRandomPage() {
     }
   };
 
-  // HANDLE IMAGE ATTACHMENT CLICK (VIP Gate)
+  // ─── IMAGE ATTACHMENT ─────────────────────────────────────────────────────
   const handleImageAttachmentClick = () => {
-    if (!isVIP) {
-      setShowVipModal(true);
-      return;
-    }
+    if (!isVIP) { setShowVipModal(true); return; }
     fileInputRef.current?.click();
   };
 
-  // HANDLE IMAGE FILE SELECTED
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image size exceeds 5MB limit.');
-      return;
-    }
-
+    if (file.size > 5 * 1024 * 1024) { alert('Image size exceeds 5MB limit.'); return; }
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result as string;
@@ -438,10 +443,9 @@ export default function KnotChatRandomPage() {
     reader.readAsDataURL(file);
   };
 
-  // DISMISS INTRO MODAL & PERSIST "DON'T SHOW AGAIN"
+  // ─── INTRO MODAL ──────────────────────────────────────────────────────────
   const handleDismissIntro = async () => {
     setShowIntroModal(false);
-
     if (dontShowAgain) {
       fetch('/api/profile', {
         method: 'PUT',
@@ -449,15 +453,13 @@ export default function KnotChatRandomPage() {
         body: JSON.stringify({ randomChatIntroSeen: true }),
       }).catch(() => {});
     }
-
     handleStartMatch();
   };
 
-  // REPORT PARTNER
+  // ─── REPORT PARTNER ───────────────────────────────────────────────────────
   const handleReportPartner = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!partner || !reportReason.trim()) return;
-
     setReportSubmitting(true);
     try {
       const res = await fetch('/api/chat/report', {
@@ -466,10 +468,9 @@ export default function KnotChatRandomPage() {
         body: JSON.stringify({
           reportedUserId: partner.id,
           reason: reportReason,
-          chatSessionId,
+          chatSessionId: matchId,
         }),
       });
-
       if (res.ok) {
         setReportSuccess(true);
         setTimeout(() => {
@@ -486,7 +487,7 @@ export default function KnotChatRandomPage() {
     }
   };
 
-  // BLOCK PARTNER
+  // ─── BLOCK PARTNER ────────────────────────────────────────────────────────
   const handleBlockPartner = async () => {
     if (!partner) return;
     try {
@@ -502,12 +503,15 @@ export default function KnotChatRandomPage() {
     }
   };
 
+  // ─── RENDER ────────────────────────────────────────────────────────────────
+
   return (
     <AppShell showNav={matchStatus === 'idle'}>
       <div className="flex-1 flex flex-col h-[100dvh] max-h-[100dvh] bg-[#07000e] text-white overflow-hidden relative font-sans">
-        {/* ========================================================================= */}
-        {/* 1. STATE: IDLE / START SCREEN */}
-        {/* ========================================================================= */}
+
+        {/* ================================================================= */}
+        {/* 1. IDLE / START SCREEN                                             */}
+        {/* ================================================================= */}
         {matchStatus === 'idle' && (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-8 max-w-md mx-auto">
             <div className="relative">
@@ -522,7 +526,7 @@ export default function KnotChatRandomPage() {
             <div className="space-y-2">
               <h2 className="text-2xl font-black text-white">Live Random Chat</h2>
               <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                Connect instantly with verified people nearby. No names revealed unless you choose to.
+                Connect instantly with verified people. Real-time, anonymous, safe.
               </p>
             </div>
 
@@ -547,12 +551,11 @@ export default function KnotChatRandomPage() {
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* 2. STATE: SEARCHING / FINDING SOMEONE */}
-        {/* ========================================================================= */}
+        {/* ================================================================= */}
+        {/* 2. SEARCHING                                                        */}
+        {/* ================================================================= */}
         {matchStatus === 'searching' && (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-8 max-w-md mx-auto">
-            {/* Pulsing Radar Animation */}
             <div className="relative w-36 h-36 flex items-center justify-center">
               <div className="absolute inset-0 rounded-full bg-pink-500/20 animate-ping" />
               <div className="absolute inset-3 rounded-full bg-purple-600/30 animate-pulse" />
@@ -564,7 +567,7 @@ export default function KnotChatRandomPage() {
             <div className="space-y-2">
               <h3 className="text-xl font-black text-white">Finding someone...</h3>
               <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                Looking for another authenticated person to chat with. Connecting you in real-time...
+                Scanning for another person to chat with. This is real-time — connecting you instantly when someone joins.
               </p>
             </div>
 
@@ -577,12 +580,12 @@ export default function KnotChatRandomPage() {
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* 3. STATE: CONNECTED / WHATSAPP-LIKE ACTIVE CHAT */}
-        {/* ========================================================================= */}
+        {/* ================================================================= */}
+        {/* 3. CONNECTED — CHAT                                                */}
+        {/* ================================================================= */}
         {matchStatus === 'connected' && (
           <div className="flex-1 flex flex-col h-full overflow-hidden">
-            {/* WHATSAPP-STYLE CHAT HEADER */}
+            {/* HEADER */}
             <header className="px-4 py-3 bg-[#0d0119]/95 backdrop-blur-xl border-b border-pink-500/20 flex items-center justify-between z-30 shrink-0 shadow-md">
               <div className="flex items-center space-x-3">
                 <div
@@ -595,13 +598,10 @@ export default function KnotChatRandomPage() {
                   <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#0d0119]" />
                 </div>
 
-                <div
-                  onClick={() => setShowProfileSheet(true)}
-                  className="cursor-pointer"
-                >
+                <div onClick={() => setShowProfileSheet(true)} className="cursor-pointer">
                   <div className="flex items-center space-x-1.5">
                     <h3 className="text-sm font-black text-white truncate max-w-[140px] sm:max-w-[200px]">
-                      {partner?.displayName || partner?.fullName || 'Anonymous Partner'}
+                      @{partner?.username || 'stranger'}
                     </h3>
                     {partner?.isVIP && (
                       <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current shrink-0" />
@@ -619,7 +619,7 @@ export default function KnotChatRandomPage() {
                 </div>
               </div>
 
-              {/* Header Action Buttons */}
+              {/* Header actions */}
               <div className="flex items-center space-x-2">
                 <button
                   onClick={handleNextPartner}
@@ -637,14 +637,10 @@ export default function KnotChatRandomPage() {
                     <MoreVertical className="w-4 h-4" />
                   </button>
 
-                  {/* 3-Dots Dropdown Menu */}
                   {showOptionsMenu && (
                     <div className="absolute right-0 mt-2 w-44 rounded-2xl bg-[#140024] border border-pink-500/30 shadow-2xl p-1.5 z-50 space-y-1 text-xs font-bold">
                       <button
-                        onClick={() => {
-                          setShowOptionsMenu(false);
-                          setShowReportModal(true);
-                        }}
+                        onClick={() => { setShowOptionsMenu(false); setShowReportModal(true); }}
                         className="w-full px-3 py-2 rounded-xl text-left text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors cursor-pointer"
                       >
                         <Flag className="w-3.5 h-3.5 text-amber-400" />
@@ -655,13 +651,10 @@ export default function KnotChatRandomPage() {
                         className="w-full px-3 py-2 rounded-xl text-left text-rose-300 hover:text-rose-200 hover:bg-rose-500/10 flex items-center gap-2 transition-colors cursor-pointer"
                       >
                         <Ban className="w-3.5 h-3.5 text-rose-400" />
-                        <span>Block & Skip</span>
+                        <span>Block &amp; Skip</span>
                       </button>
                       <button
-                        onClick={() => {
-                          setShowOptionsMenu(false);
-                          setMatchStatus('ended');
-                        }}
+                        onClick={() => { setShowOptionsMenu(false); setMatchStatus('ended'); }}
                         className="w-full px-3 py-2 rounded-xl text-left text-slate-400 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors cursor-pointer"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -673,13 +666,12 @@ export default function KnotChatRandomPage() {
               </div>
             </header>
 
-            {/* CHAT MESSAGES SCROLL CONTAINER */}
+            {/* MESSAGES */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {/* Security Header Banner */}
               <div className="text-center my-2">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] text-slate-400">
                   <ShieldCheck className="w-3.5 h-3.5 text-pink-400" />
-                  <span>Encrypted Transport Connection • Be polite & respectful</span>
+                  <span>Connected with @{partner?.username} • Be polite &amp; respectful</span>
                 </span>
               </div>
 
@@ -690,9 +682,9 @@ export default function KnotChatRandomPage() {
                 </div>
               )}
 
-              {/* Message Bubbles */}
               {messages.map((msg, index) => {
-                const isMine = msg.senderId === user?.id || msg.senderUsername === user?.username;
+                const isMine = msg.senderId === firebaseUser?.uid ||
+                               msg.senderUsername === user?.username;
 
                 return (
                   <motion.div
@@ -708,7 +700,6 @@ export default function KnotChatRandomPage() {
                           : 'bg-slate-900/90 border border-slate-800 text-slate-100 rounded-tl-sm'
                       }`}
                     >
-                      {/* Image Message */}
                       {msg.imageUrl && (
                         <div
                           onClick={() => setSelectedFullImage(msg.imageUrl!)}
@@ -725,10 +716,8 @@ export default function KnotChatRandomPage() {
                         </div>
                       )}
 
-                      {/* Text Content */}
                       {msg.content && <p className="text-xs leading-relaxed">{msg.content}</p>}
 
-                      {/* Timestamp & Delivery State */}
                       <div className="flex items-center justify-end space-x-1 mt-1 text-[9px] opacity-70">
                         <span>
                           {new Date(msg.createdAt).toLocaleTimeString([], {
@@ -737,7 +726,9 @@ export default function KnotChatRandomPage() {
                           })}
                         </span>
                         {isMine && (
-                          <CheckCheck className="w-3 h-3 text-white" />
+                          msg.status === 'FAILED'
+                            ? <span className="text-rose-300">!</span>
+                            : <CheckCheck className="w-3 h-3 text-white" />
                         )}
                       </div>
                     </div>
@@ -745,7 +736,6 @@ export default function KnotChatRandomPage() {
                 );
               })}
 
-              {/* Typing Indicator Bubble */}
               {partnerTyping && (
                 <div className="flex items-center space-x-2 text-xs text-slate-400 italic">
                   <div className="px-3 py-2 rounded-2xl bg-slate-900 border border-slate-800 flex items-center space-x-1">
@@ -760,7 +750,7 @@ export default function KnotChatRandomPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* IMAGE PREVIEW DRAWER (Before Sending) */}
+            {/* IMAGE PREVIEW */}
             {imagePreview && (
               <div className="p-3 bg-[#10001f] border-t border-pink-500/20 flex items-center justify-between">
                 <div className="flex items-center space-x-3">
@@ -769,10 +759,7 @@ export default function KnotChatRandomPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setImagePreview(null);
-                    setSelectedImageFile(null);
-                  }}
+                  onClick={() => { setImagePreview(null); setSelectedImageFile(null); }}
                   className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300"
                 >
                   <X className="w-4 h-4" />
@@ -780,12 +767,11 @@ export default function KnotChatRandomPage() {
               </div>
             )}
 
-            {/* WHATSAPP-STYLE MOBILE STICKY COMPOSER */}
+            {/* COMPOSER */}
             <form
               onSubmit={handleSendMessage}
               className="p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] bg-[#0d0119]/95 backdrop-blur-xl border-t border-pink-500/20 flex items-center space-x-2 z-30 shrink-0"
             >
-              {/* Image Attachment Button */}
               <button
                 type="button"
                 onClick={handleImageAttachmentClick}
@@ -794,24 +780,17 @@ export default function KnotChatRandomPage() {
               >
                 <Paperclip className="w-4 h-4" />
               </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={handleFileChange}
-                className="hidden"
-              />
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} className="hidden" />
 
-              {/* Message Input Box */}
               <input
                 type="text"
                 placeholder="Type a message..."
                 value={inputText}
                 onChange={handleInputChange}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleSendMessage(); }}
                 className="flex-1 px-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
               />
 
-              {/* Send Button */}
               <button
                 type="submit"
                 disabled={sendingMsg || (!inputText.trim() && !selectedImageFile)}
@@ -823,9 +802,9 @@ export default function KnotChatRandomPage() {
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* 4. STATE: ENDED / PARTNER LEFT */}
-        {/* ========================================================================= */}
+        {/* ================================================================= */}
+        {/* 4. ENDED                                                            */}
+        {/* ================================================================= */}
         {matchStatus === 'ended' && (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-6 max-w-md mx-auto">
             <div className="w-16 h-16 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400">
@@ -835,7 +814,9 @@ export default function KnotChatRandomPage() {
             <div className="space-y-1">
               <h3 className="text-lg font-black text-white">Connection Ended</h3>
               <p className="text-xs text-slate-400">
-                Your chat partner has disconnected or skipped to the next person.
+                {partner
+                  ? `@${partner.username} has left the chat.`
+                  : 'Your chat partner has disconnected or skipped.'}
               </p>
             </div>
 
@@ -850,9 +831,9 @@ export default function KnotChatRandomPage() {
         )}
       </div>
 
-      {/* ========================================================================= */}
-      {/* INTRO POPUP WITH PERSISTENT "DON'T SHOW AGAIN" */}
-      {/* ========================================================================= */}
+      {/* ================================================================== */}
+      {/* INTRO MODAL                                                          */}
+      {/* ================================================================== */}
       {showIntroModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <motion.div
@@ -866,24 +847,13 @@ export default function KnotChatRandomPage() {
 
             <div className="text-center space-y-1">
               <h3 className="text-base font-black text-white">How CupidX Chat Works</h3>
-              <p className="text-xs text-slate-400">
-                Quick safety tips before starting your anonymous random chat:
-              </p>
+              <p className="text-xs text-slate-400">Quick safety tips before starting your anonymous random chat:</p>
             </div>
 
             <div className="space-y-2.5 text-xs text-slate-300 bg-black/40 p-4 rounded-2xl border border-white/5">
-              <div className="flex items-start space-x-2">
-                <span>🔒</span>
-                <span>Your private details (email, Clerk ID, IP) are never shared with your partner.</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span>⏭</span>
-                <span>Click <strong>NEXT</strong> anytime to instantly disconnect and find someone new.</span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <span>🚩</span>
-                <span>Report or block inappropriate behavior directly from the chat menu.</span>
-              </div>
+              <div className="flex items-start space-x-2"><span>🔒</span><span>Your private details are never shared with your partner.</span></div>
+              <div className="flex items-start space-x-2"><span>⏭</span><span>Click <strong>NEXT</strong> anytime to instantly disconnect and find someone new.</span></div>
+              <div className="flex items-start space-x-2"><span>🚩</span><span>Report or block inappropriate behavior directly from the chat menu.</span></div>
             </div>
 
             <label className="flex items-center space-x-2.5 text-xs text-slate-300 cursor-pointer select-none">
@@ -901,15 +871,15 @@ export default function KnotChatRandomPage() {
               onClick={handleDismissIntro}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-600 to-purple-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-pink-500/20 cursor-pointer"
             >
-              Continue & Start Chat
+              Continue &amp; Start Chat
             </button>
           </motion.div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* REPORT MODAL */}
-      {/* ========================================================================= */}
+      {/* ================================================================== */}
+      {/* REPORT MODAL                                                         */}
+      {/* ================================================================== */}
       {showReportModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-3xl bg-[#120021] border border-rose-500/30 p-6 space-y-4 shadow-2xl">
@@ -954,7 +924,7 @@ export default function KnotChatRandomPage() {
         </div>
       )}
 
-      {/* FULL IMAGE LIGHTBOX */}
+      {/* LIGHTBOX */}
       {selectedFullImage && (
         <div
           onClick={() => setSelectedFullImage(null)}
@@ -964,17 +934,14 @@ export default function KnotChatRandomPage() {
         </div>
       )}
 
-      {/* VIP UPGRADE MODAL */}
+      {/* VIP MODAL */}
       <SelfHostedVipModal
         isOpen={showVipModal}
         onClose={() => setShowVipModal(false)}
-        onSuccess={() => {
-          refreshUser();
-          setShowVipModal(false);
-        }}
+        onSuccess={() => { refreshUser(); setShowVipModal(false); }}
       />
 
-      {/* Profile Preview Sheet */}
+      {/* PROFILE SHEET */}
       {showProfileSheet && partner && (
         <ProfilePreviewSheet
           isOpen={showProfileSheet}

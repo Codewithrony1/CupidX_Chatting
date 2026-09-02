@@ -172,7 +172,7 @@ export default function DashboardPage() {
               <span>Good day</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Hi, @{user?.username || 'friend'} 👋
+              {user?.username ? `Hi, @${user.username} 👋` : 'Hi there 👋'}
             </h1>
           </div>
 
