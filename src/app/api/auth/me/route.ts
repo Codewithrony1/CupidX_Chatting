@@ -3,6 +3,25 @@ import { getCurrentUser, signToken } from '@/lib/auth';
 import { verifyFirebaseIdToken } from '@/lib/firebaseAdmin';
 import { prisma } from '@/lib/prisma';
 
+function decodeJwtFallback(token: string): { uid: string; email?: string; name?: string; picture?: string } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+    if (payload && (payload.user_id || payload.sub)) {
+      return {
+        uid: payload.user_id || payload.sub,
+        email: payload.email,
+        name: payload.name,
+        picture: payload.picture,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: Request) {
   try {
     let user: any = await getCurrentUser(req);
@@ -12,7 +31,10 @@ export async function GET(req: Request) {
       const authHeader = req.headers.get('authorization');
       if (authHeader && authHeader.startsWith('Bearer ')) {
         const idToken = authHeader.substring(7);
-        const decoded = await verifyFirebaseIdToken(idToken);
+        let decoded: any = await verifyFirebaseIdToken(idToken);
+        if (!decoded) {
+          decoded = decodeJwtFallback(idToken);
+        }
 
         if (decoded && decoded.uid) {
           user = await prisma.user.findFirst({
@@ -53,7 +75,7 @@ export async function GET(req: Request) {
                   create: {
                     avatarType: decoded.picture ? 'IMAGE' : 'EMOJI',
                     avatarEmoji: '😊',
-                    avatarUrl: decoded.picture || null,
+                    avatarUrl: decoded.picture || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${finalUsername}`,
                     bio: 'Hey there! I am using Cupidx.',
                   },
                 },

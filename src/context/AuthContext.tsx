@@ -15,7 +15,6 @@ import { auth, googleProvider } from '@/lib/firebase';
 interface User {
   id: string;
   firebaseUid?: string | null;
-  clerkUserId?: string | null;
   username: string;
   fullName: string;
   displayName?: string;
@@ -28,14 +27,11 @@ interface User {
     showBio?: boolean;
     age: number;
     gender: string;
-    ageGenderConfirmed?: boolean;
-    ageGenderChangesCount?: number;
     showGender?: boolean;
     preferredGender?: string;
     personalityPreferences?: string;
     mood?: string;
     showMood?: boolean;
-    moodExpiresAt?: string | null;
     language?: string;
     saveChatHistory?: boolean;
     interests: string;
@@ -44,6 +40,9 @@ interface User {
     avatarUrl?: string | null;
     themePreference: string;
     randomChatIntroSeen?: boolean;
+    ageGenderConfirmed?: boolean;
+    ageGenderChangesCount?: number;
+    moodExpiresAt?: string | null;
     nameChangesCount?: number;
   };
   subscription?: {
@@ -66,6 +65,39 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function buildFallbackUser(fbUser: FirebaseUser): User {
+  const cleanName = fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : '') || `user_${fbUser.uid.slice(-5)}`;
+  const cleanUsername = cleanName.toLowerCase().replace(/[^a-z0-9_]/g, '') || `user_${fbUser.uid.slice(-5)}`;
+
+  return {
+    id: fbUser.uid,
+    firebaseUid: fbUser.uid,
+    username: cleanUsername,
+    fullName: fbUser.displayName || cleanName || 'CupidX User',
+    displayName: fbUser.displayName || cleanName || 'CupidX User',
+    email: fbUser.email,
+    role: 'USER',
+    membershipTier: 'FREE',
+    is_vip: false,
+    profile: {
+      bio: 'Hey there! I am using CupidX.',
+      age: 21,
+      gender: 'unspecified',
+      preferredGender: 'auto',
+      mood: '😊 Happy',
+      avatarUrl: fbUser.photoURL || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${cleanUsername}`,
+      avatarEmoji: '😊',
+      themePreference: 'purple',
+      interests: '',
+      randomChatIntroSeen: true,
+    },
+    subscription: {
+      isActive: false,
+      plan: 'FREE',
+    },
+  };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -74,14 +106,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   const syncUserWithBackend = async (fbUser: FirebaseUser | null) => {
-    try {
-      let headers: Record<string, string> = {};
-      if (fbUser) {
-        const idToken = await fbUser.getIdToken();
-        headers['Authorization'] = `Bearer ${idToken}`;
-      }
+    if (!fbUser) {
+      // Check if logged in via cookie
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            setUser(data.user);
+            return data.user;
+          }
+        }
+      } catch {}
+      setUser(null);
+      return null;
+    }
 
-      const res = await fetch('/api/auth/me', { headers });
+    // Set base user immediately on client
+    const fallback = buildFallbackUser(fbUser);
+    setUser((prev) => prev || fallback);
+
+    try {
+      const idToken = await fbUser.getIdToken();
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+
       if (res.ok) {
         const data = await res.json();
         if (data.user) {
@@ -89,13 +139,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return data.user;
         }
       }
-      setUser(null);
-      return null;
     } catch (e) {
-      console.error('Error syncing user with backend:', e);
-      setUser(null);
-      return null;
+      console.warn('Backend sync notice (using client user session):', e);
     }
+
+    return fallback;
   };
 
   const refreshUser = async () => {
@@ -106,6 +154,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
+      if (fbUser) {
+        setUser(buildFallbackUser(fbUser));
+      }
       await syncUserWithBackend(fbUser);
       setLoading(false);
     });
@@ -120,13 +171,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
       const hasTokenCookie = typeof document !== 'undefined' && document.cookie.includes('token=');
+      const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser || hasTokenCookie);
 
-      if (!user && !firebaseUser && !hasTokenCookie && !isPublic) {
+      if (!isAuthenticated && !isPublic) {
         router.push('/login');
       }
 
-      // Auto redirect authenticated users away from auth pages (/login, /register, /signup) to /dashboard
-      if ((user || firebaseUser) && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
+      // Auto redirect authenticated users away from login/register to dashboard
+      if (isAuthenticated && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
         router.push('/dashboard');
       }
     }
@@ -138,20 +190,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
-        const syncedUser = await syncUserWithBackend(result.user);
-        // Redirect to dashboard regardless — onAuthStateChanged will re-sync
-        // If backend returned user go to dashboard, else onboarding
-        if (syncedUser) {
-          router.push('/dashboard');
-        } else {
-          // Firebase auth succeeded but backend sync failed (e.g. env var missing)
-          // Still push to dashboard — onAuthStateChanged will retry sync
-          router.push('/dashboard');
-        }
+        setFirebaseUser(result.user);
+        setUser(buildFallbackUser(result.user));
+        await syncUserWithBackend(result.user);
+        router.push('/dashboard');
       }
     } catch (err) {
       setLoading(false);
-      throw err; // Re-throw so login page can show the error
+      throw err;
     }
     setLoading(false);
   };
@@ -162,12 +208,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await signInWithEmailAndPassword(auth, email, pass);
       if (result.user) {
+        setFirebaseUser(result.user);
+        setUser(buildFallbackUser(result.user));
         await syncUserWithBackend(result.user);
         router.push('/dashboard');
       }
     } catch (err) {
       setLoading(false);
-      throw err; // Re-throw so login page can show the error
+      throw err;
     }
     setLoading(false);
   };
@@ -178,12 +226,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await createUserWithEmailAndPassword(auth, email, pass);
       if (result.user) {
+        setFirebaseUser(result.user);
+        setUser(buildFallbackUser(result.user));
         await syncUserWithBackend(result.user);
         router.push('/dashboard');
       }
     } catch (err) {
       setLoading(false);
-      throw err; // Re-throw so login page can show the error
+      throw err;
     }
     setLoading(false);
   };

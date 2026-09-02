@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
+import { auth } from '@/lib/firebase';
 import AppShell from '@/components/AppShell';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
@@ -82,6 +83,31 @@ export default function KnotChatRandomPage() {
   const { user, firebaseUser, loading, refreshUser } = useAuth();
   const { socket, isConnected: socketConnected } = useSocket();
 
+  // Effective authenticated user
+  const currentUser = user || (firebaseUser ? {
+    id: firebaseUser.uid,
+    firebaseUid: firebaseUser.uid,
+    username: firebaseUser.displayName ? firebaseUser.displayName.toLowerCase().replace(/[^a-z0-9_]/g, '') : `user_${firebaseUser.uid.slice(-5)}`,
+    displayName: firebaseUser.displayName || 'User',
+    fullName: firebaseUser.displayName || 'User',
+    role: 'USER' as const,
+    membershipTier: 'FREE',
+    is_vip: false,
+    profile: {
+      avatarEmoji: '😊',
+      avatarUrl: firebaseUser.photoURL || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${firebaseUser.uid}`,
+      gender: 'unspecified',
+      preferredGender: 'auto',
+      mood: '😊 Happy',
+      bio: 'Hey there! I am using CupidX.',
+      age: 21,
+      themePreference: 'purple',
+      interests: '',
+      randomChatIntroSeen: true,
+    },
+    subscription: { isActive: false, plan: 'FREE' },
+  } : null);
+
   // ── Core state ──
   const [matchStatus, setMatchStatus] = useState<'idle' | 'searching' | 'connected' | 'ended'>('idle');
   const [partner, setPartner] = useState<RandomPartner | null>(null);
@@ -130,8 +156,8 @@ export default function KnotChatRandomPage() {
   const activeMatchIdRef = useRef<string | null>(null);
 
   const isVIP =
-    user?.membershipTier === 'VIP' ||
-    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
+    currentUser?.membershipTier === 'VIP' ||
+    (currentUser?.subscription?.isActive === true && currentUser?.subscription?.plan === 'VIP');
 
   // ─── Auto scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -140,10 +166,10 @@ export default function KnotChatRandomPage() {
 
   // ─── Auth redirect guard ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!loading && !user) {
+    if (!loading && !user && !firebaseUser && !auth.currentUser) {
       router.push('/login');
     }
-  }, [user, loading, router]);
+  }, [user, firebaseUser, loading, router]);
 
   // ─── Socket typing indicator ──────────────────────────────────────────────
   useEffect(() => {
@@ -204,7 +230,7 @@ export default function KnotChatRandomPage() {
 
   // ─── Attach active match ──────────────────────────────────────────────────
   const attachActiveMatch = useCallback((mid: string, myUid: string) => {
-    if (activeMatchIdRef.current === mid) return; // Already attached
+    if (activeMatchIdRef.current === mid) return;
     activeMatchIdRef.current = mid;
     setMatchId(mid);
 
@@ -245,8 +271,6 @@ export default function KnotChatRandomPage() {
 
   // ─── START MATCHMAKING ────────────────────────────────────────────────────
   const handleStartMatch = useCallback(async () => {
-    if (!user) return;
-
     setMatchStatus('searching');
     setPartner(null);
     setMessages([]);
@@ -260,19 +284,19 @@ export default function KnotChatRandomPage() {
     stopAllListeners();
 
     try {
-      const fbUid = (await ensureFirebaseAuth()) || user.firebaseUid || user.id;
+      const fbUid = (await ensureFirebaseAuth()) || currentUser?.id || 'user_' + Date.now();
       currentUidRef.current = fbUid;
 
       const prefs = {
         firebaseUid: fbUid,
-        userId: user.id,
-        username: user.username,
-        displayName: user.displayName || user.fullName || user.username,
-        avatarUrl: user.profile?.avatarUrl || '',
-        avatarEmoji: user.profile?.avatarEmoji || '😊',
-        gender: user.profile?.gender || 'unspecified',
-        genderPref: user.profile?.preferredGender || 'auto',
-        mood: user.profile?.mood || '',
+        userId: currentUser?.id || fbUid,
+        username: currentUser?.username || 'user',
+        displayName: currentUser?.displayName || currentUser?.fullName || currentUser?.username || 'User',
+        avatarUrl: currentUser?.profile?.avatarUrl || '',
+        avatarEmoji: currentUser?.profile?.avatarEmoji || '😊',
+        gender: currentUser?.profile?.gender || 'unspecified',
+        genderPref: currentUser?.profile?.preferredGender || 'auto',
+        mood: currentUser?.profile?.mood || '',
         isVIP,
       };
 
@@ -292,7 +316,7 @@ export default function KnotChatRandomPage() {
         attachActiveMatch(mid, fbUid);
       });
 
-      // 4. Run initial scan
+      // 4. Initial scan
       isScanningRef.current = true;
       const immediateMatchId = await findAndMatch(prefs);
       isScanningRef.current = false;
@@ -328,12 +352,12 @@ export default function KnotChatRandomPage() {
       console.error('Matchmaking error:', err);
       setSearchError(err?.message || 'Could not connect to matchmaking queue.');
     }
-  }, [user, isVIP, attachActiveMatch]);
+  }, [currentUser, isVIP, attachActiveMatch]);
 
   // ─── Auto-start on mount when user is ready ───────────────────────────────
   useEffect(() => {
-    if (user?.id) {
-      const hasSeenIntro = (user as any)?.profile?.randomChatIntroSeen;
+    if (currentUser?.id) {
+      const hasSeenIntro = (currentUser as any)?.profile?.randomChatIntroSeen;
       if (!hasSeenIntro) {
         setShowIntroModal(true);
       } else {
@@ -341,7 +365,7 @@ export default function KnotChatRandomPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [currentUser?.id]);
 
   // ─── CANCEL SEARCH ────────────────────────────────────────────────────────
   const handleCancelSearch = async () => {
@@ -383,7 +407,7 @@ export default function KnotChatRandomPage() {
     const activeMid = activeMatchIdRef.current || matchId;
     if (!activeMid) return;
 
-    const senderUid = currentUidRef.current || user?.firebaseUid || user?.id || 'me';
+    const senderUid = currentUidRef.current || currentUser?.firebaseUid || currentUser?.id || 'me';
     const textToSend = inputText.trim();
     const imageToSend = selectedImageFile;
 
@@ -392,7 +416,7 @@ export default function KnotChatRandomPage() {
       id: tempId,
       clientMessageId: tempId,
       senderId: senderUid,
-      senderUsername: user?.username || 'me',
+      senderUsername: currentUser?.username || 'me',
       content: textToSend,
       imageUrl: imagePreview || null,
       createdAt: new Date().toISOString(),
@@ -412,7 +436,7 @@ export default function KnotChatRandomPage() {
       await sendFirestoreMessage(
         activeMid,
         senderUid,
-        user?.username || 'user',
+        currentUser?.username || 'user',
         textToSend,
         imageToSend
       );
@@ -725,7 +749,7 @@ export default function KnotChatRandomPage() {
                 const isMine =
                   msg.senderId === currentUidRef.current ||
                   msg.senderId === firebaseUser?.uid ||
-                  msg.senderUsername === user?.username;
+                  msg.senderUsername === currentUser?.username;
 
                 return (
                   <motion.div
