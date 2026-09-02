@@ -17,16 +17,21 @@ export interface UserProfile {
   displayName: string;
   email: string | null;
   role: 'USER' | 'ADMIN';
-  membershipTier: string;
+  membershipTier: 'FREE' | 'VIP' | string;
   is_vip: boolean;
+  isVIP?: boolean;
   online: boolean;
   status: 'active' | 'suspended';
+  profileCompleted: boolean;
+  dateOfBirth?: string | null; // Format: "YYYY-MM-DD"
+  gender: string; // "male", "female", "other", "prefer_not_to_say", "unspecified"
   createdAt: number;
   updatedAt: number;
   profile: {
     bio: string;
     showBio?: boolean;
-    age: number;
+    dateOfBirth?: string | null;
+    age: number; // Dynamically calculated
     gender: string;
     showGender?: boolean;
     preferredGender?: string;
@@ -54,6 +59,37 @@ export interface UserProfile {
 }
 
 /**
+ * Dynamically calculate age from Date of Birth string or Date object.
+ */
+export function calculateAge(dob: string | Date | null | undefined): number {
+  if (!dob) return 18;
+  const birthDate = typeof dob === 'string' ? new Date(dob) : dob;
+  if (isNaN(birthDate.getTime())) return 18;
+  
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return Math.max(0, age);
+}
+
+/**
+ * Format DOB for beautiful display (e.g., "21 August 2005")
+ */
+export function formatDisplayDob(dob: string | Date | null | undefined): string {
+  if (!dob) return 'Not set';
+  const birthDate = typeof dob === 'string' ? new Date(dob) : dob;
+  if (isNaN(birthDate.getTime())) return 'Not set';
+  return birthDate.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+/**
  * Generate a clean username from displayName or email or fallback.
  */
 export function generateCleanUsername(fbUser: FirebaseUser): string {
@@ -73,18 +109,31 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
 
     if (snap.exists()) {
       const data = snap.data() as UserProfile;
+      // Calculate dynamic age from saved DOB
+      const dynamicAge = calculateAge(data.dateOfBirth || data.profile?.dateOfBirth);
+      
+      const enriched: UserProfile = {
+        ...data,
+        profileCompleted: Boolean(data.profileCompleted),
+        profile: {
+          ...data.profile,
+          age: dynamicAge,
+          dateOfBirth: data.dateOfBirth || data.profile?.dateOfBirth || null,
+        },
+      };
+
       // Update online status in background
       updateDoc(userRef, {
         online: true,
         updatedAt: Date.now(),
       }).catch(() => {});
-      return data;
+      return enriched;
     }
   } catch (err) {
     console.warn('Notice reading user from Firestore:', err);
   }
 
-  // Create new profile
+  // Create initial profile (profileCompleted is false until user finishes onboarding)
   const cleanUsername = generateCleanUsername(fbUser);
   const now = Date.now();
   const displayName = fbUser.displayName || cleanUsername;
@@ -101,13 +150,18 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
     role: 'USER',
     membershipTier: 'FREE',
     is_vip: false,
+    isVIP: false,
     online: true,
     status: 'active',
+    profileCompleted: false, // Must complete first-time onboarding
+    dateOfBirth: null,
+    gender: 'unspecified',
     createdAt: now,
     updatedAt: now,
     profile: {
       bio: 'Hey there! I am using CupidX.',
-      age: 21,
+      age: 18,
+      dateOfBirth: null,
       gender: 'unspecified',
       preferredGender: 'auto',
       mood: '😊 Happy',
@@ -115,8 +169,8 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
       avatarEmoji: '😊',
       themePreference: 'purple',
       interests: '',
-      randomChatIntroSeen: true,
-      ageGenderConfirmed: true,
+      randomChatIntroSeen: false,
+      ageGenderConfirmed: false,
     },
     subscription: {
       isActive: false,

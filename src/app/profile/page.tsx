@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { VIP_AVATAR_CATEGORIES } from '@/lib/avatars';
+import { formatDisplayDob, calculateAge, updateFirestoreUserProfile } from '@/lib/firestoreUser';
 import AppShell from '@/components/AppShell';
 import BottomSheet from '@/components/ui/BottomSheet';
 import {
@@ -21,6 +22,7 @@ import {
   Heart,
   Globe,
   Loader2,
+  Calendar,
   X
 } from 'lucide-react';
 
@@ -60,17 +62,8 @@ const PERSONALITY_OPTIONS = [
   '❤️ Romantic',
 ];
 
-const AVATAR_PRESETS = [
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX1',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX2',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX3',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX4',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX5',
-  'https://api.dicebear.com/7.x/fun-emoji/svg?seed=CupidX6',
-];
-
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth();
+  const { user, firebaseUser, refreshUser } = useAuth();
   const router = useRouter();
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
@@ -79,17 +72,15 @@ export default function ProfilePage() {
   const [displayName, setDisplayName] = useState(user?.displayName || user?.fullName || '');
   const [bio, setBio] = useState(user?.profile?.bio || '');
   const [showBio, setShowBio] = useState(user?.profile?.showBio ?? true);
-  const [age, setAge] = useState<number>(user?.profile?.age || 18);
-  const [gender, setGender] = useState<string>(user?.profile?.gender || 'unspecified');
-  const ageGenderConfirmed = user?.profile?.ageGenderConfirmed ?? false;
-  const ageGenderChangesCount = user?.profile?.ageGenderChangesCount ?? 0;
+  const [dateOfBirth, setDateOfBirth] = useState(user?.dateOfBirth || user?.profile?.dateOfBirth || '');
+  const [gender, setGender] = useState<string>(user?.gender || user?.profile?.gender || 'male');
   const [showGender, setShowGender] = useState(user?.profile?.showGender ?? true);
   const [preferredGender, setPreferredGender] = useState(user?.profile?.preferredGender || 'auto');
   const [mood, setMood] = useState(user?.profile?.mood || '');
   const [showMood, setShowMood] = useState(user?.profile?.showMood ?? true);
   const [moodDuration, setMoodDuration] = useState<'1hour' | '24hours' | 'never'>('24hours');
 
-  // Personality Tags (array from comma-separated string)
+  // Personality Tags
   const [personalityTags, setPersonalityTags] = useState<string[]>([]);
   const [avatarType, setAvatarType] = useState<string>(user?.profile?.avatarType || 'EMOJI');
   const [avatarEmoji, setAvatarEmoji] = useState<string>(user?.profile?.avatarEmoji || '😊');
@@ -106,21 +97,21 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (user?.profile) {
+    if (user) {
       setDisplayName(user.displayName || user.fullName || '');
-      setBio(user.profile.bio || '');
-      setShowBio(user.profile.showBio ?? true);
-      setAge(user.profile.age || 18);
-      setGender(user.profile.gender || 'unspecified');
-      setShowGender(user.profile.showGender ?? true);
-      setPreferredGender(user.profile.preferredGender || 'auto');
-      setMood(user.profile.mood || '');
-      setShowMood(user.profile.showMood ?? true);
-      setAvatarType(user.profile.avatarType || 'EMOJI');
-      setAvatarEmoji(user.profile.avatarEmoji || '😊');
-      setAvatarUrl(user.profile.avatarUrl || null);
+      setBio(user.profile?.bio || '');
+      setShowBio(user.profile?.showBio ?? true);
+      setDateOfBirth(user.dateOfBirth || user.profile?.dateOfBirth || '');
+      setGender(user.gender || user.profile?.gender || 'male');
+      setShowGender(user.profile?.showGender ?? true);
+      setPreferredGender(user.profile?.preferredGender || 'auto');
+      setMood(user.profile?.mood || '');
+      setShowMood(user.profile?.showMood ?? true);
+      setAvatarType(user.profile?.avatarType || 'EMOJI');
+      setAvatarEmoji(user.profile?.avatarEmoji || '😊');
+      setAvatarUrl(user.profile?.avatarUrl || null);
 
-      const tags = user.profile.personalityPreferences
+      const tags = user.profile?.personalityPreferences
         ? user.profile.personalityPreferences.split(',').filter(Boolean)
         : [];
       setPersonalityTags(tags);
@@ -200,20 +191,54 @@ export default function ProfilePage() {
     setSaving(true);
     setSaveSuccess(false);
 
+    const uid = firebaseUser?.uid || user?.id;
+
     try {
+      // 1. Save to Cloud Firestore
+      if (uid) {
+        const updates: any = {
+          fullName: displayName.trim(),
+          displayName: displayName.trim(),
+          profile: {
+            ...user?.profile,
+            showBio,
+            showGender,
+            preferredGender,
+            personalityPreferences: personalityTags.join(','),
+            avatarType,
+            avatarEmoji,
+          },
+        };
+
+        if (isVIP) {
+          updates.dateOfBirth = dateOfBirth;
+          updates.gender = gender;
+          updates.profile.bio = bio;
+          updates.profile.dateOfBirth = dateOfBirth;
+          updates.profile.gender = gender;
+          updates.profile.age = calculateAge(dateOfBirth);
+          updates.profile.mood = mood;
+          updates.profile.showMood = showMood;
+        }
+
+        await updateFirestoreUserProfile(uid, updates);
+      }
+
+      // 2. Sync to Backend Database API
       const res = await fetch('/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           displayName,
-          bio,
+          bio: isVIP ? bio : undefined,
           showBio,
-          age,
-          gender,
+          dob: isVIP ? dateOfBirth : undefined,
+          dateOfBirth: isVIP ? dateOfBirth : undefined,
+          gender: isVIP ? gender : undefined,
           showGender,
           preferredGender,
           personalityPreferences: personalityTags.join(','),
-          mood,
+          mood: isVIP ? mood : undefined,
           showMood,
           moodDuration,
           avatarType,
@@ -239,6 +264,8 @@ export default function ProfilePage() {
       setSaving(false);
     }
   };
+
+  const dynamicAge = calculateAge(dateOfBirth || user?.dateOfBirth || user?.profile?.dateOfBirth);
 
   return (
     <AppShell>
@@ -277,7 +304,7 @@ export default function ProfilePage() {
           {/* SECTION 1: CUPIDX IDENTITY & AVATAR */}
           <div className="glass-romantic rounded-3xl p-6 text-center space-y-5">
             
-            {/* Avatar Render Box (Emoji or Custom Image) */}
+            {/* Avatar Render Box */}
             <div className="relative w-28 h-28 mx-auto">
               {isVIP && avatarType === 'IMAGE' && (imagePreview || avatarUrl) ? (
                 <img
@@ -371,31 +398,30 @@ export default function ProfilePage() {
               ) : (
                 /* VIP USER CATEGORIZED AVATAR PICKER */
                 <div className="space-y-4">
-                  {/* Avatar Mode Selector (Emoji vs Custom Image) */}
                   <div className="flex justify-center gap-2">
                     <button
                       type="button"
                       onClick={() => setAvatarType('EMOJI')}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                         avatarType === 'EMOJI'
-                          ? 'bg-pink-500 text-white shadow-md'
-                          : 'bg-white/5 border border-white/10 text-pink-200/60 hover:bg-white/10'
+                          ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md'
+                          : 'bg-white/5 text-slate-400 hover:bg-white/10'
                       }`}
                     >
-                      😎 Emoji Avatar
+                      ✨ VIP Emoji Avatars
                     </button>
                     <button
                       type="button"
                       onClick={() => {
                         setAvatarType('IMAGE');
-                        if (!avatarUrl && !imagePreview) {
+                        if (!imagePreview && !avatarUrl) {
                           fileInputRef.current?.click();
                         }
                       }}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                         avatarType === 'IMAGE'
-                          ? 'bg-pink-500 text-white shadow-md'
-                          : 'bg-white/5 border border-white/10 text-pink-200/60 hover:bg-white/10'
+                          ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md'
+                          : 'bg-white/5 text-slate-400 hover:bg-white/10'
                       }`}
                     >
                       🖼 Custom Image
@@ -461,7 +487,7 @@ export default function ProfilePage() {
             <div className="space-y-3 text-left pt-2">
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Cupidx Display Name</label>
+                  <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Full / Display Name</label>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-300 font-bold border border-pink-500/20">
                     {`Name changes left today: ${Math.max(0, 4 - ((user?.profile as any)?.nameChangesCount ?? 0))}/4`}
                   </span>
@@ -474,9 +500,6 @@ export default function ProfilePage() {
                   placeholder="e.g. Rony Rai"
                   className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-semibold"
                 />
-                <p className="text-[10px] text-pink-200/60">
-                  Your display name shown in chat. You can change your name up to 4 times per day.
-                </p>
               </div>
 
               <div className="space-y-1">
@@ -484,430 +507,237 @@ export default function ProfilePage() {
                 <div className="px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 font-mono text-xs">
                   @{user?.username}
                 </div>
-                <p className="text-[10px] text-pink-200/60 font-medium">Username is set once during setup and cannot be changed.</p>
               </div>
 
+              {/* Bio Field — Free (Locked) vs VIP (Editable) */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Bio</label>
-                  <label className="flex items-center space-x-1.5 text-[11px] text-pink-200/80 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showBio}
-                      onChange={(e) => setShowBio(e.target.checked)}
-                      className="rounded accent-pink-500"
-                    />
-                    <span>Show Bio</span>
-                  </label>
+                  {!isVIP ? (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-300 font-bold border border-yellow-500/30 flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-yellow-400" />
+                      <span>VIP — Upgrade to edit</span>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-bold border border-yellow-500/30 flex items-center gap-1">
+                      <Crown className="w-3 h-3 fill-current" />
+                      <span>VIP Unlocked</span>
+                    </span>
+                  )}
                 </div>
-                <textarea
-                  rows={3}
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  placeholder="Share a short intro about yourself..."
-                  className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs"
-                />
+
+                <div className="relative">
+                  <textarea
+                    rows={3}
+                    disabled={!isVIP}
+                    value={bio}
+                    onChange={(e) => setBio(e.target.value)}
+                    placeholder={isVIP ? "Share a short intro about yourself..." : "Upgrade to VIP to write a custom bio."}
+                    className={`w-full px-3.5 py-2.5 rounded-xl glass-input text-xs ${
+                      !isVIP ? 'opacity-70 cursor-not-allowed bg-black/40' : ''
+                    }`}
+                  />
+                  {!isVIP && (
+                    <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px] rounded-xl flex items-center justify-center pointer-events-none">
+                      <Link
+                        href="/vip"
+                        className="pointer-events-auto px-3 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black text-[11px] shadow-lg flex items-center gap-1 hover:scale-105 transition-transform"
+                      >
+                        <Crown className="w-3.5 h-3.5 fill-current" />
+                        <span>Unlock Bio Editing with VIP</span>
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* SECTION 2: IDENTITY, AGE & GENDER */}
-          <div className="glass-romantic rounded-3xl p-6 space-y-4">
+          {/* SECTION 2: IDENTITY, DATE OF BIRTH & GENDER */}
+          <div className="glass-romantic rounded-3xl p-6 space-y-4 text-left">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black text-white flex items-center gap-2">
                 <User className="w-4 h-4 text-purple-400" />
-                <span>Identity, Age & Gender</span>
+                <span>Identity, Date of Birth &amp; Gender</span>
               </h3>
 
               {isVIP ? (
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-1">
-                  <Crown className="w-3 h-3 fill-current" /> Unlimited Edits 💎
+                  <Crown className="w-3 h-3 fill-current" /> Editable with VIP 💎
                 </span>
               ) : (
-                <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold border ${
-                  ageGenderChangesCount >= 1
-                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                }`}>
-                  {ageGenderChangesCount >= 1 ? '0 edits left (Max 1 Free edit)' : '1 edit left (Free)'}
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-extrabold border bg-rose-500/15 text-rose-300 border-rose-500/30 flex items-center gap-1">
+                  <Lock className="w-3 h-3 text-rose-400" />
+                  <span>Locked for Free members</span>
                 </span>
               )}
             </div>
 
-            {/* Age Input */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Age (18+)</label>
-              <input
-                type="number"
-                min={18}
-                max={99}
-                value={age}
-                onChange={(e) => {
-                  if (!isVIP && ageGenderConfirmed && ageGenderChangesCount >= 1 && parseInt(e.target.value) !== user?.profile?.age) {
-                    setShowVipLockModal(true);
-                    return;
-                  }
-                  setAge(Math.min(99, Math.max(18, parseInt(e.target.value) || 18)));
-                }}
-                className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-bold"
-              />
-            </div>
-
-            {/* Gender Selection */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Gender</label>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {[
-                  { id: 'male', label: 'Male' },
-                  { id: 'female', label: 'Female' },
-                  { id: 'non-binary', label: 'Non-binary' },
-                  { id: 'prefer_not_to_say', label: 'Prefer not to say' },
-                ].map((g) => (
-                  <button
-                    key={g.id}
-                    type="button"
-                    onClick={() => {
-                      if (!isVIP && ageGenderConfirmed && ageGenderChangesCount >= 1 && g.id !== user?.profile?.gender) {
-                        setShowVipLockModal(true);
-                        return;
-                      }
-                      setGender(g.id);
-                    }}
-                    className={`p-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
-                      gender === g.id
-                        ? 'bg-pink-500/25 border-pink-400 text-white shadow-md'
-                        : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
-                    }`}
-                  >
-                    {g.label}
-                  </button>
-                ))}
+            {/* Date of Birth Field */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">
+                  Date of Birth
+                </label>
+                <span className="text-[10px] font-extrabold text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  Age: {dynamicAge} yrs
+                </span>
               </div>
-            </div>
-          </div>
 
-          {/* SECTION 3: CURRENT MOOD & EXPIRATION (VIP vs FREE) */}
-          <div className="glass-romantic rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <Smile className="w-4 h-4 text-amber-400" />
-                <span>Current Mood</span>
-                {isVIP && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-black border border-yellow-500/30 flex items-center gap-1">
-                    <Crown className="w-3 h-3 fill-current" /> 💎 VIP
+              {isVIP ? (
+                <input
+                  type="date"
+                  max={new Date().toISOString().split('T')[0]}
+                  value={dateOfBirth}
+                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-semibold cursor-pointer"
+                />
+              ) : (
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <span className="text-xs font-bold text-white">
+                      {formatDisplayDob(dateOfBirth || user?.dateOfBirth || user?.profile?.dateOfBirth)}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 flex items-center gap-1 font-bold">
+                    <Lock className="w-3 h-3 text-yellow-400" />
+                    <span>Locked</span>
                   </span>
-                )}
-              </h3>
-
-              {isVIP && (
-                <button
-                  type="button"
-                  onClick={() => setShowMoodSheet(true)}
-                  className="text-xs font-bold text-pink-400 hover:text-pink-300 transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Change Mood</span>
-                </button>
+                </div>
               )}
+              <p className="text-[10px] text-pink-200/50">
+                {isVIP ? 'VIP members can update their date of birth anytime.' : 'Date of birth is permanently locked for Free members.'}
+              </p>
             </div>
 
-            {/* FREE USER MOOD CARD */}
-            {!isVIP ? (
-              <div className="p-4 rounded-2xl bg-white/5 border border-pink-500/15 text-center space-y-2">
-                <p className="text-xs font-bold text-pink-200/80">
-                  {mood ? mood : '😊 Choose your mood'}
-                </p>
-                <p className="text-[11px] text-pink-300/60">
-                  Custom mood selection and expiration timers are available with CupidX VIP.
-                </p>
-                <Link
-                  href="/vip"
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-slate-950 font-black text-xs shadow-md hover:scale-105 transition-all mt-1"
-                >
-                  <Crown className="w-3.5 h-3.5 fill-current" />
-                  <span>Explore VIP →</span>
-                </Link>
-              </div>
-            ) : (
-              /* VIP USER MOOD CONTROLS */
-              <>
-                <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-2xl leading-none">{mood ? mood.split(' ')[0] : '😊'}</span>
-                    <span className="text-xs font-bold text-white">{mood || 'No mood selected'}</span>
-                  </div>
-                  <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">Active</span>
-                </div>
+            {/* Gender Field */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">
+                Gender
+              </label>
 
-                <div className="space-y-2 pt-1">
-                  <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Mood Duration</label>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    {[
-                      { id: '1hour', label: '1 Hour' },
-                      { id: '24hours', label: '24 Hours (Today)' },
-                      { id: 'never', label: 'Until Changed' },
-                    ].map((d) => (
-                      <button
-                        key={d.id}
-                        type="button"
-                        onClick={() => setMoodDuration(d.id as any)}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                          moodDuration === d.id
-                            ? 'bg-pink-500 text-white shadow-md'
-                            : 'bg-white/5 border border-white/10 text-pink-200/70 hover:bg-white/10'
-                        }`}
-                      >
-                        <span>{d.label}</span>
-                      </button>
-                    ))}
-                  </div>
+              {isVIP ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Male', val: 'male' },
+                    { label: 'Female', val: 'female' },
+                    { label: 'Other', val: 'other' },
+                  ].map((item) => (
+                    <button
+                      key={item.val}
+                      type="button"
+                      onClick={() => setGender(item.val)}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        gender === item.val
+                          ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-400 shadow-md'
+                          : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
-              </>
-            )}
+              ) : (
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
+                  <span className="text-xs font-bold text-white capitalize">
+                    {gender || user?.gender || user?.profile?.gender || 'Unspecified'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 flex items-center gap-1 font-bold">
+                    <Lock className="w-3 h-3 text-yellow-400" />
+                    <span>Locked</span>
+                  </span>
+                </div>
+              )}
+              <p className="text-[10px] text-pink-200/50">
+                {isVIP ? 'VIP members can update their gender preferences.' : 'Gender is locked after initial setup. Upgrade to VIP to change.'}
+              </p>
+            </div>
           </div>
 
-          {/* SECTION 4: PERSONALITY PREFERENCES (VIP Feature) */}
-          <div className="glass-romantic rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-yellow-400" />
-                <span>Conversation Style & Personality</span>
-                {!isVIP && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
-                    <Lock className="w-2.5 h-2.5" /> VIP
-                  </span>
-                )}
-              </h3>
-            </div>
+          {/* SECTION 3: PERSONALITY TAGS */}
+          <div className="glass-romantic rounded-3xl p-6 space-y-3 text-left">
+            <h3 className="text-sm font-black text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-yellow-400" />
+              <span>Personality Tags</span>
+            </h3>
+            <p className="text-xs text-pink-200/70">Pick tags that best describe your romantic personality:</p>
 
-            <p className="text-xs text-pink-200/70">
-              Select personality tags that describe you and your conversation style (VIP Exclusive).
-            </p>
-
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 pt-1">
               {PERSONALITY_OPTIONS.map((tag) => {
-                const selected = personalityTags.includes(tag);
+                const isSelected = personalityTags.includes(tag);
                 return (
                   <button
                     key={tag}
                     type="button"
-                    onClick={() => {
-                      if (!isVIP) {
-                        setShowVipLockModal(true);
-                        return;
-                      }
-                      togglePersonalityTag(tag);
-                    }}
-                    className={`px-3 py-2 rounded-2xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                      selected
-                        ? 'bg-gradient-to-r from-pink-600 to-rose-500 text-white border-pink-400 shadow-md scale-105'
-                        : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
+                    onClick={() => togglePersonalityTag(tag)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-pink-600 text-white border-pink-400 shadow-md scale-105'
+                        : 'bg-white/5 text-pink-200/70 border-white/10 hover:bg-white/10'
                     }`}
                   >
-                    <span>{tag}</span>
-                    {!isVIP && <Lock className="w-3 h-3 text-yellow-400" />}
-                    {isVIP && selected && <Check className="w-3.5 h-3.5 text-white" />}
+                    {tag}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* SECTION 5: DISCOVERY PREFERENCES (Requirement 7 & 9) */}
-          <div className="glass-romantic rounded-3xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <Zap className="w-4 h-4 text-yellow-400" />
-                <span>Discovery Preference</span>
-              </h3>
-
-              {!isVIP && (
-                <span className="text-[10px] text-yellow-400 font-extrabold flex items-center gap-1">
-                  <Lock className="w-3 h-3" /> VIP Feature
-                </span>
-              )}
-            </div>
-
-            <p className="text-xs text-pink-200/70">
-              Who would you like to connect with in Random Chat? (Random matching prioritizes compatible users).
-            </p>
-
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              {[
-                { id: 'auto', label: 'Anyone' },
-                { id: 'male', label: 'Men' },
-                { id: 'female', label: 'Women' },
-              ].map((p) => {
-                const isLocked = p.id !== 'auto' && !isVIP;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      if (isLocked) {
-                        setShowVipLockModal(true);
-                        return;
-                      }
-                      setPreferredGender(p.id);
-                    }}
-                    className={`p-3 rounded-2xl border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                      preferredGender === p.id
-                        ? 'bg-pink-500/25 border-pink-400 text-white shadow-md'
-                        : isLocked
-                        ? 'bg-white/5 border-white/5 text-pink-200/40 hover:border-yellow-500/40'
-                        : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
-                    }`}
-                  >
-                    <span>{p.label}</span>
-                    {isLocked && <Lock className="w-3 h-3 text-yellow-400" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* SECTION 6: VIP PAYMENT HISTORY */}
-          {payments.length > 0 && (
-            <div className="glass-romantic rounded-3xl p-6 space-y-4">
-              <h3 className="text-sm font-black text-white flex items-center gap-2">
-                <Crown className="w-4 h-4 text-yellow-400 fill-current" />
-                <span>VIP Payment History</span>
-              </h3>
-
-              <div className="space-y-2 text-xs">
-                {payments.map((p) => (
-                  <div
-                    key={p.id}
-                    className="p-3 rounded-2xl bg-white/5 border border-pink-500/15 flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-extrabold text-white">💎 Cupidx VIP Membership</p>
-                      <p className="text-[10px] text-pink-200/60">
-                        {new Date(p.createdAt).toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-black text-yellow-400">₹{(p.amount / 100).toFixed(0)}</p>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        p.status === 'CAPTURED' || p.status === 'SUCCESS'
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                          : p.status === 'REFUNDED'
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                          : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                      }`}>
-                        {p.status === 'CAPTURED' ? 'Paid' : p.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
+          {/* Success Banner */}
           {saveSuccess && (
-            <div className="p-3.5 rounded-2xl bg-green-500/15 border border-green-500/30 text-xs text-green-400 text-center font-bold flex items-center justify-center gap-1.5">
-              <Check className="w-4 h-4" /> Profile updated successfully!
+            <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-bold text-center animate-pulse">
+              ✓ Profile saved successfully!
             </div>
           )}
 
+          {/* Save Button */}
           <button
             type="submit"
             disabled={saving}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-black text-sm shadow-xl shadow-pink-500/30 transition-all cursor-pointer flex items-center justify-center space-x-2"
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-black text-sm uppercase tracking-wider shadow-xl shadow-pink-500/30 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
           >
             {saving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Saving Profile...</span>
-              </>
+              <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
-              <span>SAVE PROFILE</span>
+              <>
+                <Check className="w-5 h-5" />
+                <span>Save Profile</span>
+              </>
             )}
           </button>
         </form>
 
-      </div>
-
-      {/* Mood Bottom Sheet */}
-      <BottomSheet isOpen={showMoodSheet} onClose={() => setShowMoodSheet(false)} title="Select your mood">
-        <div className="space-y-4 py-2">
-          <div className="grid grid-cols-2 gap-2.5 max-h-[50vh] overflow-y-auto pr-1">
-            {MOOD_OPTIONS.map((m) => {
-              const selected = mood === m;
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => {
-                    setMood(m);
-                    setShowMoodSheet(false);
-                  }}
-                  className={`p-3 rounded-2xl border text-xs font-bold text-left flex items-center justify-between transition-all cursor-pointer ${
-                    selected
-                      ? 'bg-pink-500/25 border-pink-400 text-white shadow-md'
-                      : 'bg-white/5 border-white/10 text-pink-200/80 hover:bg-white/10'
-                  }`}
-                >
-                  <span>{m}</span>
-                  {selected && <Check className="w-4 h-4 text-pink-400" />}
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowMoodSheet(false)}
-            className="w-full py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-colors cursor-pointer"
-          >
-            DONE
-          </button>
-        </div>
-      </BottomSheet>
-
-      {/* Free User VIP Feature Lock Modal (Requirement 15) */}
-      {showVipLockModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-yellow-500/30 shadow-2xl">
-            <button
-              onClick={() => setShowVipLockModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-yellow-400 via-amber-500 to-yellow-600 flex items-center justify-center mx-auto text-slate-950 shadow-xl shadow-yellow-500/30 animate-pulse">
-              <Crown className="w-7 h-7 fill-current" />
-            </div>
-
-            <div className="space-y-2">
-              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-[11px] font-extrabold uppercase tracking-wide">
-                💎 VIP FEATURE
-              </span>
-              <h3 className="text-lg font-black text-white">This feature is available with Cupidx VIP.</h3>
-              <p className="text-xs text-pink-200/70 leading-relaxed px-2">
-                Unlock custom DP uploads, targeted gender discovery, talkative matchmaking & VIP profile badge.
+        {/* VIP Lock Modal */}
+        {showVipLockModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-3xl bg-[#120021] border border-yellow-500/30 p-6 space-y-4 shadow-2xl text-center">
+              <div className="w-14 h-14 rounded-2xl bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 flex items-center justify-center mx-auto">
+                <Crown className="w-8 h-8 fill-current" />
+              </div>
+              <h3 className="text-lg font-black text-white">CupidX VIP Feature</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Custom profile photos, unlimited DOB &amp; Gender editing, and bio customization require a CupidX VIP membership.
               </p>
-            </div>
-
-            <div className="space-y-2 pt-1">
-              <Link
-                href="/vip"
-                onClick={() => setShowVipLockModal(false)}
-                className="w-full py-3 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black text-xs shadow-lg transition-all active:scale-95 cursor-pointer block text-center"
-              >
-                EXPLORE VIP
-              </Link>
-
-              <button
-                onClick={() => setShowVipLockModal(false)}
-                className="w-full py-2.5 rounded-2xl text-xs font-bold text-slate-400 hover:text-white transition-colors cursor-pointer"
-              >
-                Maybe later
-              </button>
+              <div className="flex items-center space-x-2 pt-2">
+                <Link
+                  href="/vip"
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg hover:scale-105 transition-transform"
+                >
+                  Upgrade to VIP for ₹29
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setShowVipLockModal(false)}
+                  className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </AppShell>
   );
 }

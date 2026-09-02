@@ -50,7 +50,6 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    // 1. Derive User Identity strictly from authenticated Clerk session
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -63,6 +62,8 @@ export async function PUT(req: Request) {
       displayName,
       bio,
       showBio,
+      dob,
+      dateOfBirth,
       age,
       gender,
       preferredGender,
@@ -90,7 +91,57 @@ export async function PUT(req: Request) {
       return NextResponse.json({ success: true, profile: updated });
     }
 
-    // 2. Name Change Limit: Max 4 per calendar day
+    // ─── 1. FREE vs VIP SERVER-SIDE FIELD LOCKS ──────────────────────────────
+    const inputDob = dob || dateOfBirth;
+    const existingDob = user.dob || user.profile?.dob;
+    const existingGender = user.gender || user.profile?.gender;
+    const existingBio = user.profile?.bio || '';
+
+    // A. Free user trying to change DOB after already set
+    if (inputDob && existingDob && !isVIP) {
+      const newDobDate = new Date(inputDob).toISOString().slice(0, 10);
+      const oldDobDate = new Date(existingDob).toISOString().slice(0, 10);
+      if (newDobDate !== oldDobDate) {
+        return NextResponse.json(
+          {
+            error: 'Date of Birth is locked for Free members. Upgrade to VIP to change your birth date.',
+            isVipRequired: true,
+          },
+          { status: 403 }
+        );
+      }
+    }
+
+    // B. Free user trying to change Gender after already set
+    if (gender && existingGender && existingGender !== 'unspecified' && !isVIP) {
+      const cleanNewGender = gender.trim().toLowerCase();
+      const cleanOldGender = existingGender.trim().toLowerCase();
+      if (cleanNewGender !== cleanOldGender) {
+        return NextResponse.json(
+          {
+            error: 'Gender is locked for Free members. Upgrade to VIP to change your gender.',
+            isVipRequired: true,
+          },
+          { status: 403 }
+        );
+      }
+    }
+
+    // C. Free user trying to edit Bio
+    if (bio !== undefined && !isVIP) {
+      const cleanNewBio = bio.trim();
+      if (cleanNewBio !== existingBio.trim()) {
+        return NextResponse.json(
+          {
+            error: 'Bio customization is an exclusive CupidX VIP feature. Upgrade to VIP to write a custom bio.',
+            isVipRequired: true,
+          },
+          { status: 403 }
+        );
+      }
+    }
+
+    // ─── 2. Display Name Change Limit: Max 4 per calendar day ─────────────────
     let cleanDisplayName: string | undefined = undefined;
     let nextNameChangesCount = user.profile?.nameChangesCount ?? 0;
     let nextNameChangesDate: Date | undefined = undefined;
@@ -98,7 +149,6 @@ export async function PUT(req: Request) {
     if (displayName !== undefined) {
       const trimmed = displayName.trim();
 
-      // Sanitization & Security Checks
       if (trimmed.length < 2 || trimmed.length > 50) {
         return NextResponse.json(
           { error: 'Display name must be between 2 and 50 characters.' },
@@ -112,7 +162,6 @@ export async function PUT(req: Request) {
         );
       }
 
-      // If name is actually changing
       const currentName = user.displayName || user.fullName || user.username;
       if (trimmed !== currentName) {
         const todayStr = new Date().toISOString().slice(0, 10);
@@ -139,11 +188,12 @@ export async function PUT(req: Request) {
       }
     }
 
-    // Sanitize basic fields
-    const cleanBio = bio !== undefined ? bio.trim().slice(0, 500) : undefined;
+    // Sanitize VIP fields
+    const cleanBio = isVIP && bio !== undefined ? bio.trim().slice(0, 500) : undefined;
     const cleanGender = gender !== undefined ? gender.trim().toLowerCase() : undefined;
+    const parsedDob = inputDob ? new Date(inputDob) : undefined;
 
-    // Strict Server-side VIP Protection for premium VIP fields
+    // Strict VIP checks
     const isUpdatingVIPAvatarEmoji = avatarEmoji !== undefined && avatarEmoji !== '' && isVipAvatar(avatarEmoji);
     const isUpdatingVIPAvatarImage = (avatarData && avatarData.startsWith('data:image/')) || avatarType === 'IMAGE';
     const isUpdatingVIPPreferences = preferredGender !== undefined && preferredGender !== '' && preferredGender !== 'auto';
@@ -190,14 +240,21 @@ export async function PUT(req: Request) {
       }
     }
 
-    // Update User.displayName if provided
+    // Update User record
     const userUpdateData: any = {};
     if (cleanDisplayName) {
       userUpdateData.displayName = cleanDisplayName;
       userUpdateData.fullName = cleanDisplayName;
     }
-    if (cleanGender && ['male', 'female', 'non-binary', 'prefer_not_to_say'].includes(cleanGender)) {
-      userUpdateData.gender = cleanGender;
+    if (cleanGender && ['male', 'female', 'non-binary', 'other', 'prefer_not_to_say'].includes(cleanGender)) {
+      if (isVIP || !existingGender || existingGender === 'unspecified') {
+        userUpdateData.gender = cleanGender;
+      }
+    }
+    if (parsedDob && !isNaN(parsedDob.getTime())) {
+      if (isVIP || !existingDob) {
+        userUpdateData.dob = parsedDob;
+      }
     }
 
     if (Object.keys(userUpdateData).length > 0) {
@@ -211,8 +268,8 @@ export async function PUT(req: Request) {
     const profileUpdateData: any = {
       bio: cleanBio !== undefined ? cleanBio : undefined,
       showBio: showBio !== undefined ? Boolean(showBio) : undefined,
-      age: age !== undefined ? parseInt(age.toString(), 10) : undefined,
-      gender: cleanGender !== undefined ? cleanGender : undefined,
+      gender: cleanGender !== undefined ? (isVIP || !existingGender || existingGender === 'unspecified' ? cleanGender : undefined) : undefined,
+      dob: parsedDob && !isNaN(parsedDob.getTime()) ? (isVIP || !existingDob ? parsedDob : undefined) : undefined,
       preferredGender: preferredGender !== undefined ? preferredGender : undefined,
       personalityPreferences: isVIP && personalityPreferences !== undefined ? personalityPreferences : undefined,
       mood: isVIP && mood !== undefined ? mood : undefined,

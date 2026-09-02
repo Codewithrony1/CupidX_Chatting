@@ -3,245 +3,288 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { Heart, Sparkles, Check, X, Loader2, User, Smile, ArrowRight, Shield } from 'lucide-react';
+import { updateFirestoreUserProfile, calculateAge } from '@/lib/firestoreUser';
+import { Heart, Sparkles, Check, X, Loader2, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { user, refreshUser } = useAuth();
+  const { user, firebaseUser, loading: authLoading, refreshUser } = useAuth();
 
-  const [displayName, setDisplayName] = useState(user?.displayName || user?.fullName || '');
-  const [username, setUsername] = useState(user?.username || '');
-  const [selectedEmoji, setSelectedEmoji] = useState(user?.profile?.avatarEmoji || '😊');
-  const [age, setAge] = useState<number>(user?.profile?.age && user.profile.age >= 18 ? user.profile.age : 18);
-  const [gender, setGender] = useState<string>(user?.profile?.gender && user.profile.gender !== 'unspecified' ? user.profile.gender : 'male');
+  const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [gender, setGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say'>('male');
+  const [selectedEmoji, setSelectedEmoji] = useState('😊');
 
-  const [checking, setChecking] = useState(false);
-  const [available, setAvailable] = useState<boolean | null>(null);
-  const [reason, setReason] = useState<string>('');
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [usernameReason, setUsernameReason] = useState<string>('');
+
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [success, setSuccess] = useState(false);
 
-  // Redirect to dashboard ONLY if username is set AND age/gender confirmed
+  // Pre-fill existing data if available
   useEffect(() => {
-    if (
-      user &&
-      user.username &&
-      !user.username.startsWith('user_') &&
-      user.profile?.ageGenderConfirmed === true &&
-      user.profile?.gender !== 'unspecified'
-    ) {
-      router.replace('/dashboard');
-    }
-  }, [user, router]);
+    if (user) {
+      if (user.fullName && user.fullName !== 'CupidX User') {
+        setDisplayName(user.fullName);
+      } else if (user.displayName && user.displayName !== 'CupidX User') {
+        setDisplayName(user.displayName);
+      }
 
-  // Real-time username availability check
+      if (user.username && !user.username.startsWith('user_')) {
+        setUsername(user.username);
+        setUsernameAvailable(true);
+      }
+
+      if (user.dateOfBirth || user.profile?.dateOfBirth) {
+        setDateOfBirth(user.dateOfBirth || user.profile?.dateOfBirth || '');
+      }
+
+      if (user.gender && user.gender !== 'unspecified') {
+        setGender(user.gender as any);
+      } else if (user.profile?.gender && user.profile.gender !== 'unspecified') {
+        setGender(user.profile.gender as any);
+      }
+
+      if (user.profile?.avatarEmoji) {
+        setSelectedEmoji(user.profile.avatarEmoji);
+      }
+    }
+  }, [user]);
+
+  // If already complete, redirect to dashboard
+  useEffect(() => {
+    if (!authLoading && user) {
+      const isComplete = Boolean(
+        user.profileCompleted ||
+        (user.profile?.ageGenderConfirmed && user.gender && user.gender !== 'unspecified' && (user.dateOfBirth || user.profile?.dateOfBirth))
+      );
+      if (isComplete && !submitting && !success) {
+        router.replace('/dashboard');
+      }
+    }
+  }, [user, authLoading, submitting, success, router]);
+
+  // Username availability live check
   useEffect(() => {
     const clean = username.trim().toLowerCase().replace(/^@/, '');
     if (!clean || clean.length < 3) {
-      setAvailable(null);
-      setReason('');
+      setUsernameAvailable(null);
+      setUsernameReason('');
       return;
     }
 
     const timer = setTimeout(async () => {
-      setChecking(true);
+      setCheckingUsername(true);
       try {
         const res = await fetch(`/api/auth/onboarding?username=${encodeURIComponent(clean)}`);
         const data = await res.json();
         if (res.ok && data.available) {
-          setAvailable(true);
-          setReason('✓ @' + clean + ' is available');
+          setUsernameAvailable(true);
+          setUsernameReason('✓ @' + clean + ' is available');
         } else {
-          setAvailable(false);
-          setReason('✕ ' + (data.reason || 'Username already taken'));
+          setUsernameAvailable(false);
+          setUsernameReason('✕ ' + (data.reason || 'Username already taken'));
         }
       } catch (e) {
-        setAvailable(false);
-        setReason('✕ Error checking username');
+        setUsernameAvailable(false);
+        setUsernameReason('✕ Error checking username');
       } finally {
-        setChecking(false);
+        setCheckingUsername(false);
       }
     }, 400);
 
     return () => clearTimeout(timer);
   }, [username]);
 
+  // Calculated Age
+  const dynamicAge = dateOfBirth ? calculateAge(dateOfBirth) : null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || submitting || available === false) return;
+    if (!displayName.trim()) {
+      setErrorMsg('Please enter your full name.');
+      return;
+    }
+
+    if (!dateOfBirth) {
+      setErrorMsg('Please enter your date of birth.');
+      return;
+    }
+
+    // Validate DOB
+    const birthDate = new Date(dateOfBirth);
+    if (isNaN(birthDate.getTime())) {
+      setErrorMsg('Please enter a valid date of birth.');
+      return;
+    }
+
+    const today = new Date();
+    if (birthDate > today) {
+      setErrorMsg('Date of birth cannot be in the future.');
+      return;
+    }
+
+    const age = calculateAge(dateOfBirth);
+    if (age < 18) {
+      setErrorMsg('You must be at least 18 years old to use CupidX.');
+      return;
+    }
+
+    if (!gender) {
+      setErrorMsg('Please select your gender.');
+      return;
+    }
+
+    const cleanUser = (username.trim() || user?.username || `user_${Date.now().toString().slice(-5)}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '');
 
     setSubmitting(true);
     setErrorMsg('');
 
     try {
-      const res = await fetch('/api/auth/onboarding', {
+      const uid = firebaseUser?.uid || user?.id;
+
+      // 1. Save directly to Cloud Firestore
+      if (uid) {
+        await updateFirestoreUserProfile(uid, {
+          fullName: displayName.trim(),
+          displayName: displayName.trim(),
+          username: cleanUser,
+          usernameLower: cleanUser.toLowerCase(),
+          dateOfBirth,
+          gender,
+          profileCompleted: true,
+          profile: {
+            bio: user?.profile?.bio || 'Hey there! I am using CupidX.',
+            dateOfBirth,
+            gender,
+            age,
+            avatarEmoji: selectedEmoji,
+            avatarType: 'EMOJI',
+            ageGenderConfirmed: true,
+            themePreference: 'purple',
+            randomChatIntroSeen: true,
+            interests: '',
+          },
+        });
+      }
+
+      // 2. Sync with Backend Database API
+      await fetch('/api/auth/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: username.trim(),
-          displayName: displayName.trim() || username.trim(),
+          username: cleanUser,
+          displayName: displayName.trim(),
           avatarEmoji: selectedEmoji,
-          age,
+          dob: dateOfBirth,
           gender,
         }),
-      });
+      }).catch(() => {});
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        await refreshUser();
+      setSuccess(true);
+      await refreshUser();
+
+      setTimeout(() => {
         router.replace('/dashboard');
-      } else {
-        setErrorMsg(data.error || 'Failed to complete profile setup.');
-      }
+      }, 1000);
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg('Network error. Please try again.');
-    } finally {
+      console.error('Onboarding save error:', err);
+      setErrorMsg(err?.message || 'Failed to complete profile setup. Please try again.');
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0014] text-white flex flex-col justify-center items-center p-4 relative overflow-x-hidden">
+    <div className="min-h-screen bg-[#0d0014] text-white flex flex-col justify-center items-center p-4 relative overflow-x-hidden selection:bg-pink-500 selection:text-white">
       <FloatingHearts />
 
-      <div className="w-full max-w-md glass-romantic rounded-3xl p-6 sm:p-8 space-y-6 z-10 border border-pink-500/30 shadow-2xl shadow-pink-500/20 my-6">
+      <div className="w-full max-w-md glass-romantic rounded-3xl p-6 sm:p-8 space-y-6 z-10 border border-pink-500/30 shadow-2xl shadow-pink-500/20 my-6 backdrop-blur-xl">
         
-        {/* Header Branding */}
+        {/* Header */}
         <div className="text-center space-y-2">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-pink-600 via-rose-500 to-fuchsia-500 flex items-center justify-center mx-auto shadow-lg shadow-pink-500/40">
             <Heart className="w-7 h-7 text-white fill-white animate-pulse" />
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-white">Welcome to CupidX 👋</h1>
-          <p className="text-xs text-pink-200/80">Complete mandatory profile setup & Age/Gender confirmation</p>
+          <h1 className="text-2xl font-black tracking-tight text-white">Let&apos;s set up your profile</h1>
+          <p className="text-xs text-pink-200/80">Tell us a little about yourself before you start connecting.</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          
-          {/* 1. Emoji DP Selector Grid */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-pink-200 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Smile className="w-4 h-4 text-pink-400" />
-                <span>Choose your Avatar</span>
-              </span>
-              <span className="text-[10px] text-pink-300/60 font-semibold">2 Free Avatars</span>
-            </label>
-
-            <div className="p-3.5 rounded-2xl bg-white/5 border border-pink-500/20 flex items-center justify-center space-x-4">
-              {['😊', '😎'].map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => setSelectedEmoji(emoji)}
-                  className={`w-14 h-14 rounded-2xl text-3xl flex items-center justify-center transition-all cursor-pointer select-none ${
-                    selectedEmoji === emoji
-                      ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-xl scale-110'
-                      : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  {emoji}
-                </button>
-              ))}
+        {success ? (
+          <div className="py-12 text-center space-y-3">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto animate-bounce">
+              <CheckCircle2 className="w-8 h-8" />
             </div>
-
-            <p className="text-[10px] text-pink-300/70 text-center font-medium pt-0.5">
-              💎 25+ Premium Avatars & Custom Image DP available with CupidX VIP
-            </p>
+            <h3 className="text-lg font-black text-white">Profile ready ✨</h3>
+            <p className="text-xs text-slate-400">Redirecting to your dashboard...</p>
           </div>
-
-          {/* 2. Display Name Input */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
-              <User className="w-4 h-4 text-purple-400" />
-              <span>Display Name</span>
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Rony Rai"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-2 focus:ring-pink-500/50 font-semibold"
-            />
-            <p className="text-[10px] text-pink-200/50">Your name visible to people you chat with.</p>
-          </div>
-
-          {/* 3. Username Input */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-yellow-400" />
-              <span>Unique @username</span>
-            </label>
-            <div className="relative">
-              <span className="absolute left-4 top-3 text-sm font-bold text-pink-400">@</span>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            
+            {/* 1. Full Name */}
+            <div className="space-y-1.5 text-left">
+              <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-pink-400" />
+                <span>FULL NAME</span>
+              </label>
               <input
                 type="text"
-                placeholder="rony"
-                value={username.replace(/^@/, '')}
-                onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                maxLength={20}
                 required
-                className="w-full pl-8 pr-10 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-2 focus:ring-pink-500/50 font-mono font-bold"
+                placeholder="Enter your name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-1 focus:ring-pink-500 font-semibold"
               />
-              <div className="absolute right-3 top-3">
-                {checking && <Loader2 className="w-4 h-4 text-pink-400 animate-spin" />}
-                {!checking && available === true && <Check className="w-4 h-4 text-emerald-400" />}
-                {!checking && available === false && <X className="w-4 h-4 text-rose-400" />}
+            </div>
+
+            {/* 2. Date of Birth */}
+            <div className="space-y-1.5 text-left">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                  <span>DATE OF BIRTH</span>
+                </label>
+                {dynamicAge !== null && dynamicAge >= 18 && (
+                  <span className="text-[11px] font-extrabold text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                    Age: {dynamicAge} yrs
+                  </span>
+                )}
               </div>
-            </div>
-
-            {reason && (
-              <p className={`text-[11px] font-bold ${available ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {reason}
-              </p>
-            )}
-            <p className="text-[10px] text-pink-200/50">3–20 characters. Letters, numbers and _ allowed.</p>
-          </div>
-
-          {/* 4. Mandatory Age & Gender Confirmation Gate */}
-          <div className="space-y-3 pt-3 border-t border-pink-500/20">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-extrabold text-pink-200 flex items-center gap-1.5">
-                <Shield className="w-4 h-4 text-emerald-400" />
-                <span>Mandatory Age & Gender Gate</span>
-              </label>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-extrabold border border-emerald-500/30">
-                Required 🔒
-              </span>
-            </div>
-
-            {/* Age Selection */}
-            <div className="space-y-1">
-              <label className="text-[11px] text-pink-200/80 font-bold">Your Age (18+)</label>
               <input
-                type="number"
-                min={18}
-                max={99}
-                value={age}
-                onChange={(e) => setAge(Math.min(99, Math.max(18, parseInt(e.target.value) || 18)))}
+                type="date"
                 required
-                className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white font-bold"
+                max={new Date().toISOString().split('T')[0]}
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+                className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-pink-500 font-semibold cursor-pointer"
               />
+              <p className="text-[10px] text-pink-200/50">Must be at least 18 years old. DOB cannot be changed for Free members.</p>
             </div>
 
-            {/* Gender Selection */}
-            <div className="space-y-1">
-              <label className="text-[11px] text-pink-200/80 font-bold">Your Gender</label>
-              <div className="grid grid-cols-2 gap-2 text-xs">
+            {/* 3. Gender */}
+            <div className="space-y-1.5 text-left">
+              <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-pink-400" />
+                <span>GENDER</span>
+              </label>
+              <div className="grid grid-cols-3 gap-2">
                 {[
                   { label: 'Male', val: 'male' },
                   { label: 'Female', val: 'female' },
-                  { label: 'Non-binary', val: 'non-binary' },
-                  { label: 'Prefer not to say', val: 'prefer_not_to_say' },
+                  { label: 'Other', val: 'other' },
                 ].map((item) => (
                   <button
                     key={item.val}
                     type="button"
-                    onClick={() => setGender(item.val)}
-                    className={`py-2.5 px-3 rounded-xl font-bold border transition-all cursor-pointer ${
+                    onClick={() => setGender(item.val as any)}
+                    className={`py-2.5 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                       gender === item.val
-                        ? 'bg-pink-500 text-white border-pink-400 shadow-md scale-[1.02]'
+                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white border-pink-400 shadow-md scale-[1.02]'
                         : 'bg-white/5 border-white/10 text-pink-200/70 hover:bg-white/10'
                     }`}
                   >
@@ -250,31 +293,89 @@ export default function OnboardingPage() {
                 ))}
               </div>
             </div>
-          </div>
 
-          {errorMsg && (
-            <div className="p-3 rounded-2xl bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 font-bold text-center">
-              {errorMsg}
+            {/* 4. Choose Avatar Emoji */}
+            <div className="space-y-1.5 text-left pt-1">
+              <label className="text-xs font-bold text-pink-200 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Smile className="w-3.5 h-3.5 text-pink-400" />
+                  <span>Choose Avatar Emoji</span>
+                </span>
+                <span className="text-[10px] text-pink-300/60 font-semibold">2 Free</span>
+              </label>
+
+              <div className="p-3 rounded-2xl bg-white/5 border border-pink-500/20 flex items-center justify-center space-x-4">
+                {['😊', '😎'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setSelectedEmoji(emoji)}
+                    className={`w-12 h-12 rounded-2xl text-2xl flex items-center justify-center transition-all cursor-pointer select-none ${
+                      selectedEmoji === emoji
+                        ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-xl scale-110'
+                        : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             </div>
-          )}
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={submitting || checking || available === false || !username.trim()}
-            className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white shadow-xl shadow-pink-500/30 flex items-center justify-center space-x-2 text-sm disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
-          >
-            {submitting ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <>
-                <span>Confirm Age, Gender & Start Chatting</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
+            {/* 5. Unique @username */}
+            <div className="space-y-1.5 text-left">
+              <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
+                <span>Unique @username</span>
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-3 text-sm font-bold text-pink-400">@</span>
+                <input
+                  type="text"
+                  placeholder="choose_username"
+                  value={username.replace(/^@/, '')}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  maxLength={20}
+                  required
+                  className="w-full pl-8 pr-10 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-1 focus:ring-pink-500 font-mono font-bold"
+                />
+                <div className="absolute right-3 top-3">
+                  {checkingUsername && <Loader2 className="w-4 h-4 text-pink-400 animate-spin" />}
+                  {!checkingUsername && usernameAvailable === true && <Check className="w-4 h-4 text-emerald-400" />}
+                  {!checkingUsername && usernameAvailable === false && <X className="w-4 h-4 text-rose-400" />}
+                </div>
+              </div>
+
+              {usernameReason && (
+                <p className={`text-[11px] font-bold ${usernameAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {usernameReason}
+                </p>
+              )}
+            </div>
+
+            {errorMsg && (
+              <div className="p-3 rounded-2xl bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 font-bold text-center leading-relaxed">
+                {errorMsg}
+              </div>
             )}
-          </button>
 
-        </form>
+            {/* Primary Submit Button */}
+            <button
+              type="submit"
+              disabled={submitting || checkingUsername || usernameAvailable === false || !displayName.trim() || !dateOfBirth}
+              className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-xl shadow-pink-500/30 flex items-center justify-center space-x-2 text-sm disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
+            >
+              {submitting ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  <span>Continue</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
+        )}
 
       </div>
     </div>

@@ -14,6 +14,7 @@ import { auth, googleProvider } from '@/lib/firebase';
 import {
   getOrCreateFirestoreUser,
   setFirestoreUserPresence,
+  calculateAge,
   type UserProfile,
 } from '@/lib/firestoreUser';
 import { ensureFirebaseAuth } from '@/lib/firestoreMatchmaking';
@@ -72,12 +73,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (res.ok) {
           const data = await res.json();
           if (data.user) {
+            const dynamicAge = calculateAge(
+              data.user.dob || data.user.profile?.dob || firestoreProfile.dateOfBirth
+            );
+
             setUser((prev) => ({
               ...firestoreProfile,
               ...data.user,
+              profileCompleted: Boolean(
+                firestoreProfile.profileCompleted ||
+                (data.user.profile?.ageGenderConfirmed && data.user.gender !== 'unspecified')
+              ),
+              dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
+              gender: firestoreProfile.gender || data.user.gender || 'unspecified',
               profile: {
                 ...firestoreProfile.profile,
                 ...(data.user.profile || {}),
+                age: dynamicAge,
+                dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
               },
             }));
           }
@@ -114,7 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // ─── Strict Client Route Guard (No Redirect Loops) ─────────────────────────────
+  // ─── Strict Client Route Guard (Onboarding + Auth Protection) ─────────────────
   useEffect(() => {
     // NEVER redirect while Firebase Auth is determining session (AUTH_LOADING)
     if (loading) return;
@@ -126,16 +139,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser || hasTokenCookie);
 
     // 1. Unauthenticated users trying to access private routes -> send to /login
-    if (!isAuthenticated && !isPublic) {
+    if (!isAuthenticated && !isPublic && pathname !== '/onboarding') {
       router.push('/login');
+      return;
     }
 
-    // 2. Authenticated users on auth pages (/login, /signup, /register) -> send to /dashboard
-    if (isAuthenticated && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
-      if (typeof window !== 'undefined') {
-        window.location.href = '/dashboard';
-      } else {
+    // 2. Authenticated users: Check if first-time profile onboarding is required
+    if (isAuthenticated && user) {
+      const isComplete = Boolean(
+        user.profileCompleted ||
+        (user.profile?.ageGenderConfirmed && user.gender && user.gender !== 'unspecified')
+      );
+
+      // If profile is INCOMPLETE, force user to /onboarding
+      if (!isComplete && pathname !== '/onboarding') {
+        router.push('/onboarding');
+        return;
+      }
+
+      // If profile is COMPLETE, redirect away from auth pages and onboarding to /dashboard
+      if (isComplete && (pathname === '/login' || pathname === '/register' || pathname === '/signup' || pathname === '/onboarding')) {
         router.push('/dashboard');
+        return;
       }
     }
   }, [loading, user, firebaseUser, pathname, router]);
@@ -150,8 +175,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const profile = await getOrCreateFirestoreUser(result.user);
         setUser(profile);
         handleUserSession(result.user).catch(() => {});
-        if (typeof window !== 'undefined') {
-          window.location.href = '/dashboard';
+
+        const isComplete = Boolean(
+          profile.profileCompleted ||
+          (profile.profile?.ageGenderConfirmed && profile.gender && profile.gender !== 'unspecified')
+        );
+
+        if (!isComplete) {
+          router.push('/onboarding');
         } else {
           router.push('/dashboard');
         }
@@ -177,8 +208,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const profile = await getOrCreateFirestoreUser(result.user);
           setUser(profile);
           handleUserSession(result.user).catch(() => {});
-          if (typeof window !== 'undefined') {
-            window.location.href = '/dashboard';
+
+          const isComplete = Boolean(
+            profile.profileCompleted ||
+            (profile.profile?.ageGenderConfirmed && profile.gender && profile.gender !== 'unspecified')
+          );
+
+          if (!isComplete) {
+            router.push('/onboarding');
           } else {
             router.push('/dashboard');
           }
@@ -206,8 +243,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setUser(data.user);
           ensureFirebaseAuth().catch(() => {});
-          if (typeof window !== 'undefined') {
-            window.location.href = '/dashboard';
+          const isComplete = Boolean(
+            data.user.profileCompleted ||
+            (data.user.profile?.ageGenderConfirmed && data.user.gender && data.user.gender !== 'unspecified')
+          );
+          if (!isComplete) {
+            router.push('/onboarding');
           } else {
             router.push('/dashboard');
           }
@@ -265,11 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setUser(data.user);
           ensureFirebaseAuth().catch(() => {});
-          if (typeof window !== 'undefined') {
-            window.location.href = '/dashboard';
-          } else {
-            router.push('/dashboard');
-          }
+          router.push('/onboarding');
           setLoading(false);
           return;
         }
@@ -286,11 +323,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    if (typeof window !== 'undefined') {
-      window.location.href = '/dashboard';
-    } else {
-      router.push('/dashboard');
-    }
+    router.push('/onboarding');
     setLoading(false);
   };
 
