@@ -45,7 +45,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   const handleUserSession = async (fbUser: FirebaseUser | null) => {
     if (!fbUser) {
-      // Check if user has an active token cookie
       try {
         const res = await fetch('/api/auth/me');
         if (res.ok) {
@@ -60,12 +59,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
 
-    // 1. Fetch or create user in Firestore (Persistent Cloud Database)
     try {
       const firestoreProfile = await getOrCreateFirestoreUser(fbUser);
       setUser(firestoreProfile);
 
-      // 2. Background sync with backend SQLite / JWT cookie
+      // Background sync with backend SQLite / JWT cookie
       try {
         const idToken = await fbUser.getIdToken();
         const res = await fetch('/api/auth/me', {
@@ -134,7 +132,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // 2. Authenticated users on auth pages (/login, /signup, /register) -> send to /dashboard
     if (isAuthenticated && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
-      router.push('/dashboard');
+      if (typeof window !== 'undefined') {
+        window.location.href = '/dashboard';
+      } else {
+        router.push('/dashboard');
+      }
     }
   }, [loading, user, firebaseUser, pathname, router]);
 
@@ -147,9 +149,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setFirebaseUser(result.user);
         const profile = await getOrCreateFirestoreUser(result.user);
         setUser(profile);
-        // Background backend sync
         handleUserSession(result.user).catch(() => {});
-        router.push('/dashboard');
+        if (typeof window !== 'undefined') {
+          window.location.href = '/dashboard';
+        } else {
+          router.push('/dashboard');
+        }
       }
     } catch (err) {
       setLoading(false);
@@ -172,7 +177,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const profile = await getOrCreateFirestoreUser(result.user);
           setUser(profile);
           handleUserSession(result.user).catch(() => {});
-          router.push('/dashboard');
+          if (typeof window !== 'undefined') {
+            window.location.href = '/dashboard';
+          } else {
+            router.push('/dashboard');
+          }
           setLoading(false);
           return;
         }
@@ -197,7 +206,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setUser(data.user);
           ensureFirebaseAuth().catch(() => {});
-          router.push('/dashboard');
+          if (typeof window !== 'undefined') {
+            window.location.href = '/dashboard';
+          } else {
+            router.push('/dashboard');
+          }
           setLoading(false);
           return;
         }
@@ -252,7 +265,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setUser(data.user);
           ensureFirebaseAuth().catch(() => {});
-          router.push('/dashboard');
+          if (typeof window !== 'undefined') {
+            window.location.href = '/dashboard';
+          } else {
+            router.push('/dashboard');
+          }
           setLoading(false);
           return;
         }
@@ -269,7 +286,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    router.push('/dashboard');
+    if (typeof window !== 'undefined') {
+      window.location.href = '/dashboard';
+    } else {
+      router.push('/dashboard');
+    }
     setLoading(false);
   };
 
