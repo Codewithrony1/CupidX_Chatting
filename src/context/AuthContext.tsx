@@ -11,6 +11,7 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
+import { ensureFirebaseAuth } from '@/lib/firestoreMatchmaking';
 
 interface User {
   id: string;
@@ -32,6 +33,7 @@ interface User {
     personalityPreferences?: string;
     mood?: string;
     showMood?: boolean;
+    moodExpiresAt?: string | null;
     language?: string;
     saveChatHistory?: boolean;
     interests: string;
@@ -42,7 +44,6 @@ interface User {
     randomChatIntroSeen?: boolean;
     ageGenderConfirmed?: boolean;
     ageGenderChangesCount?: number;
-    moodExpiresAt?: string | null;
     nameChangesCount?: number;
   };
   subscription?: {
@@ -57,8 +58,8 @@ interface AuthContextType {
   firebaseUser: FirebaseUser | null;
   loading: boolean;
   loginWithGoogle: () => Promise<void>;
-  loginWithEmail: (email: string, pass: string) => Promise<void>;
-  signUpWithEmail: (email: string, pass: string, name?: string) => Promise<void>;
+  loginWithEmail: (emailOrUsername: string, pass: string) => Promise<void>;
+  signUpWithEmail: (emailOrUsername: string, pass: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -90,6 +91,7 @@ function buildFallbackUser(fbUser: FirebaseUser): User {
       themePreference: 'purple',
       interests: '',
       randomChatIntroSeen: true,
+      ageGenderConfirmed: true,
     },
     subscription: {
       isActive: false,
@@ -202,39 +204,116 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   };
 
-  // 2. Email / Password Sign-in
-  const loginWithEmail = async (email: string, pass: string) => {
+  // 2. Email / Username / Password Sign-in
+  const loginWithEmail = async (emailOrUsername: string, pass: string) => {
     setLoading(true);
-    try {
-      const result = await signInWithEmailAndPassword(auth, email, pass);
-      if (result.user) {
-        setFirebaseUser(result.user);
-        setUser(buildFallbackUser(result.user));
-        await syncUserWithBackend(result.user);
-        router.push('/dashboard');
+    const identifier = emailOrUsername.trim();
+
+    // A. Try Firebase Auth if it contains @
+    if (identifier.includes('@')) {
+      try {
+        const result = await signInWithEmailAndPassword(auth, identifier, pass);
+        if (result.user) {
+          setFirebaseUser(result.user);
+          setUser(buildFallbackUser(result.user));
+          await syncUserWithBackend(result.user);
+          router.push('/dashboard');
+          setLoading(false);
+          return;
+        }
+      } catch (fbErr: any) {
+        console.warn('Firebase email auth notice, trying database login:', fbErr?.code || fbErr);
       }
-    } catch (err) {
+    }
+
+    // B. Try database login (/api/auth/login)
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: identifier.includes('@') ? identifier.split('@')[0] : identifier,
+          password: pass,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          setUser(data.user);
+          ensureFirebaseAuth().catch(() => {});
+          router.push('/dashboard');
+          setLoading(false);
+          return;
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Invalid credentials');
+      }
+    } catch (dbErr: any) {
       setLoading(false);
-      throw err;
+      throw new Error(dbErr?.message || 'Invalid credentials. Please check your username and password.');
     }
     setLoading(false);
   };
 
-  // 3. Email / Password Sign-up
-  const signUpWithEmail = async (email: string, pass: string) => {
+  // 3. Email / Username / Password Sign-up
+  const signUpWithEmail = async (emailOrUsername: string, pass: string, name?: string) => {
     setLoading(true);
+    const identifier = emailOrUsername.trim();
+    const cleanUsername = (identifier.includes('@') ? identifier.split('@')[0] : identifier).toLowerCase().replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`;
+    const effectiveEmail = identifier.includes('@') ? identifier : `${cleanUsername}@cupidxchat.in`;
+
+    let fbSuccess = false;
+
+    // A. Try Firebase Auth create user
     try {
-      const result = await createUserWithEmailAndPassword(auth, email, pass);
+      const result = await createUserWithEmailAndPassword(auth, effectiveEmail, pass);
       if (result.user) {
         setFirebaseUser(result.user);
         setUser(buildFallbackUser(result.user));
         await syncUserWithBackend(result.user);
-        router.push('/dashboard');
+        fbSuccess = true;
       }
-    } catch (err) {
-      setLoading(false);
-      throw err;
+    } catch (fbErr: any) {
+      console.warn('Firebase signup notice, proceeding with database registration:', fbErr?.code || fbErr);
     }
+
+    // B. Call database registration
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: name || cleanUsername,
+          username: cleanUsername,
+          password: pass,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          setUser(data.user);
+          ensureFirebaseAuth().catch(() => {});
+          router.push('/dashboard');
+          setLoading(false);
+          return;
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        if (!fbSuccess) {
+          throw new Error(errData.error || 'Registration failed');
+        }
+      }
+    } catch (dbErr: any) {
+      if (!fbSuccess) {
+        setLoading(false);
+        throw dbErr;
+      }
+    }
+
+    router.push('/dashboard');
     setLoading(false);
   };
 

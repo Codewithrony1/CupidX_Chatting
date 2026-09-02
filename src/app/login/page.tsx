@@ -4,24 +4,24 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { Heart, Mail, Lock, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
+import { Heart, User, Lock, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 export default function Login() {
   const router = useRouter();
-  const { user, loginWithGoogle, loginWithEmail, signUpWithEmail } = useAuth();
+  const { user, firebaseUser, loginWithGoogle, loginWithEmail, signUpWithEmail } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (user?.username) {
+    if (user?.username || firebaseUser) {
       router.push('/dashboard');
     }
-  }, [user, router]);
+  }, [user, firebaseUser, router]);
 
   const handleGoogleAuth = async () => {
     setError('');
@@ -29,36 +29,34 @@ export default function Login() {
     try {
       await loginWithGoogle();
     } catch (err: any) {
-      console.error(err);
-      setError(err?.message || 'Google sign-in was cancelled or failed.');
+      console.error('Google auth error:', err);
+      if (err?.code === 'auth/unauthorized-domain') {
+        setError('This domain is not authorized in Firebase Console. Please add your domain to Firebase Console -> Authentication -> Settings -> Authorized Domains.');
+      } else if (err?.code === 'auth/popup-closed-by-user') {
+        setError('Google sign-in popup was closed.');
+      } else {
+        setError(err?.message || 'Google sign-in was cancelled or failed.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEmailAuth = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) return;
+    if (!identifier.trim() || !password) return;
     setError('');
     setLoading(true);
 
     try {
       if (mode === 'login') {
-        await loginWithEmail(email, password);
+        await loginWithEmail(identifier, password);
       } else {
-        await signUpWithEmail(email, password);
+        await signUpWithEmail(identifier, password);
       }
     } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setError('Invalid email or password. If you do not have an account, switch to Sign Up below.');
-      } else if (err.code === 'auth/email-already-in-use') {
-        setError('An account with this email already exists. Please log in.');
-      } else if (err.code === 'auth/weak-password') {
-        setError('Password should be at least 6 characters.');
-      } else {
-        setError(err.message || 'Authentication failed. Please try again.');
-      }
+      console.error('Auth error:', err);
+      setError(err?.message || 'Authentication failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
@@ -84,7 +82,7 @@ export default function Login() {
               {mode === 'login' ? 'Welcome Back' : 'Create an Account'}
             </h2>
             <p className="text-xs text-pink-200/70">
-              Sign in with Firebase to start instant random & direct chat
+              Sign in with Google or your account to start chatting
             </p>
           </div>
         </div>
@@ -128,23 +126,23 @@ export default function Login() {
           {/* Divider */}
           <div className="flex items-center space-x-3 my-2">
             <div className="flex-1 h-px bg-pink-500/20" />
-            <span className="text-[11px] font-bold text-pink-300/60 uppercase tracking-wider">or with email</span>
+            <span className="text-[11px] font-bold text-pink-300/60 uppercase tracking-wider">or with credentials</span>
             <div className="flex-1 h-px bg-pink-500/20" />
           </div>
 
-          {/* Email / Password Form */}
-          <form onSubmit={handleEmailAuth} className="space-y-4">
+          {/* Login / Register Form */}
+          <form onSubmit={handleAuth} className="space-y-4">
             <div className="space-y-1 text-left">
               <label className="text-[11px] font-bold text-pink-200/80 uppercase tracking-wider flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-pink-400" />
-                <span>Email Address</span>
+                <User className="w-3.5 h-3.5 text-pink-400" />
+                <span>Username or Email</span>
               </label>
               <input
-                type="email"
+                type="text"
                 required
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                placeholder="username or email@example.com"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 className="w-full px-4 py-3 rounded-2xl glass-input text-xs font-medium focus:outline-none focus:ring-1 focus:ring-pink-500"
               />
             </div>
