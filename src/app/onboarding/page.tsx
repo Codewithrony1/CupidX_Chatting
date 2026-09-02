@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { updateFirestoreUserProfile, calculateAge } from '@/lib/firestoreUser';
-import { Heart, Sparkles, Check, X, Loader2, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 export default function OnboardingPage() {
@@ -12,14 +12,9 @@ export default function OnboardingPage() {
   const { user, firebaseUser, loading: authLoading, refreshUser } = useAuth();
 
   const [displayName, setDisplayName] = useState('');
-  const [username, setUsername] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say'>('male');
   const [selectedEmoji, setSelectedEmoji] = useState('😊');
-
-  const [checkingUsername, setCheckingUsername] = useState(false);
-  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
-  const [usernameReason, setUsernameReason] = useState<string>('');
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -32,11 +27,6 @@ export default function OnboardingPage() {
         setDisplayName(user.fullName);
       } else if (user.displayName && user.displayName !== 'CupidX User') {
         setDisplayName(user.displayName);
-      }
-
-      if (user.username && !user.username.startsWith('user_')) {
-        setUsername(user.username);
-        setUsernameAvailable(true);
       }
 
       if (user.dateOfBirth || user.profile?.dateOfBirth) {
@@ -68,39 +58,7 @@ export default function OnboardingPage() {
     }
   }, [user, authLoading, submitting, success, router]);
 
-  // Username availability live check
-  useEffect(() => {
-    const clean = username.trim().toLowerCase().replace(/^@/, '');
-    if (!clean || clean.length < 3) {
-      setUsernameAvailable(null);
-      setUsernameReason('');
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setCheckingUsername(true);
-      try {
-        const res = await fetch(`/api/auth/onboarding?username=${encodeURIComponent(clean)}`);
-        const data = await res.json();
-        if (res.ok && data.available) {
-          setUsernameAvailable(true);
-          setUsernameReason('✓ @' + clean + ' is available');
-        } else {
-          setUsernameAvailable(false);
-          setUsernameReason('✕ ' + (data.reason || 'Username already taken'));
-        }
-      } catch (e) {
-        setUsernameAvailable(false);
-        setUsernameReason('✕ Error checking username');
-      } finally {
-        setCheckingUsername(false);
-      }
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [username]);
-
-  // Calculated Age
+  // Calculated dynamic age
   const dynamicAge = dateOfBirth ? calculateAge(dateOfBirth) : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -139,9 +97,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    const cleanUser = (username.trim() || user?.username || `user_${Date.now().toString().slice(-5)}`)
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, '');
+    const effectiveUsername = (user?.username || (displayName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`));
 
     setSubmitting(true);
     setErrorMsg('');
@@ -154,8 +110,8 @@ export default function OnboardingPage() {
         await updateFirestoreUserProfile(uid, {
           fullName: displayName.trim(),
           displayName: displayName.trim(),
-          username: cleanUser,
-          usernameLower: cleanUser.toLowerCase(),
+          username: effectiveUsername,
+          usernameLower: effectiveUsername.toLowerCase(),
           dateOfBirth,
           gender,
           profileCompleted: true,
@@ -174,12 +130,12 @@ export default function OnboardingPage() {
         });
       }
 
-      // 2. Sync with Backend Database API
-      await fetch('/api/auth/onboarding', {
+      // 2. Background sync with backend
+      fetch('/api/auth/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: cleanUser,
+          username: effectiveUsername,
           displayName: displayName.trim(),
           avatarEmoji: selectedEmoji,
           dob: dateOfBirth,
@@ -192,7 +148,7 @@ export default function OnboardingPage() {
 
       setTimeout(() => {
         router.replace('/dashboard');
-      }, 1000);
+      }, 800);
     } catch (err: any) {
       console.error('Onboarding save error:', err);
       setErrorMsg(err?.message || 'Failed to complete profile setup. Please try again.');
@@ -221,7 +177,7 @@ export default function OnboardingPage() {
               <CheckCircle2 className="w-8 h-8" />
             </div>
             <h3 className="text-lg font-black text-white">Profile ready ✨</h3>
-            <p className="text-xs text-slate-400">Redirecting to your dashboard...</p>
+            <p className="text-xs text-slate-400">Opening your dashboard...</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -322,37 +278,6 @@ export default function OnboardingPage() {
               </div>
             </div>
 
-            {/* 5. Unique @username */}
-            <div className="space-y-1.5 text-left">
-              <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-                <span>Unique @username</span>
-              </label>
-              <div className="relative">
-                <span className="absolute left-4 top-3 text-sm font-bold text-pink-400">@</span>
-                <input
-                  type="text"
-                  placeholder="choose_username"
-                  value={username.replace(/^@/, '')}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                  maxLength={20}
-                  required
-                  className="w-full pl-8 pr-10 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-1 focus:ring-pink-500 font-mono font-bold"
-                />
-                <div className="absolute right-3 top-3">
-                  {checkingUsername && <Loader2 className="w-4 h-4 text-pink-400 animate-spin" />}
-                  {!checkingUsername && usernameAvailable === true && <Check className="w-4 h-4 text-emerald-400" />}
-                  {!checkingUsername && usernameAvailable === false && <X className="w-4 h-4 text-rose-400" />}
-                </div>
-              </div>
-
-              {usernameReason && (
-                <p className={`text-[11px] font-bold ${usernameAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {usernameReason}
-                </p>
-              )}
-            </div>
-
             {errorMsg && (
               <div className="p-3 rounded-2xl bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 font-bold text-center leading-relaxed">
                 {errorMsg}
@@ -362,7 +287,7 @@ export default function OnboardingPage() {
             {/* Primary Submit Button */}
             <button
               type="submit"
-              disabled={submitting || checkingUsername || usernameAvailable === false || !displayName.trim() || !dateOfBirth}
+              disabled={submitting || !displayName.trim() || !dateOfBirth}
               className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-xl shadow-pink-500/30 flex items-center justify-center space-x-2 text-sm disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
             >
               {submitting ? (
