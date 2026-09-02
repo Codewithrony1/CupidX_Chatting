@@ -5,35 +5,33 @@
  * Firestore is realtime, serverless-compatible, and supports atomic transactions.
  *
  * Collections:
- *   matchmaking/{firebaseUid}     — queue entry for each searching user
+ *   matchmaking/{uid}             — queue entry for each searching user
  *   matches/{matchId}             — active match between two users
  *   matches/{matchId}/messages/   — realtime messages subcollection
  */
 
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
+import { signInAnonymously } from 'firebase/auth';
 import {
   doc,
   setDoc,
   deleteDoc,
-  getDoc,
   getDocs,
   addDoc,
   onSnapshot,
   collection,
   query,
   where,
-  orderBy,
   limit,
   runTransaction,
   serverTimestamp,
   updateDoc,
-  Timestamp,
 } from 'firebase/firestore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface QueueEntry {
-  uid: string;          // Firebase UID
+  uid: string;          // User unique identifier (Firebase UID or DB user ID)
   userId: string;       // Prisma DB user ID
   username: string;
   displayName: string;
@@ -52,9 +50,9 @@ export interface QueueEntry {
 
 export interface MatchDoc {
   matchId: string;
-  user1Uid: string;     // Firebase UID of user 1
-  user2Uid: string;     // Firebase UID of user 2
-  user1DbId: string;    // Prisma DB ID
+  user1Uid: string;
+  user2Uid: string;
+  user1DbId: string;
   user2DbId: string;
   user1Username: string;
   user2Username: string;
@@ -75,11 +73,26 @@ export interface MatchDoc {
 
 export interface FirestoreMessage {
   id: string;
-  senderUid: string;    // Firebase UID
+  senderUid: string;
   senderUsername: string;
   content: string;
   imageUrl: string | null;
   createdAt: any;
+}
+
+// ─── Helper: Ensure Firebase Auth Is Active ───────────────────────────────────
+
+export async function ensureFirebaseAuth(): Promise<string> {
+  if (auth.currentUser?.uid) {
+    return auth.currentUser.uid;
+  }
+  try {
+    const cred = await signInAnonymously(auth);
+    return cred.user.uid;
+  } catch (e) {
+    console.warn('Firebase anonymous auth fallback error:', e);
+    return auth.currentUser?.uid || 'anonymous_user';
+  }
 }
 
 // ─── Queue Operations ─────────────────────────────────────────────────────────
@@ -99,7 +112,7 @@ export async function joinQueue(params: {
   mood?: string;
   isVIP?: boolean;
 }): Promise<void> {
-  const entry: Omit<QueueEntry, 'matchId' | 'partnerUid'> = {
+  const entry: QueueEntry = {
     uid: params.firebaseUid,
     userId: params.userId,
     username: params.username,
@@ -135,8 +148,9 @@ export async function leaveQueue(firebaseUid: string): Promise<void> {
  * Atomically find a compatible partner and create a match.
  * Returns the matchId if successful, null if no partner found.
  *
- * Uses Firestore transactions to prevent race conditions —
- * two users cannot steal the same partner simultaneously.
+ * Uses Firestore transactions to prevent race conditions.
+ * NOTE: We do NOT use composite orderBy to avoid requiring custom indexes.
+ * In-memory sorting is performed in JavaScript.
  */
 export async function findAndMatch(params: {
   firebaseUid: string;
@@ -151,25 +165,31 @@ export async function findAndMatch(params: {
 }): Promise<string | null> {
   const { firebaseUid, genderPref = 'auto', isVIP = false } = params;
 
-  // Query searching users (limit 20 to scan for best match)
+  // Single-field query (no composite index required)
   const q = query(
     collection(db, 'matchmaking'),
     where('status', '==', 'searching'),
-    orderBy('createdAt', 'asc'),
-    limit(20)
+    limit(30)
   );
 
   const snapshot = await getDocs(q);
-  const candidates = snapshot.docs
-    .map(d => d.data() as QueueEntry)
-    .filter(c => c.uid !== firebaseUid);
+  let candidates = snapshot.docs
+    .map((d) => d.data() as QueueEntry)
+    .filter((c) => c.uid && c.uid !== firebaseUid);
+
+  // In-memory sort by createdAt (earliest first)
+  candidates.sort((a, b) => {
+    const aTime = a.createdAt?.seconds || 0;
+    const bTime = b.createdAt?.seconds || 0;
+    return aTime - bTime;
+  });
 
   for (const candidate of candidates) {
     // Gender preference filter (VIP-only feature)
     if (isVIP && genderPref !== 'auto' && genderPref !== 'any') {
       if (candidate.gender !== genderPref) continue;
     }
-    // Also respect candidate's VIP gender preference
+    // Respect candidate's VIP gender preference
     if (candidate.isVIP && candidate.genderPref !== 'auto' && candidate.genderPref !== 'any') {
       if (candidate.genderPref !== (params.gender || 'unspecified')) continue;
     }
@@ -203,8 +223,8 @@ export async function findAndMatch(params: {
           matchId,
           user1Uid: firebaseUid,
           user2Uid: candidate.uid,
-          user1DbId: selfData.userId,
-          user2DbId: candidate.userId,
+          user1DbId: selfData.userId || firebaseUid,
+          user2DbId: candidate.userId || candidate.uid,
           user1Username: selfData.username,
           user2Username: candidate.username,
           user1DisplayName: selfData.displayName,
@@ -241,7 +261,7 @@ export async function findAndMatch(params: {
       if (err.code === 'CANDIDATE_TAKEN' || err.code === 'SELF_TAKEN') {
         continue; // Try next candidate
       }
-      throw err; // Unexpected error
+      console.warn('Match transaction error:', err);
     }
   }
 
@@ -301,17 +321,24 @@ export function listenToMessages(
 ): () => void {
   const q = query(
     collection(db, 'matches', matchId, 'messages'),
-    orderBy('createdAt', 'asc'),
-    limit(500)
+    limit(200)
   );
 
   return onSnapshot(
     q,
     (snapshot) => {
-      const msgs: FirestoreMessage[] = snapshot.docs.map(d => ({
+      const msgs: FirestoreMessage[] = snapshot.docs.map((d) => ({
         id: d.id,
         ...(d.data() as Omit<FirestoreMessage, 'id'>),
       }));
+
+      // In-memory sort by createdAt
+      msgs.sort((a, b) => {
+        const aT = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+        const bT = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+        return aT - bT;
+      });
+
       onMessages(msgs);
     },
     onError
