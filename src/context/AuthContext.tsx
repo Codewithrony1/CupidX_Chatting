@@ -11,47 +11,14 @@ import {
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
+import {
+  getOrCreateFirestoreUser,
+  setFirestoreUserPresence,
+  type UserProfile,
+} from '@/lib/firestoreUser';
 import { ensureFirebaseAuth } from '@/lib/firestoreMatchmaking';
 
-interface User {
-  id: string;
-  firebaseUid?: string | null;
-  username: string;
-  fullName: string;
-  displayName?: string;
-  email?: string | null;
-  role: 'USER' | 'ADMIN';
-  membershipTier?: string;
-  is_vip?: boolean;
-  profile?: {
-    bio: string;
-    showBio?: boolean;
-    age: number;
-    gender: string;
-    showGender?: boolean;
-    preferredGender?: string;
-    personalityPreferences?: string;
-    mood?: string;
-    showMood?: boolean;
-    moodExpiresAt?: string | null;
-    language?: string;
-    saveChatHistory?: boolean;
-    interests: string;
-    avatarType?: string;
-    avatarEmoji?: string;
-    avatarUrl?: string | null;
-    themePreference: string;
-    randomChatIntroSeen?: boolean;
-    ageGenderConfirmed?: boolean;
-    ageGenderChangesCount?: number;
-    nameChangesCount?: number;
-  };
-  subscription?: {
-    isActive: boolean;
-    plan: string;
-    endDate?: string;
-  };
-}
+export type User = UserProfile;
 
 interface AuthContextType {
   user: User | null;
@@ -66,50 +33,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function buildFallbackUser(fbUser: FirebaseUser): User {
-  const cleanName = fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : '') || `user_${fbUser.uid.slice(-5)}`;
-  const cleanUsername = cleanName.toLowerCase().replace(/[^a-z0-9_]/g, '') || `user_${fbUser.uid.slice(-5)}`;
-
-  return {
-    id: fbUser.uid,
-    firebaseUid: fbUser.uid,
-    username: cleanUsername,
-    fullName: fbUser.displayName || cleanName || 'CupidX User',
-    displayName: fbUser.displayName || cleanName || 'CupidX User',
-    email: fbUser.email,
-    role: 'USER',
-    membershipTier: 'FREE',
-    is_vip: false,
-    profile: {
-      bio: 'Hey there! I am using CupidX.',
-      age: 21,
-      gender: 'unspecified',
-      preferredGender: 'auto',
-      mood: '😊 Happy',
-      avatarUrl: fbUser.photoURL || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${cleanUsername}`,
-      avatarEmoji: '😊',
-      themePreference: 'purple',
-      interests: '',
-      randomChatIntroSeen: true,
-      ageGenderConfirmed: true,
-    },
-    subscription: {
-      isActive: false,
-      plan: 'FREE',
-    },
-  };
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const router = useRouter();
   const pathname = usePathname();
 
-  const syncUserWithBackend = async (fbUser: FirebaseUser | null) => {
+  /**
+   * Sync user with both Firestore and backend /api/auth/me
+   */
+  const handleUserSession = async (fbUser: FirebaseUser | null) => {
     if (!fbUser) {
-      // Check if logged in via cookie
+      // Check if user has an active token cookie
       try {
         const res = await fetch('/api/auth/me');
         if (res.ok) {
@@ -124,77 +60,95 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
 
-    // Set base user immediately on client
-    const fallback = buildFallbackUser(fbUser);
-    setUser((prev) => prev || fallback);
-
+    // 1. Fetch or create user in Firestore (Persistent Cloud Database)
     try {
-      const idToken = await fbUser.getIdToken();
-      const res = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
+      const firestoreProfile = await getOrCreateFirestoreUser(fbUser);
+      setUser(firestoreProfile);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          setUser(data.user);
-          return data.user;
+      // 2. Background sync with backend SQLite / JWT cookie
+      try {
+        const idToken = await fbUser.getIdToken();
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            setUser((prev) => ({
+              ...firestoreProfile,
+              ...data.user,
+              profile: {
+                ...firestoreProfile.profile,
+                ...(data.user.profile || {}),
+              },
+            }));
+          }
         }
+      } catch (backendErr) {
+        console.warn('Backend sync notice (using Firestore session):', backendErr);
       }
-    } catch (e) {
-      console.warn('Backend sync notice (using client user session):', e);
-    }
 
-    return fallback;
+      return firestoreProfile;
+    } catch (err) {
+      console.error('Error handling user session:', err);
+      return null;
+    }
   };
 
   const refreshUser = async () => {
-    await syncUserWithBackend(auth.currentUser);
+    if (auth.currentUser) {
+      await handleUserSession(auth.currentUser);
+    }
   };
 
-  // Listen to Firebase Auth state changes
+  // ─── Firebase Auth State Listener (Source of Truth) ───────────────────────────
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       setFirebaseUser(fbUser);
       if (fbUser) {
-        setUser(buildFallbackUser(fbUser));
+        await handleUserSession(fbUser);
+      } else {
+        setUser(null);
       }
-      await syncUserWithBackend(fbUser);
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Client-side Strict Route Protection Guard
+  // ─── Strict Client Route Guard (No Redirect Loops) ─────────────────────────────
   useEffect(() => {
-    if (!loading) {
-      const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback'];
-      const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
+    // NEVER redirect while Firebase Auth is determining session (AUTH_LOADING)
+    if (loading) return;
 
-      const hasTokenCookie = typeof document !== 'undefined' && document.cookie.includes('token=');
-      const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser || hasTokenCookie);
+    const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback'];
+    const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
-      if (!isAuthenticated && !isPublic) {
-        router.push('/login');
-      }
+    const hasTokenCookie = typeof document !== 'undefined' && document.cookie.includes('token=');
+    const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser || hasTokenCookie);
 
-      // Auto redirect authenticated users away from login/register to dashboard
-      if (isAuthenticated && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
-        router.push('/dashboard');
-      }
+    // 1. Unauthenticated users trying to access private routes -> send to /login
+    if (!isAuthenticated && !isPublic) {
+      router.push('/login');
+    }
+
+    // 2. Authenticated users on auth pages (/login, /signup, /register) -> send to /dashboard
+    if (isAuthenticated && (pathname === '/login' || pathname === '/register' || pathname === '/signup')) {
+      router.push('/dashboard');
     }
   }, [loading, user, firebaseUser, pathname, router]);
 
-  // 1. Google 1-Click Sign-in
+  // ─── 1. Google 1-Click Sign-in ────────────────────────────────────────────────
   const loginWithGoogle = async () => {
     setLoading(true);
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
         setFirebaseUser(result.user);
-        setUser(buildFallbackUser(result.user));
-        await syncUserWithBackend(result.user);
+        const profile = await getOrCreateFirestoreUser(result.user);
+        setUser(profile);
+        // Background backend sync
+        handleUserSession(result.user).catch(() => {});
         router.push('/dashboard');
       }
     } catch (err) {
@@ -204,25 +158,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   };
 
-  // 2. Email / Username / Password Sign-in
+  // ─── 2. Email / Username Sign-in ──────────────────────────────────────────────
   const loginWithEmail = async (emailOrUsername: string, pass: string) => {
     setLoading(true);
     const identifier = emailOrUsername.trim();
 
-    // A. Try Firebase Auth if it contains @
+    // A. If identifier is an email, try Firebase Auth first
     if (identifier.includes('@')) {
       try {
         const result = await signInWithEmailAndPassword(auth, identifier, pass);
         if (result.user) {
           setFirebaseUser(result.user);
-          setUser(buildFallbackUser(result.user));
-          await syncUserWithBackend(result.user);
+          const profile = await getOrCreateFirestoreUser(result.user);
+          setUser(profile);
+          handleUserSession(result.user).catch(() => {});
           router.push('/dashboard');
           setLoading(false);
           return;
         }
       } catch (fbErr: any) {
-        console.warn('Firebase email auth notice, trying database login:', fbErr?.code || fbErr);
+        console.warn('Firebase email auth notice, trying backend database:', fbErr?.code || fbErr);
       }
     }
 
@@ -257,7 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   };
 
-  // 3. Email / Username / Password Sign-up
+  // ─── 3. Email / Username Sign-up ──────────────────────────────────────────────
   const signUpWithEmail = async (emailOrUsername: string, pass: string, name?: string) => {
     setLoading(true);
     const identifier = emailOrUsername.trim();
@@ -266,13 +221,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     let fbSuccess = false;
 
-    // A. Try Firebase Auth create user
+    // A. Try Firebase Auth
     try {
       const result = await createUserWithEmailAndPassword(auth, effectiveEmail, pass);
       if (result.user) {
         setFirebaseUser(result.user);
-        setUser(buildFallbackUser(result.user));
-        await syncUserWithBackend(result.user);
+        const profile = await getOrCreateFirestoreUser(result.user);
+        setUser(profile);
+        handleUserSession(result.user).catch(() => {});
         fbSuccess = true;
       }
     } catch (fbErr: any) {
@@ -317,9 +273,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   };
 
-  // 4. Logout
+  // ─── 4. Logout ────────────────────────────────────────────────────────────────
   const logout = async () => {
     try {
+      if (firebaseUser?.uid) {
+        setFirestoreUserPresence(firebaseUser.uid, false).catch(() => {});
+      }
+
       if (typeof document !== 'undefined') {
         document.cookie = 'token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;';
       }
