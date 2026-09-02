@@ -23,6 +23,7 @@ import {
   X,
   Check,
   Radio,
+  Loader2,
 } from 'lucide-react';
 
 interface SearchUser {
@@ -55,7 +56,7 @@ const MOOD_OPTIONS = [
 ];
 
 export default function DashboardPage() {
-  const { user, refreshUser } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const router = useRouter();
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
@@ -159,6 +160,22 @@ export default function DashboardPage() {
       setSavingPrefs(false);
     }
   };
+
+  if (loading) {
+    return (
+      <AppShell>
+        <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-pink-600 via-rose-500 to-fuchsia-500 flex items-center justify-center shadow-xl shadow-pink-500/40 animate-pulse">
+            <Heart className="w-7 h-7 text-white fill-white" />
+          </div>
+          <div className="flex items-center space-x-2 text-pink-300 text-xs font-bold">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Loading CupidX Dashboard...</span>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>

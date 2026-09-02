@@ -100,7 +100,7 @@ export function generateCleanUsername(fbUser: FirebaseUser): string {
 
 /**
  * Fetch existing Firestore user document or initialize a new one.
- * Infallible: Always returns a valid UserProfile even if Firestore is offline.
+ * Infallible: Protected with timeout race so cold Firestore connections never freeze auth.
  */
 export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<UserProfile> {
   const cleanUsername = generateCleanUsername(fbUser);
@@ -122,7 +122,7 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
     isVIP: false,
     online: true,
     status: 'active',
-    profileCompleted: false, // New user needs onboarding
+    profileCompleted: false,
     dateOfBirth: null,
     gender: 'unspecified',
     createdAt: now,
@@ -149,9 +149,14 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
 
   try {
     const userRef = doc(db, 'users', fbUser.uid);
-    const snap = await getDoc(userRef);
 
-    if (snap.exists()) {
+    // Timeout protection: If Firestore takes > 2500ms, proceed with fallback immediately
+    const fetchPromise = getDoc(userRef);
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+
+    const snap = await Promise.race([fetchPromise, timeoutPromise]);
+
+    if (snap && snap.exists()) {
       const data = snap.data() as UserProfile;
       const dynamicAge = calculateAge(data.dateOfBirth || data.profile?.dateOfBirth);
       
@@ -160,13 +165,19 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
         id: fbUser.uid,
         uid: fbUser.uid,
         firebaseUid: fbUser.uid,
-        profileCompleted: Boolean(data.profileCompleted),
+        profileCompleted: Boolean(
+          data.profileCompleted ||
+          (data.dateOfBirth && data.gender && data.gender !== 'unspecified') ||
+          (data.profile?.dateOfBirth && data.profile?.gender && data.profile?.gender !== 'unspecified')
+        ),
         profile: {
           ...data.profile,
           age: dynamicAge,
           dateOfBirth: data.dateOfBirth || data.profile?.dateOfBirth || null,
         },
       };
+
+      console.log('[PROFILE] Loaded Firestore profile for UID:', fbUser.uid, 'profileCompleted:', enriched.profileCompleted);
 
       // Update online status in background
       updateDoc(userRef, {
@@ -175,13 +186,17 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
       }).catch(() => {});
       
       return enriched;
+    } else if (snap && !snap.exists()) {
+      console.log('[PROFILE] User document missing in Firestore, creating new profile for UID:', fbUser.uid);
+      setDoc(userRef, fallbackUser).catch((e) => console.warn('[PROFILE] Firestore setDoc notice:', e));
+      return fallbackUser;
     } else {
-      // Save new user document to Firestore
-      await setDoc(userRef, fallbackUser);
+      console.warn('[PROFILE] Firestore read timed out (>2.5s), proceeding with fallback for UID:', fbUser.uid);
+      setDoc(userRef, fallbackUser).catch(() => {});
       return fallbackUser;
     }
   } catch (err) {
-    console.warn('[AUTH] Firestore read/write fallback active:', err);
+    console.error('[PROFILE] Firestore read failed:', err);
     return fallbackUser;
   }
 }
@@ -199,8 +214,9 @@ export async function updateFirestoreUserProfile(
       ...updates,
       updatedAt: Date.now(),
     });
+    console.log('[PROFILE] Firestore profile updated successfully for UID:', uid);
   } catch (err) {
-    console.warn('[AUTH] Notice updating Firestore user profile:', err);
+    console.warn('[PROFILE] Notice updating Firestore user profile:', err);
   }
 }
 
