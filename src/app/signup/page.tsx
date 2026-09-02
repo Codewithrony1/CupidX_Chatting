@@ -12,6 +12,7 @@ export default function SignupPage() {
   const [name, setName] = useState('');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -22,15 +23,7 @@ export default function SignupPage() {
       await loginWithGoogle();
     } catch (err: any) {
       console.error('[SIGNUP] Google auth error:', err);
-      if (err?.code === 'auth/unauthorized-domain') {
-        setError('Domain not authorized in Firebase Console. Please add cupidxchat.in, www.cupidxchat.in, and localhost to Firebase Console -> Authentication -> Settings -> Authorized Domains.');
-      } else if (err?.code === 'auth/popup-closed-by-user') {
-        setError('Google sign-in popup was closed.');
-      } else if (err?.code === 'auth/popup-blocked') {
-        setError('Popup was blocked by your browser. Please allow popups for this site and try again.');
-      } else {
-        setError(err?.message || 'Google sign-up was cancelled or failed.');
-      }
+      setError(err?.message || 'Google sign-up was cancelled or failed.');
     } finally {
       setSubmitting(false);
     }
@@ -39,8 +32,14 @@ export default function SignupPage() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier.trim() || !password) return;
+
     if (password.length < 6) {
       setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    if (confirmPassword && password !== confirmPassword) {
+      setError('Passwords do not match.');
       return;
     }
 
@@ -134,7 +133,7 @@ export default function SignupPage() {
             <div className="space-y-1 text-left">
               <label className="text-[11px] font-bold text-pink-200/80 uppercase tracking-wider flex items-center gap-1.5">
                 <User className="w-3.5 h-3.5 text-pink-400" />
-                <span>Display Name (Optional)</span>
+                <span>Full Name (Optional)</span>
               </label>
               <input
                 type="text"
@@ -148,12 +147,12 @@ export default function SignupPage() {
             <div className="space-y-1 text-left">
               <label className="text-[11px] font-bold text-pink-200/80 uppercase tracking-wider flex items-center gap-1.5">
                 <Mail className="w-3.5 h-3.5 text-pink-400" />
-                <span>Username or Email</span>
+                <span>Email or Username</span>
               </label>
               <input
                 type="text"
                 required
-                placeholder="choose_username or you@example.com"
+                placeholder="you@example.com or username"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="w-full px-4 py-3 rounded-2xl glass-input text-xs font-medium focus:outline-none focus:ring-1 focus:ring-pink-500"
@@ -171,6 +170,20 @@ export default function SignupPage() {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-2xl glass-input text-xs font-medium focus:outline-none focus:ring-1 focus:ring-pink-500"
+              />
+            </div>
+
+            <div className="space-y-1 text-left">
+              <label className="text-[11px] font-bold text-pink-200/80 uppercase tracking-wider flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-pink-400" />
+                <span>Confirm Password</span>
+              </label>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 className="w-full px-4 py-3 rounded-2xl glass-input text-xs font-medium focus:outline-none focus:ring-1 focus:ring-pink-500"
               />
             </div>

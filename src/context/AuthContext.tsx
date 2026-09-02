@@ -8,15 +8,18 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
+  updateProfile as updateFirebaseProfile,
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
 import {
   getOrCreateFirestoreUser,
+  updateFirestoreUserProfile,
   setFirestoreUserPresence,
   calculateAge,
   type UserProfile,
 } from '@/lib/firestoreUser';
+import { getFriendlyAuthErrorMessage } from '@/lib/authErrors';
 import { ensureFirebaseAuth } from '@/lib/firestoreMatchmaking';
 
 export type User = UserProfile;
@@ -25,6 +28,7 @@ interface AuthContextType {
   user: User | null;
   firebaseUser: FirebaseUser | null;
   loading: boolean;
+  isAuthenticated: boolean;
   loginWithGoogle: () => Promise<void>;
   loginWithEmail: (emailOrUsername: string, pass: string) => Promise<void>;
   signUpWithEmail: (emailOrUsername: string, pass: string, name?: string) => Promise<void>;
@@ -41,30 +45,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Track initialization to guarantee execution happens ONCE per user session
+  // Protect against duplicate initialization per user session
   const currentInitUidRef = useRef<string | null>(null);
   const isNavigatingRef = useRef<boolean>(false);
 
   /**
-   * Helper to check if a user has completed the mandatory onboarding profile
+   * Evaluates if the user profile has completed first-time onboarding
    */
   const checkProfileCompletion = (u: User | null): boolean => {
-    if (!u) {
-      console.log('[CUPIDX AUTH 6] profileCompleted: false (no user)');
-      return false;
-    }
-    const isComp = Boolean(
+    if (!u) return false;
+    return Boolean(
       u.profileCompleted === true ||
       (u.dateOfBirth && u.gender && u.gender !== 'unspecified') ||
       (u.profile?.dateOfBirth && u.profile?.gender && u.profile?.gender !== 'unspecified')
     );
-    console.log('[CUPIDX AUTH 6] profileCompleted', isComp);
-    return isComp;
   };
 
   /**
-   * Initialize user profile once from Firestore.
-   * Firestore is the single source of truth — SQLite sync is fire-and-forget and does NOT overwrite profile state.
+   * Initializes user profile once from Firestore
    */
   const initializeUserSession = async (fbUser: FirebaseUser | null): Promise<UserProfile | null> => {
     if (!fbUser) {
@@ -73,20 +71,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
 
-    // Prevent duplicate concurrent initialization for the same user
     if (currentInitUidRef.current === fbUser.uid && user) {
       return user;
     }
     currentInitUidRef.current = fbUser.uid;
 
-    console.log('[CUPIDX AUTH 4] profile load START', fbUser.uid);
+    console.log('[AUTH] Profile initialization for UID:', fbUser.uid);
     try {
       const firestoreProfile = await getOrCreateFirestoreUser(fbUser);
-      console.log('[CUPIDX AUTH 5] profile load END');
-      
       setUser(firestoreProfile);
 
-      // Fire-and-forget JWT session cookie sync for API routes (does NOT mutate state)
+      // Background session cookie sync for API routes
       fbUser.getIdToken().then((idToken) => {
         fetch('/api/auth/me', {
           headers: { Authorization: `Bearer ${idToken}` },
@@ -95,28 +90,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return firestoreProfile;
     } catch (err) {
-      console.error('[CUPIDX AUTH ERROR] profile load failed:', err);
+      console.error('[AUTH] Profile load error:', err);
       return null;
     }
   };
 
   const refreshUser = async () => {
     if (auth.currentUser) {
-      currentInitUidRef.current = null; // Force reload
+      currentInitUidRef.current = null;
       await initializeUserSession(auth.currentUser);
     }
   };
 
-  // ─── Firebase Auth State Listener (Single Source of Truth) ───────────────────
+  // ─── Single Authoritative Auth State Listener ────────────────────────────────
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      console.log('[CUPIDX AUTH 3] onAuthStateChanged', fbUser?.uid || 'null');
+      console.log('[AUTH] Auth state changed, UID:', fbUser?.uid || 'null');
       setFirebaseUser(fbUser);
       if (fbUser) {
-        console.log('[CUPIDX AUTH 2] Firebase login success', fbUser.uid);
         await initializeUserSession(fbUser);
       } else {
         setUser(null);
+        currentInitUidRef.current = null;
       }
       setLoading(false);
     });
@@ -124,58 +119,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // ─── Single Authoritative Route Guard ─────────────────────────────────────────
+  // ─── Single Centralized Route Guard ──────────────────────────────────────────
   useEffect(() => {
     // WHILE AUTH_LOADING: NEVER REDIRECT
     if (loading) return;
 
-    const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback'];
+    const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback', '/forgot-password'];
     const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
-    const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser);
+    const isAuthed = Boolean(user || firebaseUser || auth.currentUser);
 
-    // 1. Unauthenticated users trying to access protected routes -> send to /login
-    if (!isAuthenticated && !isPublic && pathname !== '/onboarding') {
+    // 1. Unauthenticated users on private routes -> redirect to /login
+    if (!isAuthed && !isPublic && pathname !== '/onboarding') {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
-      console.log('[CUPIDX ROUTE GUARD] Unauthenticated user on private route:', pathname, '-> redirecting to /login');
+      console.log('[AUTH GUARD] Unauthenticated user accessing private route:', pathname, '-> redirecting to /login');
       router.replace('/login');
-      setTimeout(() => { isNavigatingRef.current = false; }, 600);
+      setTimeout(() => { isNavigatingRef.current = false; }, 500);
       return;
     }
 
     // 2. Authenticated users
-    if (isAuthenticated && user) {
+    if (isAuthed && user) {
       const isComplete = checkProfileCompletion(user);
 
-      // A. Authenticated on login / signup / register
+      // Authenticated users on auth pages (/login, /signup, /register)
       if (pathname === '/login' || pathname === '/register' || pathname === '/signup') {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
         const target = isComplete ? '/dashboard' : '/onboarding';
-        console.log('[CUPIDX AUTH 7] redirecting to', target);
+        console.log('[AUTH GUARD] Authenticated user on auth page -> redirecting to:', target);
         router.replace(target);
-        setTimeout(() => { isNavigatingRef.current = false; }, 600);
+        setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // B. Completed user on /onboarding -> send to /dashboard
+      // Users who already completed onboarding on /onboarding -> send to /dashboard
       if (pathname === '/onboarding' && isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        console.log('[CUPIDX AUTH 7] redirecting to dashboard');
+        console.log('[AUTH GUARD] Profile already complete -> redirecting to /dashboard');
         router.replace('/dashboard');
-        setTimeout(() => { isNavigatingRef.current = false; }, 600);
+        setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // C. Incomplete user trying to access /dashboard or /chat/* -> send to /onboarding
+      // Users with incomplete profiles on protected routes -> send to /onboarding
       if (!isPublic && pathname !== '/onboarding' && !isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        console.log('[CUPIDX ROUTE GUARD] Incomplete profile on protected route -> redirecting to /onboarding');
+        console.log('[AUTH GUARD] Incomplete profile on protected route -> redirecting to /onboarding');
         router.replace('/onboarding');
-        setTimeout(() => { isNavigatingRef.current = false; }, 600);
+        setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
     }
@@ -183,142 +178,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ─── 1. Google 1-Click Sign-in ────────────────────────────────────────────────
   const loginWithGoogle = async () => {
-    setLoading(true);
-    console.log('[CUPIDX AUTH 1] Google login started');
+    console.log('[AUTH] Google login initiated');
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      console.log('[CUPIDX AUTH 2] Firebase login success', result.user?.uid);
-
       if (result.user) {
+        console.log('[AUTH] Google login success. UID:', result.user.uid);
         setFirebaseUser(result.user);
         const profile = await initializeUserSession(result.user);
-        setLoading(false);
-
         if (profile) {
           const isComplete = checkProfileCompletion(profile);
           const target = isComplete ? '/dashboard' : '/onboarding';
-          console.log('[CUPIDX AUTH 7] redirecting to', target);
           router.replace(target);
         }
       }
     } catch (err: any) {
-      setLoading(false);
-      console.error('[CUPIDX AUTH ERROR] Google sign-in failed:', err?.code, err?.message);
-      throw err;
+      console.error('[AUTH] Google login error:', err);
+      const friendlyMsg = getFriendlyAuthErrorMessage(err);
+      throw new Error(friendlyMsg);
     }
   };
 
-  // ─── 2. Email / Username Sign-in ──────────────────────────────────────────────
+  // ─── 2. Email / Password Login ────────────────────────────────────────────────
   const loginWithEmail = async (emailOrUsername: string, pass: string) => {
-    setLoading(true);
     const identifier = emailOrUsername.trim();
-
-    if (identifier.includes('@')) {
-      try {
-        const result = await signInWithEmailAndPassword(auth, identifier, pass);
-        if (result.user) {
-          setFirebaseUser(result.user);
-          const profile = await initializeUserSession(result.user);
-          setLoading(false);
-
-          if (profile) {
-            const isComplete = checkProfileCompletion(profile);
-            const target = isComplete ? '/dashboard' : '/onboarding';
-            router.replace(target);
-          }
-          return;
-        }
-      } catch (fbErr: any) {
-        console.warn('[AUTH] Firebase email auth notice, trying backend database:', fbErr?.code || fbErr);
-      }
-    }
+    const effectiveEmail = identifier.includes('@')
+      ? identifier
+      : `${identifier.toLowerCase().replace(/[^a-z0-9_]/g, '')}@cupidxchat.in`;
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: identifier.includes('@') ? identifier.split('@')[0] : identifier,
-          password: pass,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          setUser(data.user);
-          ensureFirebaseAuth().catch(() => {});
-          const isComplete = checkProfileCompletion(data.user);
+      const result = await signInWithEmailAndPassword(auth, effectiveEmail, pass);
+      if (result.user) {
+        console.log('[AUTH] Email login success. UID:', result.user.uid);
+        setFirebaseUser(result.user);
+        const profile = await initializeUserSession(result.user);
+        if (profile) {
+          const isComplete = checkProfileCompletion(profile);
           const target = isComplete ? '/dashboard' : '/onboarding';
           router.replace(target);
-          setLoading(false);
-          return;
         }
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Invalid credentials');
       }
-    } catch (dbErr: any) {
-      setLoading(false);
-      throw new Error(dbErr?.message || 'Invalid credentials. Please check your username and password.');
+    } catch (err: any) {
+      console.error('[AUTH] Email login error:', err);
+      const friendlyMsg = getFriendlyAuthErrorMessage(err);
+      throw new Error(friendlyMsg);
     }
   };
 
-  // ─── 3. Email / Username Sign-up ──────────────────────────────────────────────
+  // ─── 3. Email / Password Signup ───────────────────────────────────────────────
   const signUpWithEmail = async (emailOrUsername: string, pass: string, name?: string) => {
-    setLoading(true);
     const identifier = emailOrUsername.trim();
-    const cleanUsername = (identifier.includes('@') ? identifier.split('@')[0] : identifier).toLowerCase().replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`;
+    const cleanUsername = (identifier.includes('@') ? identifier.split('@')[0] : identifier)
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`;
     const effectiveEmail = identifier.includes('@') ? identifier : `${cleanUsername}@cupidxchat.in`;
-
-    let fbSuccess = false;
 
     try {
       const result = await createUserWithEmailAndPassword(auth, effectiveEmail, pass);
       if (result.user) {
+        console.log('[AUTH] Account created successfully. UID:', result.user.uid);
+        if (name && name.trim()) {
+          await updateFirebaseProfile(result.user, { displayName: name.trim() }).catch(() => {});
+        }
         setFirebaseUser(result.user);
-        await initializeUserSession(result.user);
-        fbSuccess = true;
-      }
-    } catch (fbErr: any) {
-      console.warn('[AUTH] Firebase signup notice, proceeding with database registration:', fbErr?.code || fbErr);
-    }
-
-    try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: name || cleanUsername,
-          username: cleanUsername,
-          password: pass,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          setUser(data.user);
-          ensureFirebaseAuth().catch(() => {});
-          router.replace('/onboarding');
-          setLoading(false);
-          return;
+        const profile = await initializeUserSession(result.user);
+        if (profile && name && name.trim()) {
+          await updateFirestoreUserProfile(result.user.uid, {
+            fullName: name.trim(),
+            displayName: name.trim(),
+          }).catch(() => {});
         }
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        if (!fbSuccess) {
-          throw new Error(errData.error || 'Registration failed');
-        }
+        router.replace('/onboarding');
       }
-    } catch (dbErr: any) {
-      if (!fbSuccess) {
-        setLoading(false);
-        throw dbErr;
-      }
+    } catch (err: any) {
+      console.error('[AUTH] Signup error:', err);
+      const friendlyMsg = getFriendlyAuthErrorMessage(err);
+      throw new Error(friendlyMsg);
     }
-
-    router.replace('/onboarding');
-    setLoading(false);
   };
 
   // ─── 4. Logout ────────────────────────────────────────────────────────────────
@@ -341,10 +276,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       router.replace('/login');
     } catch (e) {
-      console.error('[AUTH-ERROR] Logout error:', e);
+      console.error('[AUTH] Logout error:', e);
       router.replace('/login');
     }
   };
+
+  const isAuthenticated = Boolean(user || firebaseUser);
 
   return (
     <AuthContext.Provider
@@ -352,6 +289,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         firebaseUser,
         loading,
+        isAuthenticated,
         loginWithGoogle,
         loginWithEmail,
         signUpWithEmail,

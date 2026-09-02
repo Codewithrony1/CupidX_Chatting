@@ -21,15 +21,7 @@ export default function Login() {
       await loginWithGoogle();
     } catch (err: any) {
       console.error('[LOGIN] Google auth error:', err);
-      if (err?.code === 'auth/unauthorized-domain') {
-        setError('Domain not authorized in Firebase Console. Please add cupidxchat.in, www.cupidxchat.in, and localhost to Firebase Console -> Authentication -> Settings -> Authorized Domains.');
-      } else if (err?.code === 'auth/popup-closed-by-user') {
-        setError('Google sign-in popup was closed.');
-      } else if (err?.code === 'auth/popup-blocked') {
-        setError('Popup was blocked by your browser. Please allow popups for this site and try again.');
-      } else {
-        setError(err?.message || 'Google sign-in was cancelled or failed.');
-      }
+      setError(err?.message || 'Google sign-in was cancelled or failed.');
     } finally {
       setSubmitting(false);
     }
