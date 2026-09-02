@@ -42,20 +42,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   /**
+   * Helper to check if a user has completed the mandatory onboarding profile
+   */
+  const checkProfileCompletion = (u: User | null): boolean => {
+    if (!u) return false;
+    return Boolean(
+      u.profileCompleted ||
+      (u.profile?.ageGenderConfirmed && u.gender && u.gender !== 'unspecified' && (u.dateOfBirth || u.profile?.dateOfBirth))
+    );
+  };
+
+  /**
    * Sync user with both Firestore and backend /api/auth/me
    */
   const handleUserSession = async (fbUser: FirebaseUser | null) => {
     if (!fbUser) {
-      try {
-        const res = await fetch('/api/auth/me');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.user) {
-            setUser(data.user);
-            return data.user;
-          }
-        }
-      } catch {}
       setUser(null);
       return null;
     }
@@ -64,44 +65,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const firestoreProfile = await getOrCreateFirestoreUser(fbUser);
       setUser(firestoreProfile);
 
-      // Background sync with backend SQLite / JWT cookie
-      try {
-        const idToken = await fbUser.getIdToken();
-        const res = await fetch('/api/auth/me', {
+      // Background sync with backend SQLite / JWT cookie (non-blocking)
+      fbUser.getIdToken().then((idToken) => {
+        fetch('/api/auth/me', {
           headers: { Authorization: `Bearer ${idToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.user) {
-            const dynamicAge = calculateAge(
-              data.user.dob || data.user.profile?.dob || firestoreProfile.dateOfBirth
-            );
-
-            setUser((prev) => ({
-              ...firestoreProfile,
-              ...data.user,
-              profileCompleted: Boolean(
-                firestoreProfile.profileCompleted ||
-                (data.user.profile?.ageGenderConfirmed && data.user.gender !== 'unspecified')
-              ),
-              dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
-              gender: firestoreProfile.gender || data.user.gender || 'unspecified',
-              profile: {
-                ...firestoreProfile.profile,
-                ...(data.user.profile || {}),
-                age: dynamicAge,
-                dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
-              },
-            }));
-          }
-        }
-      } catch (backendErr) {
-        console.warn('Backend sync notice (using Firestore session):', backendErr);
-      }
+        })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.user) {
+              const dynamicAge = calculateAge(
+                data.user.dob || data.user.profile?.dob || firestoreProfile.dateOfBirth
+              );
+              setUser((prev) => {
+                if (!prev) return firestoreProfile;
+                return {
+                  ...firestoreProfile,
+                  ...data.user,
+                  profileCompleted: Boolean(
+                    firestoreProfile.profileCompleted ||
+                    (data.user.profile?.ageGenderConfirmed && data.user.gender !== 'unspecified')
+                  ),
+                  dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
+                  gender: firestoreProfile.gender || data.user.gender || 'unspecified',
+                  profile: {
+                    ...firestoreProfile.profile,
+                    ...(data.user.profile || {}),
+                    age: dynamicAge,
+                    dateOfBirth: firestoreProfile.dateOfBirth || data.user.dob || null,
+                  },
+                };
+              });
+            }
+          })
+          .catch(() => {});
+      }).catch(() => {});
 
       return firestoreProfile;
     } catch (err) {
-      console.error('Error handling user session:', err);
+      console.error('[AUTH] Error loading user session:', err);
       return null;
     }
   };
@@ -112,9 +113,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // ─── Firebase Auth State Listener (Source of Truth) ───────────────────────────
+  // ─── Firebase Auth State Listener (Single Source of Truth) ───────────────────
   useEffect(() => {
+    console.log('[AUTH] Initializing onAuthStateChanged listener');
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      console.log('[AUTH] onAuthStateChanged received user:', fbUser?.uid || 'null');
       setFirebaseUser(fbUser);
       if (fbUser) {
         await handleUserSession(fbUser);
@@ -127,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // ─── Strict Client Route Guard (Onboarding + Auth Protection) ─────────────────
+  // ─── Strict Route Guard (Sole Authoritative Route Transition Guard) ───────────
   useEffect(() => {
     // NEVER redirect while Firebase Auth is determining session (AUTH_LOADING)
     if (loading) return;
@@ -138,28 +141,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const hasTokenCookie = typeof document !== 'undefined' && document.cookie.includes('token=');
     const isAuthenticated = Boolean(user || firebaseUser || auth.currentUser || hasTokenCookie);
 
-    // 1. Unauthenticated users trying to access private routes -> send to /login
+    // 1. Unauthenticated users trying to access protected routes -> send to /login
     if (!isAuthenticated && !isPublic && pathname !== '/onboarding') {
-      router.push('/login');
+      console.log('[AUTH] Unauthenticated access to private route, redirecting to /login');
+      router.replace('/login');
       return;
     }
 
     // 2. Authenticated users: Check if first-time profile onboarding is required
     if (isAuthenticated && user) {
-      const isComplete = Boolean(
-        user.profileCompleted ||
-        (user.profile?.ageGenderConfirmed && user.gender && user.gender !== 'unspecified')
-      );
+      const isComplete = checkProfileCompletion(user);
 
-      // If profile is INCOMPLETE, force user to /onboarding
+      // Incomplete profile on private route or auth page -> send to /onboarding
       if (!isComplete && pathname !== '/onboarding') {
-        router.push('/onboarding');
+        console.log('[AUTH] Profile incomplete, directing to /onboarding');
+        router.replace('/onboarding');
         return;
       }
 
-      // If profile is COMPLETE, redirect away from auth pages and onboarding to /dashboard
+      // Complete profile on auth pages or onboarding -> send to /dashboard
       if (isComplete && (pathname === '/login' || pathname === '/register' || pathname === '/signup' || pathname === '/onboarding')) {
-        router.push('/dashboard');
+        console.log('[AUTH] Profile complete on auth/onboarding page, directing to /dashboard');
+        router.replace('/dashboard');
         return;
       }
     }
@@ -168,27 +171,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── 1. Google 1-Click Sign-in ────────────────────────────────────────────────
   const loginWithGoogle = async () => {
     setLoading(true);
+    console.log('[AUTH] Google sign-in started');
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
+        console.log('[AUTH] Google sign-in successful. UID:', result.user.uid);
         setFirebaseUser(result.user);
         const profile = await getOrCreateFirestoreUser(result.user);
         setUser(profile);
         handleUserSession(result.user).catch(() => {});
 
-        const isComplete = Boolean(
-          profile.profileCompleted ||
-          (profile.profile?.ageGenderConfirmed && profile.gender && profile.gender !== 'unspecified')
-        );
-
-        if (!isComplete) {
-          router.push('/onboarding');
-        } else {
-          router.push('/dashboard');
-        }
+        const isComplete = checkProfileCompletion(profile);
+        const target = isComplete ? '/dashboard' : '/onboarding';
+        console.log('[AUTH] Navigating to:', target);
+        router.replace(target);
       }
     } catch (err) {
       setLoading(false);
+      console.error('[AUTH] Google sign-in error:', err);
       throw err;
     }
     setLoading(false);
@@ -209,21 +209,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(profile);
           handleUserSession(result.user).catch(() => {});
 
-          const isComplete = Boolean(
-            profile.profileCompleted ||
-            (profile.profile?.ageGenderConfirmed && profile.gender && profile.gender !== 'unspecified')
-          );
-
-          if (!isComplete) {
-            router.push('/onboarding');
-          } else {
-            router.push('/dashboard');
-          }
+          const isComplete = checkProfileCompletion(profile);
+          router.replace(isComplete ? '/dashboard' : '/onboarding');
           setLoading(false);
           return;
         }
       } catch (fbErr: any) {
-        console.warn('Firebase email auth notice, trying backend database:', fbErr?.code || fbErr);
+        console.warn('[AUTH] Firebase email auth notice, trying backend database:', fbErr?.code || fbErr);
       }
     }
 
@@ -243,15 +235,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setUser(data.user);
           ensureFirebaseAuth().catch(() => {});
-          const isComplete = Boolean(
-            data.user.profileCompleted ||
-            (data.user.profile?.ageGenderConfirmed && data.user.gender && data.user.gender !== 'unspecified')
-          );
-          if (!isComplete) {
-            router.push('/onboarding');
-          } else {
-            router.push('/dashboard');
-          }
+          const isComplete = checkProfileCompletion(data.user);
+          router.replace(isComplete ? '/dashboard' : '/onboarding');
           setLoading(false);
           return;
         }
@@ -286,7 +271,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         fbSuccess = true;
       }
     } catch (fbErr: any) {
-      console.warn('Firebase signup notice, proceeding with database registration:', fbErr?.code || fbErr);
+      console.warn('[AUTH] Firebase signup notice, proceeding with database registration:', fbErr?.code || fbErr);
     }
 
     // B. Call database registration
@@ -306,7 +291,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setUser(data.user);
           ensureFirebaseAuth().catch(() => {});
-          router.push('/onboarding');
+          router.replace('/onboarding');
           setLoading(false);
           return;
         }
@@ -323,7 +308,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    router.push('/onboarding');
+    router.replace('/onboarding');
     setLoading(false);
   };
 
@@ -344,16 +329,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setFirebaseUser(null);
 
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      } else {
-        router.push('/login');
-      }
+      router.replace('/login');
     } catch (e) {
-      console.error('Logout error:', e);
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      }
+      console.error('[AUTH] Logout error:', e);
+      router.replace('/login');
     }
   };
 

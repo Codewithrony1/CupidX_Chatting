@@ -100,45 +100,14 @@ export function generateCleanUsername(fbUser: FirebaseUser): string {
 
 /**
  * Fetch existing Firestore user document or initialize a new one.
+ * Infallible: Always returns a valid UserProfile even if Firestore is offline.
  */
 export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<UserProfile> {
-  const userRef = doc(db, 'users', fbUser.uid);
-  
-  try {
-    const snap = await getDoc(userRef);
-
-    if (snap.exists()) {
-      const data = snap.data() as UserProfile;
-      // Calculate dynamic age from saved DOB
-      const dynamicAge = calculateAge(data.dateOfBirth || data.profile?.dateOfBirth);
-      
-      const enriched: UserProfile = {
-        ...data,
-        profileCompleted: Boolean(data.profileCompleted),
-        profile: {
-          ...data.profile,
-          age: dynamicAge,
-          dateOfBirth: data.dateOfBirth || data.profile?.dateOfBirth || null,
-        },
-      };
-
-      // Update online status in background
-      updateDoc(userRef, {
-        online: true,
-        updatedAt: Date.now(),
-      }).catch(() => {});
-      return enriched;
-    }
-  } catch (err) {
-    console.warn('Notice reading user from Firestore:', err);
-  }
-
-  // Create initial profile (profileCompleted is false until user finishes onboarding)
   const cleanUsername = generateCleanUsername(fbUser);
   const now = Date.now();
   const displayName = fbUser.displayName || cleanUsername;
 
-  const newUser: UserProfile = {
+  const fallbackUser: UserProfile = {
     id: fbUser.uid,
     uid: fbUser.uid,
     firebaseUid: fbUser.uid,
@@ -153,7 +122,7 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
     isVIP: false,
     online: true,
     status: 'active',
-    profileCompleted: false, // Must complete first-time onboarding
+    profileCompleted: false, // New user needs onboarding
     dateOfBirth: null,
     gender: 'unspecified',
     createdAt: now,
@@ -179,12 +148,42 @@ export async function getOrCreateFirestoreUser(fbUser: FirebaseUser): Promise<Us
   };
 
   try {
-    await setDoc(userRef, newUser);
-  } catch (err) {
-    console.warn('Notice saving new user to Firestore:', err);
-  }
+    const userRef = doc(db, 'users', fbUser.uid);
+    const snap = await getDoc(userRef);
 
-  return newUser;
+    if (snap.exists()) {
+      const data = snap.data() as UserProfile;
+      const dynamicAge = calculateAge(data.dateOfBirth || data.profile?.dateOfBirth);
+      
+      const enriched: UserProfile = {
+        ...data,
+        id: fbUser.uid,
+        uid: fbUser.uid,
+        firebaseUid: fbUser.uid,
+        profileCompleted: Boolean(data.profileCompleted),
+        profile: {
+          ...data.profile,
+          age: dynamicAge,
+          dateOfBirth: data.dateOfBirth || data.profile?.dateOfBirth || null,
+        },
+      };
+
+      // Update online status in background
+      updateDoc(userRef, {
+        online: true,
+        updatedAt: Date.now(),
+      }).catch(() => {});
+      
+      return enriched;
+    } else {
+      // Save new user document to Firestore
+      await setDoc(userRef, fallbackUser);
+      return fallbackUser;
+    }
+  } catch (err) {
+    console.warn('[AUTH] Firestore read/write fallback active:', err);
+    return fallbackUser;
+  }
 }
 
 /**
@@ -201,7 +200,7 @@ export async function updateFirestoreUserProfile(
       updatedAt: Date.now(),
     });
   } catch (err) {
-    console.warn('Notice updating Firestore user profile:', err);
+    console.warn('[AUTH] Notice updating Firestore user profile:', err);
   }
 }
 

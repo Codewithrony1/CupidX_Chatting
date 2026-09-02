@@ -1,35 +1,18 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { Heart, User, Lock, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 export default function Login() {
-  const router = useRouter();
-  const { user, firebaseUser, loading: authLoading, loginWithGoogle, loginWithEmail } = useAuth();
+  const { loginWithGoogle, loginWithEmail } = useAuth();
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  // Navigate if already authenticated
-  useEffect(() => {
-    if (!authLoading && (user || firebaseUser)) {
-      const isComplete = Boolean(
-        user?.profileCompleted ||
-        (user?.profile?.ageGenderConfirmed && user?.gender && user?.gender !== 'unspecified' && (user?.dateOfBirth || user?.profile?.dateOfBirth))
-      );
-      if (!isComplete) {
-        router.push('/onboarding');
-      } else {
-        router.push('/dashboard');
-      }
-    }
-  }, [user, firebaseUser, authLoading, router]);
 
   const handleGoogleAuth = async () => {
     setError('');
@@ -37,7 +20,7 @@ export default function Login() {
     try {
       await loginWithGoogle();
     } catch (err: any) {
-      console.error('Google auth error:', err);
+      console.error('[LOGIN] Google auth error:', err);
       if (err?.code === 'auth/unauthorized-domain') {
         setError('Domain not authorized in Firebase Console. Please add cupidxchat.in, www.cupidxchat.in, and localhost to Firebase Console -> Authentication -> Settings -> Authorized Domains.');
       } else if (err?.code === 'auth/popup-closed-by-user') {
@@ -61,7 +44,7 @@ export default function Login() {
     try {
       await loginWithEmail(identifier.trim(), password);
     } catch (err: any) {
-      console.error('Auth error:', err);
+      console.error('[LOGIN] Auth error:', err);
       setError(err?.message || 'Authentication failed. Please check your credentials.');
     } finally {
       setSubmitting(false);
