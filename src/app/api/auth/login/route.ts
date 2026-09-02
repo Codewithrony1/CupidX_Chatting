@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     }
 
     if (!user.passwordHash) {
-      return NextResponse.json({ error: 'Please sign in using Clerk authentication' }, { status: 400 });
+      return NextResponse.json({ error: 'This account was created with Google. Please click Continue with Google.' }, { status: 400 });
     }
 
     const match = await comparePassword(password, user.passwordHash);
