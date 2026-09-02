@@ -125,13 +125,9 @@ export default function KnotChatRandomPage() {
   const messagesListenerRef = useRef<(() => void) | null>(null);
   const matchingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const matchStatusRef = useRef(matchStatus);
+  const isScanningRef = useRef(false);
   const currentUidRef = useRef<string | null>(null);
   const activeMatchIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    matchStatusRef.current = matchStatus;
-  }, [matchStatus]);
 
   const isVIP =
     user?.membershipTier === 'VIP' ||
@@ -159,24 +155,37 @@ export default function KnotChatRandomPage() {
     };
   }, [socket]);
 
-  // ─── Cleanup helper ───────────────────────────────────────────────────────
-  const cleanupAllListeners = useCallback(() => {
+  // ─── Cleanup helpers ──────────────────────────────────────────────────────
+  const stopAllTimers = () => {
+    if (matchingIntervalRef.current) {
+      clearInterval(matchingIntervalRef.current);
+      matchingIntervalRef.current = null;
+    }
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+  };
+
+  const stopAllListeners = () => {
     queueListenerRef.current?.();
+    queueListenerRef.current = null;
     matchListenerRef.current?.();
+    matchListenerRef.current = null;
     messagesListenerRef.current?.();
-    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-    if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-  }, []);
+    messagesListenerRef.current = null;
+  };
 
   // ─── Cleanup on unmount ───────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      cleanupAllListeners();
+      stopAllTimers();
+      stopAllListeners();
       if (currentUidRef.current) {
         leaveQueue(currentUidRef.current).catch(() => {});
       }
     };
-  }, [cleanupAllListeners]);
+  }, []);
 
   // ─── Build partner object ─────────────────────────────────────────────────
   function buildPartner(matchDoc: MatchDoc, myUid: string): RandomPartner {
@@ -195,12 +204,11 @@ export default function KnotChatRandomPage() {
 
   // ─── Attach active match ──────────────────────────────────────────────────
   const attachActiveMatch = useCallback((mid: string, myUid: string) => {
+    if (activeMatchIdRef.current === mid) return; // Already attached
     activeMatchIdRef.current = mid;
     setMatchId(mid);
 
-    // Stop searching intervals immediately
-    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-    if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+    stopAllTimers();
 
     // 1. Listen to match status & partner details
     matchListenerRef.current?.();
@@ -246,8 +254,10 @@ export default function KnotChatRandomPage() {
     setSearchError(null);
     setReconnecting(false);
     activeMatchIdRef.current = null;
+    isScanningRef.current = false;
 
-    cleanupAllListeners();
+    stopAllTimers();
+    stopAllListeners();
 
     try {
       const fbUid = (await ensureFirebaseAuth()) || user.firebaseUid || user.id;
@@ -269,46 +279,56 @@ export default function KnotChatRandomPage() {
       // 1. Join queue with current session timestamp
       const sessionStartedAt = await joinQueue(prefs);
 
-      // 2. Heartbeat every 4 seconds to maintain active online presence
+      // 2. Heartbeat every 4 seconds
       heartbeatIntervalRef.current = setInterval(() => {
-        if (matchStatusRef.current === 'searching') {
+        if (!activeMatchIdRef.current) {
           heartbeatQueue(fbUid);
         }
       }, 4000);
 
       // 3. Listen to own queue doc for incoming matches
       queueListenerRef.current = listenToMyQueueEntry(fbUid, sessionStartedAt, (mid) => {
-        if (activeMatchIdRef.current) return; // Already matched
+        if (activeMatchIdRef.current) return;
         attachActiveMatch(mid, fbUid);
       });
 
-      // 4. Attempt immediate scan
+      // 4. Run initial scan
+      isScanningRef.current = true;
       const immediateMatchId = await findAndMatch(prefs);
+      isScanningRef.current = false;
+
       if (immediateMatchId) {
         attachActiveMatch(immediateMatchId, fbUid);
         return;
       }
 
-      // 5. Continuous match scanner every 2s while searching
+      // 5. Continuous match scanner every 2.5s while searching
       matchingIntervalRef.current = setInterval(async () => {
-        if (matchStatusRef.current !== 'searching' || activeMatchIdRef.current) {
-          if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+        if (activeMatchIdRef.current || isScanningRef.current) {
+          if (activeMatchIdRef.current && matchingIntervalRef.current) {
+            clearInterval(matchingIntervalRef.current);
+          }
           return;
         }
+
         try {
+          isScanningRef.current = true;
           const mid = await findAndMatch(prefs);
-          if (mid) {
+          isScanningRef.current = false;
+
+          if (mid && !activeMatchIdRef.current) {
             attachActiveMatch(mid, fbUid);
           }
         } catch (e) {
+          isScanningRef.current = false;
           console.warn('Match scan error:', e);
         }
-      }, 2000);
+      }, 2500);
     } catch (err: any) {
       console.error('Matchmaking error:', err);
       setSearchError(err?.message || 'Could not connect to matchmaking queue.');
     }
-  }, [user, isVIP, cleanupAllListeners, attachActiveMatch]);
+  }, [user, isVIP, attachActiveMatch]);
 
   // ─── Auto-start on mount when user is ready ───────────────────────────────
   useEffect(() => {
@@ -325,7 +345,8 @@ export default function KnotChatRandomPage() {
 
   // ─── CANCEL SEARCH ────────────────────────────────────────────────────────
   const handleCancelSearch = async () => {
-    cleanupAllListeners();
+    stopAllTimers();
+    stopAllListeners();
     activeMatchIdRef.current = null;
 
     if (currentUidRef.current) {
@@ -340,7 +361,8 @@ export default function KnotChatRandomPage() {
     const fbUid = currentUidRef.current;
     const currentMid = activeMatchIdRef.current || matchId;
 
-    cleanupAllListeners();
+    stopAllTimers();
+    stopAllListeners();
     activeMatchIdRef.current = null;
 
     if (fbUid && currentMid) {

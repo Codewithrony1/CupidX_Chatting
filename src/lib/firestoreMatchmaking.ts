@@ -1,17 +1,12 @@
 /**
  * CupidX — Bulletproof Firestore Matchmaking & Realtime Chat
- *
- * Designed to prevent:
- *  - Old match ghosts / instant disconnects
- *  - Race conditions between simultaneous searchers
- *  - Stale / closed browser matches
- *  - Premature match cancellations
  */
 
 import { db, auth } from '@/lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import {
   doc,
+  getDoc,
   setDoc,
   deleteDoc,
   getDocs,
@@ -22,7 +17,6 @@ import {
   where,
   limit,
   runTransaction,
-  serverTimestamp,
   updateDoc,
 } from 'firebase/firestore';
 
@@ -98,7 +92,7 @@ export async function ensureFirebaseAuth(): Promise<string> {
 // ─── Queue Operations ─────────────────────────────────────────────────────────
 
 /**
- * Join the matchmaking queue. Clears any previous matchId or stale status.
+ * Join the matchmaking queue.
  */
 export async function joinQueue(params: {
   firebaseUid: string;
@@ -137,16 +131,19 @@ export async function joinQueue(params: {
 }
 
 /**
- * Keep the searching presence alive.
+ * Keep the searching presence alive without overwriting matched status.
  */
 export async function heartbeatQueue(firebaseUid: string): Promise<void> {
   try {
-    await updateDoc(doc(db, 'matchmaking', firebaseUid), {
-      updatedAt: Date.now(),
-      status: 'searching',
-    });
+    const ref = doc(db, 'matchmaking', firebaseUid);
+    const snap = await getDoc(ref);
+    if (snap.exists() && snap.data()?.status === 'searching') {
+      await updateDoc(ref, {
+        updatedAt: Date.now(),
+      });
+    }
   } catch {
-    // Document may have been converted to matched or deleted
+    // Ignore
   }
 }
 
@@ -179,7 +176,7 @@ export async function findAndMatch(params: {
 }): Promise<string | null> {
   const { firebaseUid, genderPref = 'auto', isVIP = false } = params;
   const now = Date.now();
-  const ACTIVE_HEARTBEAT_THRESHOLD = now - 25000; // Must be active in the last 25s
+  const ACTIVE_HEARTBEAT_THRESHOLD = now - 30000; // Must have sent heartbeat in last 30s
 
   const q = query(
     collection(db, 'matchmaking'),
@@ -192,8 +189,16 @@ export async function findAndMatch(params: {
 
   for (const docSnap of snapshot.docs) {
     const d = docSnap.data() as QueueEntry;
-    // Skip self and stale ghost users
-    if (d.uid && d.uid !== firebaseUid && d.userId !== params.userId) {
+    if (!d.uid) continue;
+
+    // Clean up dead ghost entries
+    if (d.updatedAt && d.updatedAt < ACTIVE_HEARTBEAT_THRESHOLD - 30000) {
+      deleteDoc(docSnap.ref).catch(() => {});
+      continue;
+    }
+
+    // Filter out self and inactive candidates
+    if (d.uid !== firebaseUid && d.userId !== params.userId) {
       if (d.updatedAt && d.updatedAt >= ACTIVE_HEARTBEAT_THRESHOLD) {
         candidates.push(d);
       }
@@ -311,7 +316,7 @@ export function listenToMyQueueEntry(
         data.status === 'matched' &&
         data.matchId &&
         data.partnerUid &&
-        (data.matchedAt ? data.matchedAt >= sessionStartedAt : true)
+        (data.matchedAt ? data.matchedAt >= sessionStartedAt - 5000 : true)
       ) {
         onMatched(data.matchId, data.partnerUid);
       }
