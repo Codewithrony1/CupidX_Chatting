@@ -7,11 +7,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
 import AppShell from '@/components/AppShell';
 import dynamic from 'next/dynamic';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Heart,
   Send,
-  Image as ImageIcon,
   Paperclip,
   CheckCheck,
   Flag,
@@ -19,16 +18,11 @@ import {
   FastForward,
   X,
   Sparkles,
-  Lock,
   Ban,
-  ArrowLeft,
   MoreVertical,
   Loader2,
   AlertCircle,
-  RefreshCw,
-  Check,
   ShieldCheck,
-  User,
   Radio,
   Eye,
 } from 'lucide-react';
@@ -38,6 +32,7 @@ import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
 import {
   ensureFirebaseAuth,
   joinQueue,
+  heartbeatQueue,
   leaveQueue,
   findAndMatch,
   listenToMyQueueEntry,
@@ -124,15 +119,16 @@ export default function KnotChatRandomPage() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
 
-  // Firestore listener cleanup refs
+  // Matchmaking control refs
   const queueListenerRef = useRef<(() => void) | null>(null);
   const matchListenerRef = useRef<(() => void) | null>(null);
   const messagesListenerRef = useRef<(() => void) | null>(null);
   const matchingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const matchStatusRef = useRef(matchStatus);
   const currentUidRef = useRef<string | null>(null);
+  const activeMatchIdRef = useRef<string | null>(null);
 
-  // Keep ref in sync with state
   useEffect(() => {
     matchStatusRef.current = matchStatus;
   }, [matchStatus]);
@@ -163,18 +159,24 @@ export default function KnotChatRandomPage() {
     };
   }, [socket]);
 
+  // ─── Cleanup helper ───────────────────────────────────────────────────────
+  const cleanupAllListeners = useCallback(() => {
+    queueListenerRef.current?.();
+    matchListenerRef.current?.();
+    messagesListenerRef.current?.();
+    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+    if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+  }, []);
+
   // ─── Cleanup on unmount ───────────────────────────────────────────────────
   useEffect(() => {
     return () => {
-      queueListenerRef.current?.();
-      matchListenerRef.current?.();
-      messagesListenerRef.current?.();
-      if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+      cleanupAllListeners();
       if (currentUidRef.current) {
         leaveQueue(currentUidRef.current).catch(() => {});
       }
     };
-  }, []);
+  }, [cleanupAllListeners]);
 
   // ─── Build partner object ─────────────────────────────────────────────────
   function buildPartner(matchDoc: MatchDoc, myUid: string): RandomPartner {
@@ -191,8 +193,28 @@ export default function KnotChatRandomPage() {
     };
   }
 
-  // ─── Attach Firestore message listener ────────────────────────────────────
-  function attachMessageListener(mid: string) {
+  // ─── Attach active match ──────────────────────────────────────────────────
+  const attachActiveMatch = useCallback((mid: string, myUid: string) => {
+    activeMatchIdRef.current = mid;
+    setMatchId(mid);
+
+    // Stop searching intervals immediately
+    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+    if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+
+    // 1. Listen to match status & partner details
+    matchListenerRef.current?.();
+    matchListenerRef.current = listenToMatch(mid, (matchDoc: MatchDoc) => {
+      if (matchDoc.status === 'ended') {
+        setMatchStatus('ended');
+        activeMatchIdRef.current = null;
+        return;
+      }
+      setPartner(buildPartner(matchDoc, myUid));
+      setMatchStatus('connected');
+    });
+
+    // 2. Listen to real-time messages
     messagesListenerRef.current?.();
     messagesListenerRef.current = listenToMessages(
       mid,
@@ -211,20 +233,7 @@ export default function KnotChatRandomPage() {
       },
       () => setReconnecting(true)
     );
-  }
-
-  // ─── Attach Firestore match listener ──────────────────────────────────────
-  function attachMatchListener(mid: string, myUid: string) {
-    matchListenerRef.current?.();
-    matchListenerRef.current = listenToMatch(mid, (matchDoc: MatchDoc) => {
-      if (matchDoc.status === 'ended') {
-        setMatchStatus('ended');
-        return;
-      }
-      setPartner(buildPartner(matchDoc, myUid));
-      setMatchStatus('connected');
-    });
-  }
+  }, []);
 
   // ─── START MATCHMAKING ────────────────────────────────────────────────────
   const handleStartMatch = useCallback(async () => {
@@ -236,15 +245,11 @@ export default function KnotChatRandomPage() {
     setMatchId(null);
     setSearchError(null);
     setReconnecting(false);
+    activeMatchIdRef.current = null;
 
-    // Cleanup previous listeners & intervals
-    queueListenerRef.current?.();
-    matchListenerRef.current?.();
-    messagesListenerRef.current?.();
-    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+    cleanupAllListeners();
 
     try {
-      // Ensure Firebase Auth is active
       const fbUid = (await ensureFirebaseAuth()) || user.firebaseUid || user.id;
       currentUidRef.current = fbUid;
 
@@ -253,7 +258,7 @@ export default function KnotChatRandomPage() {
         userId: user.id,
         username: user.username,
         displayName: user.displayName || user.fullName || user.username,
-        avatarUrl: user.profile?.avatarUrl || null,
+        avatarUrl: user.profile?.avatarUrl || '',
         avatarEmoji: user.profile?.avatarEmoji || '😊',
         gender: user.profile?.gender || 'unspecified',
         genderPref: user.profile?.preferredGender || 'auto',
@@ -261,51 +266,49 @@ export default function KnotChatRandomPage() {
         isVIP,
       };
 
-      // 1. Write queue entry to Firestore
-      await joinQueue(prefs);
+      // 1. Join queue with current session timestamp
+      const sessionStartedAt = await joinQueue(prefs);
 
-      // 2. Listen to own queue entry for incoming match
-      queueListenerRef.current = listenToMyQueueEntry(fbUid, (mid) => {
-        if (matchStatusRef.current !== 'searching') return;
-        setMatchId(mid);
-        if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-        attachMatchListener(mid, fbUid);
-        attachMessageListener(mid);
+      // 2. Heartbeat every 4 seconds to maintain active online presence
+      heartbeatIntervalRef.current = setInterval(() => {
+        if (matchStatusRef.current === 'searching') {
+          heartbeatQueue(fbUid);
+        }
+      }, 4000);
+
+      // 3. Listen to own queue doc for incoming matches
+      queueListenerRef.current = listenToMyQueueEntry(fbUid, sessionStartedAt, (mid) => {
+        if (activeMatchIdRef.current) return; // Already matched
+        attachActiveMatch(mid, fbUid);
       });
 
-      // 3. Try to match immediately
+      // 4. Attempt immediate scan
       const immediateMatchId = await findAndMatch(prefs);
       if (immediateMatchId) {
-        setMatchId(immediateMatchId);
-        if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-        attachMatchListener(immediateMatchId, fbUid);
-        attachMessageListener(immediateMatchId);
+        attachActiveMatch(immediateMatchId, fbUid);
         return;
       }
 
-      // 4. Poll continuously every 1.5 seconds while searching
+      // 5. Continuous match scanner every 2s while searching
       matchingIntervalRef.current = setInterval(async () => {
-        if (matchStatusRef.current !== 'searching') {
-          clearInterval(matchingIntervalRef.current!);
+        if (matchStatusRef.current !== 'searching' || activeMatchIdRef.current) {
+          if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
           return;
         }
         try {
           const mid = await findAndMatch(prefs);
           if (mid) {
-            setMatchId(mid);
-            if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-            attachMatchListener(mid, fbUid);
-            attachMessageListener(mid);
+            attachActiveMatch(mid, fbUid);
           }
         } catch (e) {
           console.warn('Match scan error:', e);
         }
-      }, 1500);
+      }, 2000);
     } catch (err: any) {
       console.error('Matchmaking error:', err);
       setSearchError(err?.message || 'Could not connect to matchmaking queue.');
     }
-  }, [user, isVIP]);
+  }, [user, isVIP, cleanupAllListeners, attachActiveMatch]);
 
   // ─── Auto-start on mount when user is ready ───────────────────────────────
   useEffect(() => {
@@ -322,10 +325,8 @@ export default function KnotChatRandomPage() {
 
   // ─── CANCEL SEARCH ────────────────────────────────────────────────────────
   const handleCancelSearch = async () => {
-    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-    queueListenerRef.current?.();
-    matchListenerRef.current?.();
-    messagesListenerRef.current?.();
+    cleanupAllListeners();
+    activeMatchIdRef.current = null;
 
     if (currentUidRef.current) {
       await leaveQueue(currentUidRef.current).catch(() => {});
@@ -337,14 +338,13 @@ export default function KnotChatRandomPage() {
   // ─── NEXT PARTNER ─────────────────────────────────────────────────────────
   const handleNextPartner = async () => {
     const fbUid = currentUidRef.current;
+    const currentMid = activeMatchIdRef.current || matchId;
 
-    if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-    queueListenerRef.current?.();
-    matchListenerRef.current?.();
-    messagesListenerRef.current?.();
+    cleanupAllListeners();
+    activeMatchIdRef.current = null;
 
-    if (fbUid && matchId) {
-      await cleanupSession(fbUid, matchId).catch(() => {});
+    if (fbUid && currentMid) {
+      await cleanupSession(fbUid, currentMid).catch(() => {});
     } else if (fbUid) {
       await leaveQueue(fbUid).catch(() => {});
     }
@@ -358,7 +358,8 @@ export default function KnotChatRandomPage() {
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if ((!inputText.trim() && !selectedImageFile) || matchStatus !== 'connected' || sendingMsg) return;
-    if (!matchId) return;
+    const activeMid = activeMatchIdRef.current || matchId;
+    if (!activeMid) return;
 
     const senderUid = currentUidRef.current || user?.firebaseUid || user?.id || 'me';
     const textToSend = inputText.trim();
@@ -387,7 +388,7 @@ export default function KnotChatRandomPage() {
 
     try {
       await sendFirestoreMessage(
-        matchId,
+        activeMid,
         senderUid,
         user?.username || 'user',
         textToSend,
@@ -471,7 +472,7 @@ export default function KnotChatRandomPage() {
         body: JSON.stringify({
           reportedUserId: partner.id,
           reason: reportReason,
-          chatSessionId: matchId,
+          chatSessionId: activeMatchIdRef.current || matchId,
         }),
       });
       if (res.ok) {

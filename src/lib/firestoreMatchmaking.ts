@@ -1,13 +1,11 @@
 /**
- * CupidX — Firebase Firestore Matchmaking & Realtime Chat
+ * CupidX — Bulletproof Firestore Matchmaking & Realtime Chat
  *
- * Replaces the broken Socket.IO + SQLite matchmaking that cannot run on Vercel.
- * Firestore is realtime, serverless-compatible, and supports atomic transactions.
- *
- * Collections:
- *   matchmaking/{uid}             — queue entry for each searching user
- *   matches/{matchId}             — active match between two users
- *   matches/{matchId}/messages/   — realtime messages subcollection
+ * Designed to prevent:
+ *  - Old match ghosts / instant disconnects
+ *  - Race conditions between simultaneous searchers
+ *  - Stale / closed browser matches
+ *  - Premature match cancellations
  */
 
 import { db, auth } from '@/lib/firebase';
@@ -31,11 +29,11 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface QueueEntry {
-  uid: string;          // User unique identifier (Firebase UID or DB user ID)
-  userId: string;       // Prisma DB user ID
+  uid: string;
+  userId: string;
   username: string;
   displayName: string;
-  avatarUrl: string | null;
+  avatarUrl: string;
   avatarEmoji: string;
   gender: string;
   genderPref: string;
@@ -44,8 +42,9 @@ export interface QueueEntry {
   status: 'searching' | 'matched';
   matchId?: string;
   partnerUid?: string;
-  createdAt: any;
-  updatedAt: any;
+  matchedAt?: number;
+  joinedAt: number;
+  updatedAt: number;
 }
 
 export interface MatchDoc {
@@ -58,8 +57,8 @@ export interface MatchDoc {
   user2Username: string;
   user1DisplayName: string;
   user2DisplayName: string;
-  user1AvatarUrl: string | null;
-  user2AvatarUrl: string | null;
+  user1AvatarUrl: string;
+  user2AvatarUrl: string;
   user1AvatarEmoji: string;
   user2AvatarEmoji: string;
   user1IsVIP: boolean;
@@ -67,8 +66,9 @@ export interface MatchDoc {
   user1Gender: string;
   user2Gender: string;
   status: 'active' | 'ended';
-  createdAt: any;
-  endedAt?: any;
+  createdAt: number;
+  endedAt?: number;
+  endedBy?: string;
 }
 
 export interface FirestoreMessage {
@@ -77,10 +77,10 @@ export interface FirestoreMessage {
   senderUsername: string;
   content: string;
   imageUrl: string | null;
-  createdAt: any;
+  createdAt: number;
 }
 
-// ─── Helper: Ensure Firebase Auth Is Active ───────────────────────────────────
+// ─── Ensure Firebase Auth ─────────────────────────────────────────────────────
 
 export async function ensureFirebaseAuth(): Promise<string> {
   if (auth.currentUser?.uid) {
@@ -90,15 +90,15 @@ export async function ensureFirebaseAuth(): Promise<string> {
     const cred = await signInAnonymously(auth);
     return cred.user.uid;
   } catch (e) {
-    console.warn('Firebase anonymous auth fallback error:', e);
-    return auth.currentUser?.uid || 'anonymous_user';
+    console.warn('Anonymous auth fallback error:', e);
+    return auth.currentUser?.uid || 'user_' + Math.random().toString(36).substr(2, 9);
   }
 }
 
 // ─── Queue Operations ─────────────────────────────────────────────────────────
 
 /**
- * Add current user to the matchmaking queue.
+ * Join the matchmaking queue. Clears any previous matchId or stale status.
  */
 export async function joinQueue(params: {
   firebaseUid: string;
@@ -111,46 +111,60 @@ export async function joinQueue(params: {
   genderPref?: string;
   mood?: string;
   isVIP?: boolean;
-}): Promise<void> {
+}): Promise<number> {
+  const now = Date.now();
   const entry: QueueEntry = {
     uid: params.firebaseUid,
-    userId: params.userId,
-    username: params.username,
-    displayName: params.displayName,
-    avatarUrl: params.avatarUrl || null,
+    userId: params.userId || params.firebaseUid,
+    username: params.username || 'user',
+    displayName: params.displayName || params.username || 'User',
+    avatarUrl: params.avatarUrl || '',
     avatarEmoji: params.avatarEmoji || '😊',
     gender: params.gender || 'unspecified',
     genderPref: params.genderPref || 'auto',
     mood: params.mood || '',
-    isVIP: params.isVIP || false,
+    isVIP: Boolean(params.isVIP),
     status: 'searching',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    matchId: '',
+    partnerUid: '',
+    matchedAt: 0,
+    joinedAt: now,
+    updatedAt: now,
   };
 
   await setDoc(doc(db, 'matchmaking', params.firebaseUid), entry);
+  return now;
 }
 
 /**
- * Remove user from the matchmaking queue.
+ * Keep the searching presence alive.
+ */
+export async function heartbeatQueue(firebaseUid: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'matchmaking', firebaseUid), {
+      updatedAt: Date.now(),
+      status: 'searching',
+    });
+  } catch {
+    // Document may have been converted to matched or deleted
+  }
+}
+
+/**
+ * Remove user from matchmaking queue.
  */
 export async function leaveQueue(firebaseUid: string): Promise<void> {
   try {
     await deleteDoc(doc(db, 'matchmaking', firebaseUid));
   } catch {
-    // Ignore if already removed
+    // Ignore
   }
 }
 
 // ─── Match Finding ────────────────────────────────────────────────────────────
 
 /**
- * Atomically find a compatible partner and create a match.
- * Returns the matchId if successful, null if no partner found.
- *
- * Uses Firestore transactions to prevent race conditions.
- * NOTE: We do NOT use composite orderBy to avoid requiring custom indexes.
- * In-memory sorting is performed in JavaScript.
+ * Scan for active searching candidates and atomically pair.
  */
 export async function findAndMatch(params: {
   firebaseUid: string;
@@ -164,41 +178,44 @@ export async function findAndMatch(params: {
   isVIP?: boolean;
 }): Promise<string | null> {
   const { firebaseUid, genderPref = 'auto', isVIP = false } = params;
+  const now = Date.now();
+  const ACTIVE_HEARTBEAT_THRESHOLD = now - 25000; // Must be active in the last 25s
 
-  // Single-field query (no composite index required)
   const q = query(
     collection(db, 'matchmaking'),
     where('status', '==', 'searching'),
-    limit(30)
+    limit(25)
   );
 
   const snapshot = await getDocs(q);
-  let candidates = snapshot.docs
-    .map((d) => d.data() as QueueEntry)
-    .filter((c) => c.uid && c.uid !== firebaseUid);
+  const candidates: QueueEntry[] = [];
 
-  // In-memory sort by createdAt (earliest first)
-  candidates.sort((a, b) => {
-    const aTime = a.createdAt?.seconds || 0;
-    const bTime = b.createdAt?.seconds || 0;
-    return aTime - bTime;
-  });
+  for (const docSnap of snapshot.docs) {
+    const d = docSnap.data() as QueueEntry;
+    // Skip self and stale ghost users
+    if (d.uid && d.uid !== firebaseUid && d.userId !== params.userId) {
+      if (d.updatedAt && d.updatedAt >= ACTIVE_HEARTBEAT_THRESHOLD) {
+        candidates.push(d);
+      }
+    }
+  }
+
+  // Sort earliest joined first
+  candidates.sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
 
   for (const candidate of candidates) {
-    // Gender preference filter (VIP-only feature)
+    // Gender filters
     if (isVIP && genderPref !== 'auto' && genderPref !== 'any') {
       if (candidate.gender !== genderPref) continue;
     }
-    // Respect candidate's VIP gender preference
     if (candidate.isVIP && candidate.genderPref !== 'auto' && candidate.genderPref !== 'any') {
       if (candidate.genderPref !== (params.gender || 'unspecified')) continue;
     }
 
-    // Attempt atomic match
     const matchId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
     try {
-      await runTransaction(db, async (tx) => {
+      const success = await runTransaction(db, async (tx) => {
         const candidateRef = doc(db, 'matchmaking', candidate.uid);
         const selfRef = doc(db, 'matchmaking', firebaseUid);
 
@@ -207,75 +224,81 @@ export async function findAndMatch(params: {
           tx.get(selfRef),
         ]);
 
-        // Both must still be searching
         if (!candidateSnap.exists() || candidateSnap.data()?.status !== 'searching') {
-          throw Object.assign(new Error('CANDIDATE_TAKEN'), { code: 'CANDIDATE_TAKEN' });
+          return false;
         }
         if (!selfSnap.exists() || selfSnap.data()?.status !== 'searching') {
-          throw Object.assign(new Error('SELF_TAKEN'), { code: 'SELF_TAKEN' });
+          return false;
         }
 
         const selfData = selfSnap.data() as QueueEntry;
+        const matchNow = Date.now();
 
-        // Create the match document
+        // 1. Create active match document
         const matchRef = doc(db, 'matches', matchId);
-        tx.set(matchRef, {
+        const matchData: MatchDoc = {
           matchId,
           user1Uid: firebaseUid,
           user2Uid: candidate.uid,
           user1DbId: selfData.userId || firebaseUid,
           user2DbId: candidate.userId || candidate.uid,
-          user1Username: selfData.username,
-          user2Username: candidate.username,
-          user1DisplayName: selfData.displayName,
-          user2DisplayName: candidate.displayName,
-          user1AvatarUrl: selfData.avatarUrl,
-          user2AvatarUrl: candidate.avatarUrl,
-          user1AvatarEmoji: selfData.avatarEmoji,
-          user2AvatarEmoji: candidate.avatarEmoji,
-          user1IsVIP: selfData.isVIP,
-          user2IsVIP: candidate.isVIP,
-          user1Gender: selfData.gender,
-          user2Gender: candidate.gender,
+          user1Username: selfData.username || 'user',
+          user2Username: candidate.username || 'user',
+          user1DisplayName: selfData.displayName || selfData.username || 'User',
+          user2DisplayName: candidate.displayName || candidate.username || 'User',
+          user1AvatarUrl: selfData.avatarUrl || '',
+          user2AvatarUrl: candidate.avatarUrl || '',
+          user1AvatarEmoji: selfData.avatarEmoji || '😊',
+          user2AvatarEmoji: candidate.avatarEmoji || '😊',
+          user1IsVIP: Boolean(selfData.isVIP),
+          user2IsVIP: Boolean(candidate.isVIP),
+          user1Gender: selfData.gender || 'unspecified',
+          user2Gender: candidate.gender || 'unspecified',
           status: 'active',
-          createdAt: serverTimestamp(),
-        } as Omit<MatchDoc, 'endedAt'>);
+          createdAt: matchNow,
+        };
+        tx.set(matchRef, matchData);
 
-        // Mark both users as matched
+        // 2. Mark candidate as matched
         tx.update(candidateRef, {
           status: 'matched',
           matchId,
           partnerUid: firebaseUid,
-          updatedAt: serverTimestamp(),
+          matchedAt: matchNow,
+          updatedAt: matchNow,
         });
+
+        // 3. Mark self as matched
         tx.update(selfRef, {
           status: 'matched',
           matchId,
           partnerUid: candidate.uid,
-          updatedAt: serverTimestamp(),
+          matchedAt: matchNow,
+          updatedAt: matchNow,
         });
+
+        return true;
       });
 
-      return matchId; // Match created successfully
-    } catch (err: any) {
-      if (err.code === 'CANDIDATE_TAKEN' || err.code === 'SELF_TAKEN') {
-        continue; // Try next candidate
+      if (success) {
+        return matchId;
       }
-      console.warn('Match transaction error:', err);
+    } catch (err) {
+      console.warn('Match transaction attempt error:', err);
     }
   }
 
-  return null; // No compatible partner found yet
+  return null;
 }
 
 // ─── Real-time Listeners ──────────────────────────────────────────────────────
 
 /**
- * Listen to own queue entry. Fires when another user matches us.
- * Returns an unsubscribe function.
+ * Listen to own queue doc. Only fires for matches created after sessionStartedAt.
  */
 export function listenToMyQueueEntry(
   firebaseUid: string,
+  sessionStartedAt: number,
   onMatched: (matchId: string, partnerUid: string) => void,
   onError?: (e: Error) => void
 ): () => void {
@@ -284,7 +307,12 @@ export function listenToMyQueueEntry(
     (snap) => {
       if (!snap.exists()) return;
       const data = snap.data() as QueueEntry;
-      if (data.status === 'matched' && data.matchId && data.partnerUid) {
+      if (
+        data.status === 'matched' &&
+        data.matchId &&
+        data.partnerUid &&
+        (data.matchedAt ? data.matchedAt >= sessionStartedAt : true)
+      ) {
         onMatched(data.matchId, data.partnerUid);
       }
     },
@@ -293,8 +321,7 @@ export function listenToMyQueueEntry(
 }
 
 /**
- * Listen to a match document (status, partner info).
- * Returns an unsubscribe function.
+ * Listen to active match document.
  */
 export function listenToMatch(
   matchId: string,
@@ -304,15 +331,16 @@ export function listenToMatch(
   return onSnapshot(
     doc(db, 'matches', matchId),
     (snap) => {
-      if (snap.exists()) onUpdate(snap.data() as MatchDoc);
+      if (snap.exists()) {
+        onUpdate(snap.data() as MatchDoc);
+      }
     },
     onError
   );
 }
 
 /**
- * Listen to messages in a match (real-time).
- * Returns an unsubscribe function.
+ * Listen to messages in a match.
  */
 export function listenToMessages(
   matchId: string,
@@ -332,13 +360,7 @@ export function listenToMessages(
         ...(d.data() as Omit<FirestoreMessage, 'id'>),
       }));
 
-      // In-memory sort by createdAt
-      msgs.sort((a, b) => {
-        const aT = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
-        const bT = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
-        return aT - bT;
-      });
-
+      msgs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
       onMessages(msgs);
     },
     onError
@@ -347,9 +369,6 @@ export function listenToMessages(
 
 // ─── Messaging ────────────────────────────────────────────────────────────────
 
-/**
- * Send a message in a match.
- */
 export async function sendFirestoreMessage(
   matchId: string,
   senderUid: string,
@@ -362,47 +381,39 @@ export async function sendFirestoreMessage(
     senderUsername,
     content: content || '',
     imageUrl: imageUrl || null,
-    createdAt: serverTimestamp(),
+    createdAt: Date.now(),
   });
 }
 
 // ─── Match Lifecycle ──────────────────────────────────────────────────────────
 
-/**
- * End the current match. Marks it as ended in Firestore
- * so the other user's listener fires and shows "disconnected".
- */
-export async function endMatch(matchId: string): Promise<void> {
+export async function endMatch(matchId: string, endedByUid?: string): Promise<void> {
   try {
     await updateDoc(doc(db, 'matches', matchId), {
       status: 'ended',
-      endedAt: serverTimestamp(),
+      endedAt: Date.now(),
+      endedBy: endedByUid || '',
     });
   } catch {
-    // Match might already be ended
+    // Ignore if already deleted/ended
   }
 }
 
-/**
- * Full cleanup: end match + leave queue.
- */
 export async function cleanupSession(
   firebaseUid: string,
   matchId: string | null
 ): Promise<void> {
   await Promise.allSettled([
-    matchId ? endMatch(matchId) : Promise.resolve(),
+    matchId ? endMatch(matchId, firebaseUid) : Promise.resolve(),
     leaveQueue(firebaseUid),
   ]);
 }
 
-/**
- * Resolve Firestore Timestamp or ISO string to a display string.
- */
 export function resolveTimestamp(ts: any): string {
   if (!ts) return new Date().toISOString();
+  if (typeof ts === 'number') return new Date(ts).toISOString();
   if (typeof ts === 'string') return ts;
   if (ts instanceof Date) return ts.toISOString();
-  if (ts?.toDate) return ts.toDate().toISOString(); // Firestore Timestamp
+  if (ts?.toDate) return ts.toDate().toISOString();
   return new Date().toISOString();
 }
