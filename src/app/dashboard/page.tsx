@@ -60,11 +60,11 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    console.log('[AUTH-12] Dashboard mounted');
-    console.log('[AUTH-13] Dashboard auth check: loading =', loading, 'user =', user?.username || 'null');
-    if (!loading && user) {
-      console.log('[AUTH-14] Dashboard auth check completed for user:', user.username);
-    }
+    console.log('[CUPIDX AUTH 8] dashboard mounted');
+    console.log('[CUPIDX AUTH 9] dashboard auth state', {
+      user: user?.uid,
+      loading,
+    });
   }, [loading, user]);
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');

@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Track initialization to guarantee execution happens ONCE per user
+  // Track initialization to guarantee execution happens ONCE per user session
   const currentInitUidRef = useRef<string | null>(null);
   const isNavigatingRef = useRef<boolean>(false);
 
@@ -49,9 +49,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * Helper to check if a user has completed the mandatory onboarding profile
    */
   const checkProfileCompletion = (u: User | null): boolean => {
-    console.log('[AUTH-08] Onboarding check started for:', u?.username || 'null');
     if (!u) {
-      console.log('[AUTH-09] Onboarding check completed: isComplete = false (no user)');
+      console.log('[CUPIDX AUTH 6] profileCompleted: false (no user)');
       return false;
     }
     const isComp = Boolean(
@@ -59,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       (u.dateOfBirth && u.gender && u.gender !== 'unspecified') ||
       (u.profile?.dateOfBirth && u.profile?.gender && u.profile?.gender !== 'unspecified')
     );
-    console.log('[AUTH-09] Onboarding check completed: isComplete =', isComp, 'for UID:', u.uid);
+    console.log('[CUPIDX AUTH 6] profileCompleted', isComp);
     return isComp;
   };
 
@@ -80,12 +79,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     currentInitUidRef.current = fbUser.uid;
 
-    console.log('[AUTH-04] Profile request started for UID:', fbUser.uid);
-    console.log('[AUTH-06] Profile initialization started');
+    console.log('[CUPIDX AUTH 4] profile load START', fbUser.uid);
     try {
       const firestoreProfile = await getOrCreateFirestoreUser(fbUser);
-      console.log('[AUTH-05] Profile request completed. Username:', firestoreProfile.username);
-      console.log('[AUTH-07] Profile initialization completed. profileCompleted:', firestoreProfile.profileCompleted);
+      console.log('[CUPIDX AUTH 5] profile load END');
       
       setUser(firestoreProfile);
 
@@ -98,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return firestoreProfile;
     } catch (err) {
-      console.error('[AUTH-ERROR] Profile initialization error:', err);
+      console.error('[CUPIDX AUTH ERROR] profile load failed:', err);
       return null;
     }
   };
@@ -113,10 +110,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── Firebase Auth State Listener (Single Source of Truth) ───────────────────
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      console.log('[AUTH-03] Auth state changed. UID:', fbUser?.uid || 'null');
+      console.log('[CUPIDX AUTH 3] onAuthStateChanged', fbUser?.uid || 'null');
       setFirebaseUser(fbUser);
       if (fbUser) {
-        console.log('[AUTH-02] Firebase UID received:', fbUser.uid);
+        console.log('[CUPIDX AUTH 2] Firebase login success', fbUser.uid);
         await initializeUserSession(fbUser);
       } else {
         setUser(null);
@@ -141,9 +138,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated && !isPublic && pathname !== '/onboarding') {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
-      console.log('[AUTH-REDIRECT] Unauthenticated user accessing private route:', pathname, '-> redirecting to /login');
+      console.log('[CUPIDX ROUTE GUARD] Unauthenticated user on private route:', pathname, '-> redirecting to /login');
       router.replace('/login');
-      setTimeout(() => { isNavigatingRef.current = false; }, 500);
+      setTimeout(() => { isNavigatingRef.current = false; }, 600);
       return;
     }
 
@@ -156,10 +153,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
         const target = isComplete ? '/dashboard' : '/onboarding';
-        console.log('[AUTH-10] Dashboard redirect started -> Target:', target);
+        console.log('[CUPIDX AUTH 7] redirecting to', target);
         router.replace(target);
-        console.log('[AUTH-11] Dashboard redirect completed');
-        setTimeout(() => { isNavigatingRef.current = false; }, 500);
+        setTimeout(() => { isNavigatingRef.current = false; }, 600);
         return;
       }
 
@@ -167,10 +163,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (pathname === '/onboarding' && isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        console.log('[AUTH-10] Dashboard redirect started (user already completed onboarding)');
+        console.log('[CUPIDX AUTH 7] redirecting to dashboard');
         router.replace('/dashboard');
-        console.log('[AUTH-11] Dashboard redirect completed');
-        setTimeout(() => { isNavigatingRef.current = false; }, 500);
+        setTimeout(() => { isNavigatingRef.current = false; }, 600);
         return;
       }
 
@@ -178,9 +173,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!isPublic && pathname !== '/onboarding' && !isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        console.log('[AUTH-REDIRECT] Incomplete profile on protected route -> redirecting to /onboarding');
+        console.log('[CUPIDX ROUTE GUARD] Incomplete profile on protected route -> redirecting to /onboarding');
         router.replace('/onboarding');
-        setTimeout(() => { isNavigatingRef.current = false; }, 500);
+        setTimeout(() => { isNavigatingRef.current = false; }, 600);
         return;
       }
     }
@@ -189,11 +184,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── 1. Google 1-Click Sign-in ────────────────────────────────────────────────
   const loginWithGoogle = async () => {
     setLoading(true);
-    console.log('[AUTH-01] Google authentication started');
+    console.log('[CUPIDX AUTH 1] Google login started');
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      console.log('[AUTH-01] Google authentication successful');
-      console.log('[AUTH-02] Firebase UID received:', result.user?.uid);
+      console.log('[CUPIDX AUTH 2] Firebase login success', result.user?.uid);
 
       if (result.user) {
         setFirebaseUser(result.user);
@@ -203,14 +197,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (profile) {
           const isComplete = checkProfileCompletion(profile);
           const target = isComplete ? '/dashboard' : '/onboarding';
-          console.log('[AUTH-10] Dashboard redirect started -> Target:', target);
+          console.log('[CUPIDX AUTH 7] redirecting to', target);
           router.replace(target);
-          console.log('[AUTH-11] Dashboard redirect completed');
         }
       }
     } catch (err: any) {
       setLoading(false);
-      console.error('[AUTH-ERROR] Google sign-in failed:', err?.code, err?.message);
+      console.error('[CUPIDX AUTH ERROR] Google sign-in failed:', err?.code, err?.message);
       throw err;
     }
   };
