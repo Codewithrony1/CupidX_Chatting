@@ -21,7 +21,8 @@ import {
   User,
   Settings,
   X,
-  Check
+  Check,
+  Radio,
 } from 'lucide-react';
 
 interface SearchUser {
@@ -282,26 +283,98 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Main CTA: Random Chat Matchmaking */}
-          <div className="glass-romantic rounded-3xl p-6 space-y-4 border border-pink-500/30 text-center relative overflow-hidden">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-600 via-rose-500 to-fuchsia-500 flex items-center justify-center mx-auto shadow-lg shadow-pink-500/30">
-              <Heart className="w-6 h-6 text-white fill-white animate-bounce" />
+          {/* ── HERO: Knot/Omegle Style Random Chat CTA ── */}
+          <div className="relative rounded-3xl overflow-hidden border border-pink-500/30 shadow-2xl shadow-pink-900/40">
+            {/* Background animated gradient */}
+            <div className="absolute inset-0 bg-gradient-to-br from-[#1a0030] via-[#2d0050] to-[#0d0014]" />
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(236,72,153,0.18)_0%,transparent_70%)]" />
+
+            {/* Radar pulse rings */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-48 h-48 rounded-full border border-pink-500/10 animate-ping" style={{ animationDuration: '2s' }} />
+              <div className="absolute w-64 h-64 rounded-full border border-fuchsia-500/8 animate-ping" style={{ animationDuration: '2.8s', animationDelay: '0.5s' }} />
+              <div className="absolute w-80 h-80 rounded-full border border-rose-500/6 animate-ping" style={{ animationDuration: '3.5s', animationDelay: '1s' }} />
             </div>
 
-            <div>
-              <h2 className="text-xl font-black text-white">✨ Instant Random Chat</h2>
-              <p className="text-xs text-pink-200/70 mt-1 max-w-xs mx-auto">
-                Match instantly with random users. Press NEXT at any time to delete the conversation.
-              </p>
-            </div>
+            <div className="relative z-10 p-7 flex flex-col items-center text-center space-y-5">
+              {/* Live badge */}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-pink-500/20 backdrop-blur-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse" />
+                <span className="text-[11px] font-bold text-emerald-300 tracking-wide uppercase">Live Now — Chat Instantly</span>
+              </div>
 
-            <Link
-              href="/chat/random"
-              className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white shadow-xl shadow-pink-500/40 hover:scale-102 active:scale-95 transition-all text-base flex items-center justify-center space-x-2 border border-pink-400/40 cursor-pointer block"
-            >
-              <span>START RANDOM CHAT ✨</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
+              {/* Icon */}
+              <div className="relative">
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-pink-600 via-rose-500 to-fuchsia-500 flex items-center justify-center shadow-2xl shadow-pink-500/50">
+                  <Heart className="w-10 h-10 text-white fill-white" />
+                </div>
+                <div className="absolute -inset-1 rounded-3xl bg-gradient-to-tr from-pink-500 to-fuchsia-500 opacity-30 blur-lg animate-pulse" />
+              </div>
+
+              {/* Heading */}
+              <div className="space-y-1.5">
+                <h2 className="text-3xl font-black text-white tracking-tight leading-tight">
+                  Random Chat
+                </h2>
+                <p className="text-sm text-pink-200/70 max-w-[260px] mx-auto leading-relaxed">
+                  Connect instantly with strangers online. Press <span className="text-pink-300 font-bold">NEXT</span> anytime to skip.
+                </p>
+              </div>
+
+              {/* Gender quick filter pills */}
+              <div className="flex items-center gap-2 flex-wrap justify-center">
+                {[
+                  { label: '🌍 Anyone', val: 'auto' },
+                  { label: '👩 Girls', val: 'female', vip: true },
+                  { label: '👦 Boys', val: 'male', vip: true },
+                ].map(({ label, val, vip }) => {
+                  const active = preferredGender === val;
+                  const locked = vip && !isVIP;
+                  return (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => {
+                        if (locked) {
+                          alert('🔒 Gender targeting is a VIP feature! Upgrade to VIP.');
+                          return;
+                        }
+                        handleSavePreferences(val, language);
+                      }}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        active
+                          ? 'bg-pink-500 border-pink-400 text-white shadow-lg shadow-pink-500/30'
+                          : locked
+                          ? 'bg-white/5 border-yellow-500/30 text-yellow-300/70'
+                          : 'bg-white/5 border-white/10 text-pink-200/80 hover:bg-white/10 hover:border-pink-500/30'
+                      }`}
+                    >
+                      {label}
+                      {locked && <Lock className="w-3 h-3 text-yellow-400" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Big START button */}
+              <Link
+                href="/chat/random"
+                className="w-full py-4 rounded-2xl font-black text-lg tracking-wide bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white shadow-2xl shadow-pink-600/50 active:scale-95 transition-all flex items-center justify-center gap-3 border border-pink-400/40 cursor-pointer"
+              >
+                <Radio className="w-5 h-5 animate-pulse" />
+                <span>START CHATTING</span>
+                <ArrowRight className="w-5 h-5" />
+              </Link>
+
+              {/* Stats row */}
+              <div className="flex items-center gap-4 text-[11px] text-pink-300/50 font-medium pt-1">
+                <span className="flex items-center gap-1"><Shield className="w-3 h-3" /> Anonymous</span>
+                <span className="text-pink-500/30">•</span>
+                <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> Instant Match</span>
+                <span className="text-pink-500/30">•</span>
+                <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" /> Free</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -341,56 +414,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 9. VIP DISCOVERY & MATCHING PREFERENCES */}
-        <div className="glass-romantic rounded-3xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Zap className="w-4 h-4 text-yellow-400" />
-              <span>Target Match Preferences</span>
-            </h3>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[11px] text-pink-200/70 font-semibold">Who would you like to connect with?</label>
-                {!isVIP && (
-                  <span className="text-[10px] text-yellow-400 font-extrabold flex items-center gap-1">
-                    <Lock className="w-3 h-3" /> VIP Feature
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {['auto', 'female', 'male', 'any'].map((g) => {
-                  const isLocked = g !== 'auto' && !isVIP;
-                  return (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => {
-                        if (isLocked) {
-                          alert('🔒 Gender targeting is an exclusive VIP feature! Upgrade to VIP to select target gender preference.');
-                          return;
-                        }
-                        handleSavePreferences(g, language);
-                      }}
-                      className={`py-2 px-1 rounded-xl text-[11px] font-bold capitalize transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                        preferredGender === g
-                          ? 'bg-pink-500 text-white shadow-md'
-                          : isLocked
-                          ? 'bg-white/5 text-pink-200/40 border border-white/5 hover:border-yellow-500/40'
-                          : 'bg-white/5 text-pink-200/70 border border-white/10 hover:bg-white/10'
-                      }`}
-                    >
-                      {g === 'auto' ? 'Anyone' : g}
-                      {isLocked && <Lock className="w-2.5 h-2.5 text-yellow-400" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* User Profile Personalization Summary */}
         <div className="glass-romantic rounded-3xl p-5 space-y-4 border border-pink-500/20">

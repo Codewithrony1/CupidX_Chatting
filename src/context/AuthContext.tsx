@@ -138,12 +138,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
-        await syncUserWithBackend(result.user);
-        router.push('/dashboard');
+        const syncedUser = await syncUserWithBackend(result.user);
+        // Redirect to dashboard regardless — onAuthStateChanged will re-sync
+        // If backend returned user go to dashboard, else onboarding
+        if (syncedUser) {
+          router.push('/dashboard');
+        } else {
+          // Firebase auth succeeded but backend sync failed (e.g. env var missing)
+          // Still push to dashboard — onAuthStateChanged will retry sync
+          router.push('/dashboard');
+        }
       }
-    } finally {
+    } catch (err) {
       setLoading(false);
+      throw err; // Re-throw so login page can show the error
     }
+    setLoading(false);
   };
 
   // 2. Email / Password Sign-in
@@ -155,9 +165,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await syncUserWithBackend(result.user);
         router.push('/dashboard');
       }
-    } finally {
+    } catch (err) {
       setLoading(false);
+      throw err; // Re-throw so login page can show the error
     }
+    setLoading(false);
   };
 
   // 3. Email / Password Sign-up
@@ -169,9 +181,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await syncUserWithBackend(result.user);
         router.push('/dashboard');
       }
-    } finally {
+    } catch (err) {
       setLoading(false);
+      throw err; // Re-throw so login page can show the error
     }
+    setLoading(false);
   };
 
   // 4. Logout
