@@ -63,7 +63,7 @@ const PERSONALITY_OPTIONS = [
 ];
 
 export default function ProfilePage() {
-  const { user, firebaseUser, refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const router = useRouter();
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
@@ -191,7 +191,7 @@ export default function ProfilePage() {
     setSaving(true);
     setSaveSuccess(false);
 
-    const uid = firebaseUser?.uid || user?.id;
+    const uid = user?.id || user?.uid;
 
     try {
       // 1. Save to Cloud Firestore

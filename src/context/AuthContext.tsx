@@ -16,10 +16,10 @@ export type User = UserProfile;
 interface AuthContextType {
   user: User | null;
   clerkUser: any | null;
-  firebaseUser: any | null; // Compatibility alias
   loading: boolean;
   isAuthenticated: boolean;
   loginWithGoogle: () => Promise<void>;
+  signUpWithGoogle: () => Promise<void>;
   loginWithEmail: (emailOrUsername: string, pass: string) => Promise<void>;
   signUpWithEmail: (emailOrUsername: string, pass: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -40,17 +40,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Protect against duplicate initialization per user session
   const currentInitUidRef = useRef<string | null>(null);
   const isNavigatingRef = useRef<boolean>(false);
-
-  /**
-   * Safe, atomic browser navigation
-   */
-  const hardNavigate = (target: string) => {
-    if (typeof window !== 'undefined') {
-      window.location.replace(target);
-    } else {
-      router.replace(target);
-    }
-  };
 
   /**
    * Evaluates if the user profile has completed first-time onboarding
@@ -132,7 +121,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isLoaded || loading) return;
 
-    const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback', '/forgot-password'];
+    const publicPaths = [
+      '/',
+      '/login',
+      '/register',
+      '/signup',
+      '/privacy',
+      '/terms',
+      '/safety',
+      '/community-guidelines',
+      '/sso-callback',
+      '/forgot-password',
+    ];
     const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
     const isAuthed = Boolean(isSignedIn && clerkUser);
@@ -142,12 +142,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
       console.log('[AUTH GUARD] Unauthenticated user -> redirecting to /login');
-      hardNavigate('/login');
+      router.replace('/login');
       setTimeout(() => { isNavigatingRef.current = false; }, 500);
       return;
     }
 
-    // Authenticated user on auth pages (/login, /signup)
+    // Authenticated user on auth pages (/login, /signup, /register)
     if (isAuthed && user) {
       const isComplete = checkProfileCompletion(user);
 
@@ -156,7 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isNavigatingRef.current = true;
         const target = isComplete ? '/dashboard' : '/onboarding';
         console.log('[AUTH GUARD] Authenticated user on auth page -> redirecting to:', target);
-        hardNavigate(target);
+        router.replace(target);
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
@@ -165,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (pathname === '/onboarding' && isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        hardNavigate('/dashboard');
+        router.replace('/dashboard');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
@@ -174,32 +174,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!isPublic && pathname !== '/onboarding' && !isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        hardNavigate('/onboarding');
+        router.replace('/onboarding');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
     }
-  }, [isLoaded, loading, isSignedIn, clerkUser, user, pathname]);
+  }, [isLoaded, loading, isSignedIn, clerkUser, user, pathname, router]);
 
   // ─── 3. Google 1-Click Sign-in via Clerk ────────────────────────────────────
   const loginWithGoogle = async () => {
     if (!clerk) return;
     console.log('[AUTH] Clerk Google login initiated');
     try {
+      const client = (clerk as any).client;
+      if (client?.signIn) {
+        await client.signIn.authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: '/sso-callback',
+          redirectUrlComplete: '/dashboard',
+        });
+        return;
+      }
       clerk.openSignIn({
         fallbackRedirectUrl: '/dashboard',
         signUpFallbackRedirectUrl: '/onboarding',
       });
     } catch (err: any) {
-      console.error('[AUTH] Clerk Google login error:', err);
-      throw new Error(err?.message || 'Unable to open Google sign in. Please try again.');
+      console.warn('[AUTH] Direct Google OAuth redirect notice:', err);
+      clerk.openSignIn({
+        fallbackRedirectUrl: '/dashboard',
+        signUpFallbackRedirectUrl: '/onboarding',
+      });
+    }
+  };
+
+  const signUpWithGoogle = async () => {
+    if (!clerk) return;
+    console.log('[AUTH] Clerk Google signup initiated');
+    try {
+      const client = (clerk as any).client;
+      if (client?.signUp) {
+        await client.signUp.authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: '/sso-callback',
+          redirectUrlComplete: '/onboarding',
+        });
+        return;
+      }
+      clerk.openSignUp({
+        fallbackRedirectUrl: '/onboarding',
+      });
+    } catch (err: any) {
+      console.warn('[AUTH] Direct Google OAuth signup notice:', err);
+      clerk.openSignUp({
+        fallbackRedirectUrl: '/onboarding',
+      });
     }
   };
 
   // ─── 4. Email / Password Login via Clerk ────────────────────────────────────
   const loginWithEmail = async (emailOrUsername: string, pass: string) => {
-    if (!clerk) throw new Error('Authentication is loading, please try again.');
-    try {
+    if (!clerk) {
+      throw new Error('Sign-in service is initializing. Please try again.');
+    }
+    const client = (clerk as any).client;
+    if (!client?.signIn) {
       clerk.openSignIn({
         fallbackRedirectUrl: '/dashboard',
         signUpFallbackRedirectUrl: '/onboarding',
@@ -207,16 +246,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
         },
       });
+      return;
+    }
+
+    try {
+      const result = await client.signIn.create({
+        identifier: emailOrUsername.trim(),
+        password: pass,
+      });
+
+      if (result.status === 'complete') {
+        await clerk.setActive({ session: result.createdSessionId });
+        router.replace('/dashboard');
+      } else {
+        console.warn('[AUTH] Incomplete sign-in status:', result.status);
+        clerk.openSignIn({
+          fallbackRedirectUrl: '/dashboard',
+          signUpFallbackRedirectUrl: '/onboarding',
+          initialValues: {
+            emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
+          },
+        });
+      }
     } catch (err: any) {
       console.error('[AUTH] Clerk login error:', err);
-      throw new Error(err?.message || 'Invalid email or password.');
+      const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Invalid email or password.';
+      throw new Error(msg);
     }
   };
 
   // ─── 5. Email / Password Signup via Clerk ───────────────────────────────────
   const signUpWithEmail = async (emailOrUsername: string, pass: string, name?: string) => {
-    if (!clerk) throw new Error('Authentication is loading, please try again.');
-    try {
+    if (!clerk) {
+      throw new Error('Sign-up service is initializing. Please try again.');
+    }
+    const client = (clerk as any).client;
+    if (!client?.signUp) {
       clerk.openSignUp({
         fallbackRedirectUrl: '/onboarding',
         initialValues: {
@@ -224,9 +289,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           firstName: name || undefined,
         },
       });
+      return;
+    }
+
+    try {
+      const isEmail = emailOrUsername.includes('@');
+      const result = await client.signUp.create({
+        emailAddress: isEmail ? emailOrUsername.trim() : undefined,
+        username: !isEmail ? emailOrUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') : undefined,
+        password: pass,
+        firstName: name || undefined,
+      });
+
+      if (result.status === 'complete') {
+        await clerk.setActive({ session: result.createdSessionId });
+        router.replace('/onboarding');
+      } else {
+        console.warn('[AUTH] Sign-up requires additional verification:', result.status);
+        clerk.openSignUp({
+          fallbackRedirectUrl: '/onboarding',
+          initialValues: {
+            emailAddress: isEmail ? emailOrUsername.trim() : undefined,
+            firstName: name || undefined,
+          },
+        });
+      }
     } catch (err: any) {
       console.error('[AUTH] Clerk signup error:', err);
-      throw new Error(err?.message || 'Could not complete registration.');
+      const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Could not complete registration.';
+      throw new Error(msg);
     }
   };
 
@@ -241,16 +332,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         document.cookie = 'token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;';
       }
 
+      setUser(null);
+      currentInitUidRef.current = null;
+
       if (clerk) {
-        await clerk.signOut(() => {
-          hardNavigate('/login');
-        });
-      } else {
-        hardNavigate('/login');
+        await clerk.signOut();
       }
+      router.replace('/login');
     } catch (e) {
       console.error('[AUTH] Logout error:', e);
-      hardNavigate('/login');
+      router.replace('/login');
     }
   };
 
@@ -261,10 +352,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         clerkUser,
-        firebaseUser: clerkUser ? { uid: clerkUser.id, displayName: clerkUser.fullName || clerkUser.username, email: clerkUser.primaryEmailAddress?.emailAddress, photoURL: clerkUser.imageUrl } : null,
         loading: !isLoaded || loading,
         isAuthenticated,
         loginWithGoogle,
+        signUpWithGoogle,
         loginWithEmail,
         signUpWithEmail,
         logout,

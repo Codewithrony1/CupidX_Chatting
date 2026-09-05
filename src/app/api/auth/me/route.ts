@@ -1,104 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, signToken } from '@/lib/auth';
-import { verifyFirebaseIdToken } from '@/lib/firebaseAdmin';
-import { prisma } from '@/lib/prisma';
-
-function decodeJwtFallback(token: string): { uid: string; email?: string; name?: string; picture?: string } | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-    if (payload && (payload.user_id || payload.sub)) {
-      return {
-        uid: payload.user_id || payload.sub,
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 export async function GET(req: Request) {
   try {
-    let user: any = await getCurrentUser(req);
-
-    // If not found via cookie, check Authorization header (Firebase ID token)
-    if (!user) {
-      const authHeader = req.headers.get('authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const idToken = authHeader.substring(7);
-        let decoded: any = await verifyFirebaseIdToken(idToken);
-        if (!decoded) {
-          decoded = decodeJwtFallback(idToken);
-        }
-
-        if (decoded && decoded.uid) {
-          user = await prisma.user.findFirst({
-            where: {
-              OR: [
-                { firebaseUid: decoded.uid },
-                ...(decoded.email ? [{ email: decoded.email }] : []),
-              ],
-            },
-            include: { profile: true, subscription: true },
-          });
-
-          // Auto-provision user if first time logging in
-          if (!user) {
-            const email = decoded.email || '';
-            const rawName = decoded.name || (email ? email.split('@')[0] : '') || `user_${decoded.uid.slice(-6)}`;
-            let cleanUsername = rawName.toLowerCase().replace(/[^a-z0-9_]/g, '');
-            if (cleanUsername.length < 3) cleanUsername = `user_${Date.now().toString().slice(-4)}`;
-
-            const existing = await prisma.user.findFirst({
-              where: { username: cleanUsername },
-            });
-
-            const finalUsername = existing ? `${cleanUsername}_${Math.floor(100 + Math.random() * 900)}` : cleanUsername;
-            const displayName = decoded.name || finalUsername;
-
-            user = await prisma.user.create({
-              data: {
-                firebaseUid: decoded.uid,
-                email: email || null,
-                username: finalUsername,
-                fullName: displayName,
-                displayName: displayName,
-                passwordHash: '',
-                role: 'USER',
-                membershipTier: 'FREE',
-                profile: {
-                  create: {
-                    avatarType: decoded.picture ? 'IMAGE' : 'EMOJI',
-                    avatarEmoji: '😊',
-                    avatarUrl: decoded.picture || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${finalUsername}`,
-                    bio: 'Hey there! I am using Cupidx.',
-                  },
-                },
-                subscription: {
-                  create: {
-                    plan: 'FREE',
-                    isActive: false,
-                    subscriptionStatus: 'INACTIVE',
-                  },
-                },
-              },
-              include: { profile: true, subscription: true },
-            });
-          } else if (!user.firebaseUid) {
-            user = await prisma.user.update({
-              where: { id: user.id },
-              data: { firebaseUid: decoded.uid },
-              include: { profile: true, subscription: true },
-            });
-          }
-        }
-      }
-    }
+    const user: any = await getCurrentUser(req);
 
     if (user) {
       const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
@@ -111,7 +16,7 @@ export async function GET(req: Request) {
       const response = NextResponse.json({
         user: {
           id: user.id,
-          firebaseUid: user.firebaseUid,
+          clerkUserId: user.clerkUserId,
           username: user.username,
           fullName: user.fullName,
           displayName: user.displayName || user.fullName,

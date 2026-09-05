@@ -14,9 +14,9 @@ const Canvas3D = dynamic(() => import('@/components/Canvas3D'), {
 });
 
 export default function Home() {
-  const { user, firebaseUser, loading } = useAuth();
+  const { user, loading } = useAuth();
 
-  const isAuthenticated = !loading && (!!user || !!firebaseUser);
+  const isAuthenticated = !loading && !!user;
   const needsOnboarding = isAuthenticated && user && !user.username;
 
   // Authentication-aware routing URLs

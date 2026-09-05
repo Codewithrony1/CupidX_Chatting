@@ -177,7 +177,7 @@ export default function Login() {
         {/* Security Note */}
         <div className="flex items-center justify-center space-x-1.5 text-xs text-pink-300/60 font-medium">
           <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          <span>Secured by Firebase Authentication & TLS Transport Encryption</span>
+          <span>Secured by Clerk Authentication & TLS Transport Encryption</span>
         </div>
       </div>
     </div>

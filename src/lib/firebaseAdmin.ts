@@ -1,5 +1,4 @@
 import { getApps, initializeApp, cert, App } from 'firebase-admin/app';
-import { getAuth, Auth } from 'firebase-admin/auth';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import path from 'path';
 import fs from 'fs';
@@ -105,16 +104,6 @@ function getFirebaseAdminApp(): App {
   }
 }
 
-export function getAdminAuth(): Auth | null {
-  try {
-    const app = getFirebaseAdminApp();
-    return getAuth(app);
-  } catch (e) {
-    console.warn('getAdminAuth error:', e);
-    return null;
-  }
-}
-
 export function getAdminDb(): Firestore | null {
   try {
     const app = getFirebaseAdminApp();
@@ -126,13 +115,3 @@ export function getAdminDb(): Firestore | null {
 }
 
 export const getFirestoreAdmin = getAdminDb;
-
-export async function verifyFirebaseIdToken(token: string) {
-  try {
-    const auth = getAdminAuth();
-    if (!auth) return null;
-    return await auth.verifyIdToken(token);
-  } catch (error) {
-    return null;
-  }
-}

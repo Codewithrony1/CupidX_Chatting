@@ -1,7 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from './prisma';
-import { verifyFirebaseIdToken } from './firebaseAdmin';
 import { auth as clerkAuth, currentUser as clerkCurrentUser } from '@clerk/nextjs/server';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cupidx_fallback_jwt_secret';
@@ -173,38 +172,6 @@ export async function getCurrentUser(req?: Request) {
               });
               user.is_vip = false;
               user.membershipTier = 'FREE';
-            }
-            return user;
-          }
-        }
-      }
-
-      // 4. Check Authorization Bearer Header (Firebase ID Token)
-      const authHeader = req.headers.get('authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const idToken = authHeader.substring(7);
-        const decoded = await verifyFirebaseIdToken(idToken);
-        if (decoded && decoded.uid) {
-          const user = await prisma.user.findFirst({
-            where: {
-              OR: [
-                { firebaseUid: decoded.uid },
-                ...(decoded.email ? [{ email: decoded.email }] : []),
-              ],
-            },
-            include: {
-              profile: true,
-              subscription: true,
-            },
-          });
-
-          if (user && !user.isSuspended) {
-            if (!user.firebaseUid) {
-              await prisma.user.update({
-                where: { id: user.id },
-                data: { firebaseUid: decoded.uid },
-              });
-              user.firebaseUid = decoded.uid;
             }
             return user;
           }

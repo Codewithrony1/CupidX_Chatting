@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
-import { auth } from '@/lib/firebase';
 import AppShell from '@/components/AppShell';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
@@ -80,33 +79,11 @@ interface RandomMessage {
 
 export default function KnotChatRandomPage() {
   const router = useRouter();
-  const { user, firebaseUser, loading, refreshUser } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const { socket, isConnected: socketConnected } = useSocket();
 
   // Effective authenticated user
-  const currentUser = user || (firebaseUser ? {
-    id: firebaseUser.uid,
-    firebaseUid: firebaseUser.uid,
-    username: firebaseUser.displayName ? firebaseUser.displayName.toLowerCase().replace(/[^a-z0-9_]/g, '') : `user_${firebaseUser.uid.slice(-5)}`,
-    displayName: firebaseUser.displayName || 'User',
-    fullName: firebaseUser.displayName || 'User',
-    role: 'USER' as const,
-    membershipTier: 'FREE',
-    is_vip: false,
-    profile: {
-      avatarEmoji: '😊',
-      avatarUrl: firebaseUser.photoURL || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${firebaseUser.uid}`,
-      gender: 'unspecified',
-      preferredGender: 'auto',
-      mood: '😊 Happy',
-      bio: 'Hey there! I am using CupidX.',
-      age: 21,
-      themePreference: 'purple',
-      interests: '',
-      randomChatIntroSeen: true,
-    },
-    subscription: { isActive: false, plan: 'FREE' },
-  } : null);
+  const currentUser = user;
 
   // ── Core state ──
   const [matchStatus, setMatchStatus] = useState<'idle' | 'searching' | 'connected' | 'ended'>('idle');
@@ -167,10 +144,10 @@ export default function KnotChatRandomPage() {
 
   // ─── Auth redirect guard ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!loading && !user && !firebaseUser && !auth.currentUser) {
+    if (!loading && !user) {
       router.push('/login');
     }
-  }, [user, firebaseUser, loading, router]);
+  }, [user, loading, router]);
 
   // ─── Socket typing indicator ──────────────────────────────────────────────
   useEffect(() => {
@@ -285,7 +262,7 @@ export default function KnotChatRandomPage() {
     stopAllListeners();
 
     try {
-      const fbUid = (await ensureFirebaseAuth()) || currentUser?.id || 'user_' + Date.now();
+      const fbUid = (await ensureFirebaseAuth(currentUser?.id)) || currentUser?.id || 'user_' + Date.now();
       currentUidRef.current = fbUid;
 
       const prefs = {
@@ -762,7 +739,7 @@ export default function KnotChatRandomPage() {
               {messages.map((msg, index) => {
                 const isMine =
                   msg.senderId === currentUidRef.current ||
-                  msg.senderId === firebaseUser?.uid ||
+                  msg.senderId === currentUser?.id ||
                   msg.senderUsername === currentUser?.username;
 
                 return (

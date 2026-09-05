@@ -5,7 +5,6 @@
 
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import type { User as FirebaseUser } from 'firebase/auth';
 
 export interface UserProfile {
   id: string;
@@ -102,7 +101,7 @@ export interface GenericAuthUser {
 /**
  * Generate a clean username from displayName or email or fallback.
  */
-export function generateCleanUsername(fbUser: GenericAuthUser | FirebaseUser): string {
+export function generateCleanUsername(fbUser: GenericAuthUser): string {
   const raw = fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : '') || `user_${fbUser.uid.slice(-5)}`;
   const clean = raw.toLowerCase().replace(/[^a-z0-9_]/g, '');
   return clean.length >= 3 ? clean : `user_${fbUser.uid.slice(-5)}`;
@@ -112,7 +111,7 @@ export function generateCleanUsername(fbUser: GenericAuthUser | FirebaseUser): s
  * Fetch existing Firestore user document or initialize a new one.
  * Infallible: Protected with timeout race so cold Firestore connections never freeze auth.
  */
-export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser | FirebaseUser): Promise<UserProfile> {
+export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser): Promise<UserProfile> {
   const cleanUsername = generateCleanUsername(fbUser);
   const now = Date.now();
   const displayName = fbUser.displayName || cleanUsername;

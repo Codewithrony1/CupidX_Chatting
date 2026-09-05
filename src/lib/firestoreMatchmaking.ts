@@ -2,8 +2,7 @@
  * CupidX — Bulletproof Firestore Matchmaking & Realtime Chat
  */
 
-import { db, auth } from '@/lib/firebase';
-import { signInAnonymously } from 'firebase/auth';
+import { db } from '@/lib/firebase';
 import {
   doc,
   getDoc,
@@ -74,19 +73,10 @@ export interface FirestoreMessage {
   createdAt: number;
 }
 
-// ─── Ensure Firebase Auth ─────────────────────────────────────────────────────
+// ─── Ensure User Identity ─────────────────────────────────────────────────────
 
-export async function ensureFirebaseAuth(): Promise<string> {
-  if (auth.currentUser?.uid) {
-    return auth.currentUser.uid;
-  }
-  try {
-    const cred = await signInAnonymously(auth);
-    return cred.user.uid;
-  } catch (e) {
-    console.warn('Anonymous auth fallback error:', e);
-    return auth.currentUser?.uid || 'user_' + Math.random().toString(36).substr(2, 9);
-  }
+export async function ensureFirebaseAuth(userId?: string): Promise<string> {
+  return userId || 'user_' + Math.random().toString(36).substring(2, 11);
 }
 
 // ─── Queue Operations ─────────────────────────────────────────────────────────

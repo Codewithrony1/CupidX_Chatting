@@ -9,7 +9,7 @@ import FloatingHearts from '@/components/FloatingHearts';
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { user, firebaseUser, loading: authLoading, refreshUser } = useAuth();
+  const { user, loading: authLoading, refreshUser } = useAuth();
 
   const [displayName, setDisplayName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -103,7 +103,7 @@ export default function OnboardingPage() {
     setErrorMsg('');
 
     try {
-      const uid = firebaseUser?.uid || user?.id;
+      const uid = user?.id || user?.uid;
 
       // 1. Save directly to Cloud Firestore
       if (uid) {

@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { usernameSchema } from '@/lib/validation/username';
 import { signToken, getCurrentUser } from '@/lib/auth';
-import { verifyFirebaseIdToken } from '@/lib/firebaseAdmin';
 
 export async function GET(req: Request) {
   try {
@@ -78,61 +77,7 @@ export async function POST(req: Request) {
 
     let user = await getCurrentUser(req);
 
-    // If not found from cookie, check Firebase Bearer token
-    if (!user) {
-      const authHeader = req.headers.get('authorization');
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const idToken = authHeader.substring(7);
-        const decoded = await verifyFirebaseIdToken(idToken);
-        if (decoded && decoded.uid) {
-          user = await prisma.user.findFirst({
-            where: {
-              OR: [
-                { firebaseUid: decoded.uid },
-                ...(decoded.email ? [{ email: decoded.email }] : []),
-              ],
-            },
-            include: { profile: true, subscription: true },
-          });
 
-          if (!user) {
-            user = await prisma.user.create({
-              data: {
-                firebaseUid: decoded.uid,
-                email: decoded.email || inputEmail || null,
-                username: cleanUsername,
-                fullName: cleanDisplayName,
-                displayName: cleanDisplayName,
-                passwordHash: '',
-                role: 'USER',
-                membershipTier: 'FREE',
-                dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
-                gender: cleanGender,
-                profile: {
-                  create: {
-                    avatarType: 'EMOJI',
-                    avatarEmoji: selectedEmoji,
-                    age: parsedAge,
-                    gender: cleanGender,
-                    dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
-                    ageGenderConfirmed: true,
-                    bio: 'Hey there! I am using Cupidx.',
-                  },
-                },
-                subscription: {
-                  create: {
-                    plan: 'FREE',
-                    isActive: false,
-                    subscriptionStatus: 'INACTIVE',
-                  },
-                },
-              },
-              include: { profile: true, subscription: true },
-            });
-          }
-        }
-      }
-    }
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });

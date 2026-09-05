@@ -9,6 +9,7 @@ export async function verifyAdminAccess(req: Request) {
     authorized: isAdmin,
     user,
     adminId: user?.id || 'admin_local',
-    adminFirebaseUid: user?.firebaseUid || null,
+    adminClerkUserId: user?.clerkUserId || null,
+    adminFirebaseUid: user?.clerkUserId || user?.id || null,
   };
 }
