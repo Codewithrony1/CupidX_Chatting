@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Outfit } from 'next/font/google';
 import './globals.css';
+import { ClerkProvider } from '@clerk/nextjs';
 import { AuthProvider } from '@/context/AuthContext';
 import { SocketProvider } from '@/context/SocketContext';
 import PWAInstallPrompt from '@/components/PWAInstallPrompt';
@@ -37,15 +38,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${outfit.variable} dark h-full antialiased`}>
-      <body className="font-sans min-h-full flex flex-col bg-slate-950 text-slate-100 overflow-x-hidden">
-        <AuthProvider>
-          <SocketProvider>
-            <PWAInstallPrompt />
-            {children}
-          </SocketProvider>
-        </AuthProvider>
-      </body>
-    </html>
+    <ClerkProvider
+      publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_Y2xlYW4td2hpcHBldC04OS5jbGVyay5hY2NvdW50cy5kZXYk'}
+    >
+      <html lang="en" className={`${outfit.variable} dark h-full antialiased`}>
+        <body className="font-sans min-h-full flex flex-col bg-slate-950 text-slate-100 overflow-x-hidden">
+          <AuthProvider>
+            <SocketProvider>
+              <PWAInstallPrompt />
+              {children}
+            </SocketProvider>
+          </AuthProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

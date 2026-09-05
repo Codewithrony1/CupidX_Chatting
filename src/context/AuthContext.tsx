@@ -2,18 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import {
-  onAuthStateChanged,
-  signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  updateProfile as updateFirebaseProfile,
-  User as FirebaseUser,
-} from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
+import { useUser, useClerk } from '@clerk/nextjs';
 import {
   getOrCreateFirestoreUser,
   updateFirestoreUserProfile,
@@ -21,14 +10,13 @@ import {
   calculateAge,
   type UserProfile,
 } from '@/lib/firestoreUser';
-import { getFriendlyAuthErrorMessage } from '@/lib/authErrors';
-import { ensureFirebaseAuth } from '@/lib/firestoreMatchmaking';
 
 export type User = UserProfile;
 
 interface AuthContextType {
   user: User | null;
-  firebaseUser: FirebaseUser | null;
+  clerkUser: any | null;
+  firebaseUser: any | null; // Compatibility alias
   loading: boolean;
   isAuthenticated: boolean;
   loginWithGoogle: () => Promise<void>;
@@ -41,8 +29,10 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { isLoaded, isSignedIn, user: clerkUser } = useUser();
+  const clerk = useClerk();
+
   const [user, setUser] = useState<User | null>(null);
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -75,30 +65,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
-   * Initializes user profile once from Firestore
+   * Initializes user profile once from Firestore & links with Clerk
    */
-  const initializeUserSession = async (fbUser: FirebaseUser | null): Promise<UserProfile | null> => {
-    if (!fbUser) {
+  const initializeUserSession = async (cUser: any): Promise<UserProfile | null> => {
+    if (!cUser) {
       currentInitUidRef.current = null;
       setUser(null);
       return null;
     }
 
-    if (currentInitUidRef.current === fbUser.uid && user) {
+    if (currentInitUidRef.current === cUser.id && user) {
       return user;
     }
-    currentInitUidRef.current = fbUser.uid;
+    currentInitUidRef.current = cUser.id;
 
-    console.log('[AUTH] Profile initialization for UID:', fbUser.uid);
+    console.log('[AUTH] Clerk Profile initialization for ID:', cUser.id);
     try {
-      const firestoreProfile = await getOrCreateFirestoreUser(fbUser);
+      const email = cUser.primaryEmailAddress?.emailAddress || null;
+      const displayName = cUser.fullName || cUser.username || cUser.firstName || 'User';
+      const photoURL = cUser.imageUrl || null;
+
+      const firestoreProfile = await getOrCreateFirestoreUser({
+        uid: cUser.id,
+        displayName,
+        email,
+        photoURL,
+      });
+
       setUser(firestoreProfile);
 
-      // Background session cookie sync for API routes
-      fbUser.getIdToken().then((idToken) => {
-        fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${idToken}` },
-        }).catch(() => {});
+      // Background session sync with API routes
+      fetch('/api/auth/me', {
+        headers: { 'x-clerk-user-id': cUser.id },
       }).catch(() => {});
 
       return firestoreProfile;
@@ -109,72 +107,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshUser = async () => {
-    if (auth.currentUser) {
+    if (clerkUser) {
       currentInitUidRef.current = null;
-      await initializeUserSession(auth.currentUser);
+      await initializeUserSession(clerkUser);
     }
   };
 
-  // ─── Single Authoritative Auth State Listener ────────────────────────────────
+  // ─── 1. Handle Clerk User State Changes ─────────────────────────────────────
   useEffect(() => {
-    // 1. Check for redirect result (mobile auth fallback)
-    getRedirectResult(auth)
-      .then(async (result) => {
-        if (result?.user) {
-          console.log('[AUTH] Google redirect sign-in success. UID:', result.user.uid);
-          setFirebaseUser(result.user);
-          const profile = await initializeUserSession(result.user);
-          if (profile) {
-            const isComplete = checkProfileCompletion(profile);
-            hardNavigate(isComplete ? '/dashboard' : '/onboarding');
-          }
-        }
-      })
-      .catch((err) => {
-        console.warn('[AUTH] getRedirectResult notice:', err);
+    if (!isLoaded) return;
+
+    if (isSignedIn && clerkUser) {
+      initializeUserSession(clerkUser).then(() => {
+        setLoading(false);
       });
-
-    // 2. Continuous auth state observer
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      console.log('[AUTH] Auth state changed, UID:', fbUser?.uid || 'null');
-      setFirebaseUser(fbUser);
-      if (fbUser) {
-        await initializeUserSession(fbUser);
-      } else {
-        setUser(null);
-        currentInitUidRef.current = null;
-      }
+    } else {
+      setUser(null);
+      currentInitUidRef.current = null;
       setLoading(false);
-    });
+    }
+  }, [isLoaded, isSignedIn, clerkUser]);
 
-    return () => unsubscribe();
-  }, []);
-
-  // ─── Single Centralized Route Guard ──────────────────────────────────────────
+  // ─── 2. Route Guard ──────────────────────────────────────────────────────────
   useEffect(() => {
-    // WHILE AUTH_LOADING: NEVER REDIRECT
-    if (loading) return;
+    if (!isLoaded || loading) return;
 
     const publicPaths = ['/', '/login', '/register', '/signup', '/privacy', '/terms', '/sso-callback', '/forgot-password'];
     const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
-    const isAuthed = Boolean(user || firebaseUser || auth.currentUser);
+    const isAuthed = Boolean(isSignedIn && clerkUser);
 
-    // 1. Unauthenticated users on private routes -> redirect to /login
+    // Unauthenticated user on protected route
     if (!isAuthed && !isPublic && pathname !== '/onboarding') {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
-      console.log('[AUTH GUARD] Unauthenticated user accessing private route:', pathname, '-> redirecting to /login');
+      console.log('[AUTH GUARD] Unauthenticated user -> redirecting to /login');
       hardNavigate('/login');
       setTimeout(() => { isNavigatingRef.current = false; }, 500);
       return;
     }
 
-    // 2. Authenticated users
+    // Authenticated user on auth pages (/login, /signup)
     if (isAuthed && user) {
       const isComplete = checkProfileCompletion(user);
 
-      // Authenticated users on auth pages (/login, /signup, /register)
       if (pathname === '/login' || pathname === '/register' || pathname === '/signup') {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
@@ -185,143 +161,108 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Users who already completed onboarding on /onboarding -> send to /dashboard
+      // Already completed onboarding on /onboarding
       if (pathname === '/onboarding' && isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        console.log('[AUTH GUARD] Profile already complete -> redirecting to /dashboard');
         hardNavigate('/dashboard');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // Users with incomplete profiles on protected routes -> send to /onboarding
+      // Incomplete profile on protected route
       if (!isPublic && pathname !== '/onboarding' && !isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        console.log('[AUTH GUARD] Incomplete profile on protected route -> redirecting to /onboarding');
         hardNavigate('/onboarding');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
     }
-  }, [loading, user, firebaseUser, pathname]);
+  }, [isLoaded, loading, isSignedIn, clerkUser, user, pathname]);
 
-  // ─── 1. Google 1-Click Sign-in ────────────────────────────────────────────────
+  // ─── 3. Google 1-Click Sign-in via Clerk ────────────────────────────────────
   const loginWithGoogle = async () => {
-    console.log('[AUTH] Google login initiated');
+    if (!clerk) return;
+    console.log('[AUTH] Clerk Google login initiated');
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      if (result.user) {
-        console.log('[AUTH] Google login success. UID:', result.user.uid);
-        setFirebaseUser(result.user);
-        const profile = await initializeUserSession(result.user);
-        const isComplete = profile ? checkProfileCompletion(profile) : false;
-        const target = isComplete ? '/dashboard' : '/onboarding';
-        hardNavigate(target);
-      }
+      clerk.openSignIn({
+        fallbackRedirectUrl: '/dashboard',
+        signUpFallbackRedirectUrl: '/onboarding',
+      });
     } catch (err: any) {
-      console.error('[AUTH] Google login error:', err);
-      // If popup is blocked by strict mobile browser, fall back to redirect
-      if (err?.code === 'auth/popup-blocked') {
-        console.log('[AUTH] Popup was blocked by browser. Using redirect fallback...');
-        await signInWithRedirect(auth, googleProvider);
-        return;
-      }
-      const friendlyMsg = getFriendlyAuthErrorMessage(err);
-      throw new Error(friendlyMsg);
+      console.error('[AUTH] Clerk Google login error:', err);
+      throw new Error(err?.message || 'Unable to open Google sign in. Please try again.');
     }
   };
 
-  // ─── 2. Email / Password Login ────────────────────────────────────────────────
+  // ─── 4. Email / Password Login via Clerk ────────────────────────────────────
   const loginWithEmail = async (emailOrUsername: string, pass: string) => {
-    const identifier = emailOrUsername.trim();
-    const effectiveEmail = identifier.includes('@')
-      ? identifier
-      : `${identifier.toLowerCase().replace(/[^a-z0-9_]/g, '')}@cupidxchat.in`;
-
+    if (!clerk) throw new Error('Authentication is loading, please try again.');
     try {
-      const result = await signInWithEmailAndPassword(auth, effectiveEmail, pass);
-      if (result.user) {
-        console.log('[AUTH] Email login success. UID:', result.user.uid);
-        setFirebaseUser(result.user);
-        const profile = await initializeUserSession(result.user);
-        const isComplete = profile ? checkProfileCompletion(profile) : false;
-        const target = isComplete ? '/dashboard' : '/onboarding';
-        hardNavigate(target);
-      }
+      clerk.openSignIn({
+        fallbackRedirectUrl: '/dashboard',
+        signUpFallbackRedirectUrl: '/onboarding',
+        initialValues: {
+          emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
+        },
+      });
     } catch (err: any) {
-      console.error('[AUTH] Email login error:', err);
-      const friendlyMsg = getFriendlyAuthErrorMessage(err);
-      throw new Error(friendlyMsg);
+      console.error('[AUTH] Clerk login error:', err);
+      throw new Error(err?.message || 'Invalid email or password.');
     }
   };
 
-  // ─── 3. Email / Password Signup ───────────────────────────────────────────────
+  // ─── 5. Email / Password Signup via Clerk ───────────────────────────────────
   const signUpWithEmail = async (emailOrUsername: string, pass: string, name?: string) => {
-    const identifier = emailOrUsername.trim();
-    const cleanUsername = (identifier.includes('@') ? identifier.split('@')[0] : identifier)
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`;
-    const effectiveEmail = identifier.includes('@') ? identifier : `${cleanUsername}@cupidxchat.in`;
-
+    if (!clerk) throw new Error('Authentication is loading, please try again.');
     try {
-      const result = await createUserWithEmailAndPassword(auth, effectiveEmail, pass);
-      if (result.user) {
-        console.log('[AUTH] Account created successfully. UID:', result.user.uid);
-        if (name && name.trim()) {
-          await updateFirebaseProfile(result.user, { displayName: name.trim() }).catch(() => {});
-        }
-        setFirebaseUser(result.user);
-        const profile = await initializeUserSession(result.user);
-        if (profile && name && name.trim()) {
-          await updateFirestoreUserProfile(result.user.uid, {
-            fullName: name.trim(),
-            displayName: name.trim(),
-          }).catch(() => {});
-        }
-        hardNavigate('/onboarding');
-      }
+      clerk.openSignUp({
+        fallbackRedirectUrl: '/onboarding',
+        initialValues: {
+          emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
+          firstName: name || undefined,
+        },
+      });
     } catch (err: any) {
-      console.error('[AUTH] Signup error:', err);
-      const friendlyMsg = getFriendlyAuthErrorMessage(err);
-      throw new Error(friendlyMsg);
+      console.error('[AUTH] Clerk signup error:', err);
+      throw new Error(err?.message || 'Could not complete registration.');
     }
   };
 
-  // ─── 4. Logout ────────────────────────────────────────────────────────────────
+  // ─── 6. Logout via Clerk ───────────────────────────────────────────────────
   const logout = async () => {
     try {
-      if (firebaseUser?.uid) {
-        setFirestoreUserPresence(firebaseUser.uid, false).catch(() => {});
+      if (clerkUser?.id) {
+        setFirestoreUserPresence(clerkUser.id, false).catch(() => {});
       }
 
       if (typeof document !== 'undefined') {
         document.cookie = 'token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;';
       }
 
-      await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-      await firebaseSignOut(auth).catch(() => {});
-
-      currentInitUidRef.current = null;
-      setUser(null);
-      setFirebaseUser(null);
-
-      hardNavigate('/login');
+      if (clerk) {
+        await clerk.signOut(() => {
+          hardNavigate('/login');
+        });
+      } else {
+        hardNavigate('/login');
+      }
     } catch (e) {
       console.error('[AUTH] Logout error:', e);
       hardNavigate('/login');
     }
   };
 
-  const isAuthenticated = Boolean(user || firebaseUser);
+  const isAuthenticated = Boolean(isSignedIn && clerkUser);
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        firebaseUser,
-        loading,
+        clerkUser,
+        firebaseUser: clerkUser ? { uid: clerkUser.id, displayName: clerkUser.fullName || clerkUser.username, email: clerkUser.primaryEmailAddress?.emailAddress, photoURL: clerkUser.imageUrl } : null,
+        loading: !isLoaded || loading,
         isAuthenticated,
         loginWithGoogle,
         loginWithEmail,
