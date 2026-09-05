@@ -34,29 +34,37 @@ export async function POST(
     const now = new Date();
     const adminIdentifier = admin?.username || adminFirebaseUid || 'admin';
 
-    // Update request to REJECTED
-    await prisma.paymentRequest.update({
-      where: { id: paymentRequest.id },
-      data: {
-        status: 'REJECTED',
-        rejectionReason: reason,
-        reviewedAt: now,
-        reviewedBy: adminIdentifier,
-      },
-    });
-
-    // Write Audit Log
-    await prisma.adminLog.create({
-      data: {
-        adminUserId: admin?.id || 'admin',
-        adminFirebaseUid: adminFirebaseUid || null,
-        action: 'REJECT_PAYMENT',
-        targetUserId: paymentRequest.userId,
-        entityType: 'PAYMENT',
-        entityId: paymentRequest.id,
-        details: `Rejected payment request ${paymentRequest.requestId || paymentRequest.id} by ${adminIdentifier}. Reason: ${reason}`,
-      },
-    });
+    // Update request to REJECTED and create notification
+    await prisma.$transaction([
+      prisma.paymentRequest.update({
+        where: { id: paymentRequest.id },
+        data: {
+          status: 'REJECTED',
+          rejectionReason: reason,
+          reviewedAt: now,
+          reviewedBy: adminIdentifier,
+        },
+      }),
+      prisma.notification.create({
+        data: {
+          userId: paymentRequest.userId,
+          type: 'PAYMENT_REJECTED',
+          content: `❌ Payment Request Rejected: Your payment (${paymentRequest.requestId || 'CPX'}) could not be verified. Reason: ${reason}`,
+        },
+      }),
+      prisma.adminLog.create({
+        data: {
+          adminUserId: admin?.id || 'admin',
+          adminFirebaseUid: adminFirebaseUid || null,
+          adminClerkId: admin?.clerkUserId || null,
+          action: 'REJECT_PAYMENT',
+          targetUserId: paymentRequest.userId,
+          entityType: 'PAYMENT',
+          entityId: paymentRequest.id,
+          details: `Rejected payment request ${paymentRequest.requestId || paymentRequest.id} by ${adminIdentifier}. Reason: ${reason}`,
+        },
+      }),
+    ]);
 
     return NextResponse.json({
       success: true,

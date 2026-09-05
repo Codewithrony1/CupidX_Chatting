@@ -7,7 +7,7 @@ import path from 'path';
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user server-side
+    // 1. Authenticate user server-side via Clerk / Session
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
@@ -15,32 +15,41 @@ export async function POST(req: Request) {
 
     const clerkEmail: string | null = user.email || null;
     const clerkName: string | null = user.fullName || user.displayName || user.username;
-    const clerkId: string | null = user.firebaseUid || user.clerkUserId || user.id;
+    const clerkId: string = user.clerkUserId || user.id;
 
     const body = await req.json().catch(() => ({}));
-    const { plan = 'monthly', region, paymentId, screenshot } = body;
+    const { plan = 'monthly', region = 'india', paymentId, screenshot, utrNumber } = body;
 
-    // 2. Validate Region (Required: "india" | "international")
-    if (!region || !['india', 'international'].includes(region.toLowerCase())) {
-      return NextResponse.json(
-        { error: 'Payment region is required and must be either "india" or "international".' },
-        { status: 400 }
-      );
-    }
-
-    const selectedRegion = region.toLowerCase() as 'india' | 'international';
-    const cleanPaymentId = (paymentId || '').trim();
+    const effectivePaymentId = (paymentId || utrNumber || '').trim();
     const hasScreenshot = Boolean(screenshot && screenshot.startsWith('data:image/'));
 
-    // 3. Validation: Require at least ONE of paymentId or screenshot
-    if (!cleanPaymentId && !hasScreenshot) {
+    // 2. Validation: Require at least UTR or Screenshot
+    if (!effectivePaymentId && !hasScreenshot) {
       return NextResponse.json(
-        { error: 'Please enter a Payment / UTR ID or upload a payment screenshot.' },
+        { error: 'Please enter a valid Payment / UTR reference number or upload a payment screenshot.' },
         { status: 400 }
       );
     }
 
-    // 4. Block duplicate pending requests
+    // 3. Duplicate UTR Protection (Requirement 16)
+    if (effectivePaymentId) {
+      const cleanUtr = effectivePaymentId.replace(/\s+/g, '').toUpperCase();
+      const existingUtr = await prisma.paymentRequest.findFirst({
+        where: {
+          paymentId: cleanUtr,
+          status: { in: ['pending', 'UNDER_REVIEW', 'approved', 'APPROVED'] },
+        },
+      });
+
+      if (existingUtr) {
+        return NextResponse.json(
+          { error: 'This transaction reference / UTR has already been submitted.' },
+          { status: 409 }
+        );
+      }
+    }
+
+    // 4. Block multiple active pending requests for the same user
     const existingPending = await prisma.paymentRequest.findFirst({
       where: {
         userId: user.id,
@@ -51,7 +60,7 @@ export async function POST(req: Request) {
     if (existingPending) {
       return NextResponse.json(
         {
-          error: 'You already have a pending payment request under review. Please wait for admin approval.',
+          error: 'You already have a payment request under review. Please wait for admin verification.',
           hasPending: true,
           request: existingPending,
         },
@@ -59,7 +68,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Secure Screenshot Processing (Validate MIME, generate secure random filename)
+    // 5. Screenshot Processing (Secure MIME & Magic Bytes Validation)
     let screenshotUrl: string | null = null;
     let screenshotKey: string | null = null;
 
@@ -71,12 +80,10 @@ export async function POST(req: Request) {
         const base64Data = matches[2];
         const buffer = Buffer.from(base64Data, 'base64');
 
-        // File size limit: 5MB
         if (buffer.length > 5 * 1024 * 1024) {
           return NextResponse.json({ error: 'Screenshot file size exceeds 5MB limit.' }, { status: 400 });
         }
 
-        // Validate Magic Bytes (PNG: 89 50 4E 47, JPEG: FF D8 FF, WEBP: 52 49 46 46)
         const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
         const isJpg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
         const isWebp = buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46;
@@ -96,31 +103,41 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6. Get Server-Configured Pricing (NEVER trust client-provided amounts)
-    const isYearly = plan === 'yearly' || plan === 'pro_yearly';
-    const planCode = isYearly ? 'yearly' : 'monthly';
-    const planId = isYearly ? 'pro_yearly' : 'pro_monthly';
+    // 6. Plan & Pricing Configuration
+    const normalizedPlan = (plan || 'monthly').toLowerCase();
+    let durationDays = 30;
+    let amount = 99.0;
+    let planId = 'premium_monthly';
 
-    // Retrieve settings or standard pricing
-    let amount = selectedRegion === 'india' ? (isYearly ? 199.0 : 29.0) : (isYearly ? 12.0 : 2.0);
-    const currency = selectedRegion === 'india' ? 'INR' : 'USD';
+    if (normalizedPlan === 'weekly' || normalizedPlan === '7days') {
+      durationDays = 7;
+      amount = 29.0;
+      planId = 'premium_weekly';
+    } else if (normalizedPlan === 'yearly' || normalizedPlan === '365days' || normalizedPlan === 'pro_yearly') {
+      durationDays = 365;
+      amount = 499.0;
+      planId = 'premium_yearly';
+    } else {
+      durationDays = 30;
+      amount = 99.0;
+      planId = 'premium_monthly';
+    }
 
+    // Check if custom price setting is configured in database
     try {
-      const priceSettingKey = selectedRegion === 'india'
-        ? (isYearly ? 'indiaPriceYearly' : 'indiaPriceMonthly')
-        : (isYearly ? 'intlPriceYearly' : 'intlPriceMonthly');
-      const priceSetting = await prisma.appSetting.findUnique({ where: { key: priceSettingKey } });
-      if (priceSetting && !isNaN(parseFloat(priceSetting.value))) {
-        amount = parseFloat(priceSetting.value);
+      const settingKey = normalizedPlan === 'weekly' ? 'priceWeekly' : (normalizedPlan === 'yearly' ? 'priceYearly' : 'priceMonthly');
+      const customPrice = await prisma.appSetting.findUnique({ where: { key: settingKey } });
+      if (customPrice && !isNaN(parseFloat(customPrice.value))) {
+        amount = parseFloat(customPrice.value);
       }
     } catch (e) {}
 
-    // 7. Generate CPX Unique Payment Request ID (e.g. CPX-20260901-A82F91)
+    // 7. Generate Request ID
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const randomHex = crypto.randomBytes(3).toString('hex').toUpperCase();
     const requestId = `CPX-${dateStr}-${randomHex}`;
 
-    // 8. Create PaymentRequest record in Database
+    // 8. Create PaymentRequest in database
     const paymentRequest = await prisma.paymentRequest.create({
       data: {
         requestId,
@@ -129,12 +146,12 @@ export async function POST(req: Request) {
         userEmail: clerkEmail,
         userFullName: clerkName,
         username: user.username,
-        plan: planCode,
+        plan: normalizedPlan,
         planId,
-        region: selectedRegion,
+        region: region || 'india',
         amount,
-        currency,
-        paymentId: cleanPaymentId || null,
+        currency: 'INR',
+        paymentId: effectivePaymentId || null,
         screenshotUrl,
         screenshotKey,
         status: 'UNDER_REVIEW',
@@ -151,14 +168,14 @@ export async function POST(req: Request) {
           targetUserId: user.id,
           entityType: 'PAYMENT',
           entityId: paymentRequest.id,
-          details: `User @${user.username} (${clerkEmail || 'no email'}) submitted payment proof for ${planCode} (₹${amount}). Payment ID: ${requestId}`,
+          details: `User @${user.username} (Clerk ID: ${clerkId}) submitted payment proof for ${normalizedPlan} (₹${amount}). UTR: ${effectivePaymentId || 'None'}. ID: ${requestId}`,
         },
       });
     } catch (e) {}
 
     return NextResponse.json({
       success: true,
-      message: 'Payment proof submitted. Our team will manually verify your payment.',
+      message: 'Payment proof submitted. Your payment is now under review by administration.',
       request: paymentRequest,
     });
   } catch (error) {

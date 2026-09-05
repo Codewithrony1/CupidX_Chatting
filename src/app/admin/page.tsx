@@ -131,6 +131,8 @@ export default function AdminPage() {
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [confirmApprovalItem, setConfirmApprovalItem] = useState<PaymentRequestItem | null>(null);
+  const [rejectingModalItem, setRejectingModalItem] = useState<PaymentRequestItem | null>(null);
   const [selectedFullImage, setSelectedFullImage] = useState<string | null>(null);
   const [selectedDetailPayment, setSelectedDetailPayment] = useState<PaymentRequestItem | null>(null);
 
@@ -936,7 +938,7 @@ export default function AdminPage() {
                         ) : (
                           <div className="flex items-center space-x-2">
                             <button
-                              onClick={() => handleApproveRequest(req.id)}
+                              onClick={() => setConfirmApprovalItem(req)}
                               className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                             >
                               <CheckCircle2 className="w-4 h-4" />
@@ -945,7 +947,7 @@ export default function AdminPage() {
 
                             <button
                               onClick={() => {
-                                setRejectingId(req.id);
+                                setRejectingModalItem(req);
                                 setRejectReason('');
                               }}
                               className="px-4 py-3 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold transition-all cursor-pointer"
@@ -1392,6 +1394,121 @@ export default function AdminPage() {
           </div>
         )}
       </main>
+
+      {/* Approval Confirmation Modal */}
+      {confirmApprovalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-md bg-[#0e0117] text-white rounded-3xl border border-emerald-500/40 p-6 shadow-2xl space-y-4 relative">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
+              <Crown className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-black text-white">Approve Payment Confirmation</h3>
+              <p className="text-xs text-slate-300">
+                Are you sure you want to approve this payment? This will activate Premium for this user.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">User</span>
+                <span className="font-bold text-white">@{confirmApprovalItem.username}</span>
+              </div>
+              {confirmApprovalItem.userEmail && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Email</span>
+                  <span className="font-mono text-pink-300">{confirmApprovalItem.userEmail}</span>
+                </div>
+              )}
+              {confirmApprovalItem.clerkUserId && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Clerk ID</span>
+                  <span className="font-mono text-slate-300 text-[10px]">{confirmApprovalItem.clerkUserId}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Plan & Amount</span>
+                <span className="font-bold text-yellow-300 capitalize">{confirmApprovalItem.plan} (₹{confirmApprovalItem.amount})</span>
+              </div>
+              {confirmApprovalItem.paymentId && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">UTR / Reference</span>
+                  <span className="font-mono text-yellow-400 font-bold">{confirmApprovalItem.paymentId}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                onClick={() => {
+                  const reqId = confirmApprovalItem.id;
+                  setConfirmApprovalItem(null);
+                  handleApproveRequest(reqId);
+                }}
+                className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-lg shadow-emerald-500/20 cursor-pointer transition-all"
+              >
+                Confirm & Activate VIP
+              </button>
+              <button
+                onClick={() => setConfirmApprovalItem(null)}
+                className="px-4 py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold cursor-pointer transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rejection Modal with Reason */}
+      {rejectingModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-md bg-[#0e0117] text-white rounded-3xl border border-rose-500/40 p-6 shadow-2xl space-y-4 relative">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-black text-white">Reject Payment Request</h3>
+              <p className="text-xs text-slate-300">
+                Please enter a reason for rejecting this payment. The user will be notified with this reason.
+              </p>
+            </div>
+
+            <div className="space-y-1.5 text-left">
+              <label className="text-xs font-bold text-slate-300">Rejection Reason</label>
+              <textarea
+                rows={3}
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="e.g. UTR does not match bank transaction, payment not received, or incorrect amount..."
+                className="w-full p-3 rounded-xl bg-black/60 border border-slate-700 text-white text-xs focus:outline-none focus:ring-1 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                onClick={() => {
+                  const reqId = rejectingModalItem.id;
+                  setRejectingModalItem(null);
+                  handleRejectRequest(reqId);
+                }}
+                className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black shadow-lg shadow-rose-500/20 cursor-pointer transition-all"
+              >
+                Confirm Rejection
+              </button>
+              <button
+                onClick={() => {
+                  setRejectingModalItem(null);
+                  setRejectReason('');
+                }}
+                className="px-4 py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold cursor-pointer transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Full Image Modal Lightbox */}
       {selectedFullImage && (

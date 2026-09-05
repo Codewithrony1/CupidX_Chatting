@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAdminAccess } from '@/lib/adminAuth';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(req: Request) {
   try {
@@ -11,14 +12,16 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { userId, action, days = 30 } = body;
+    const { userId, action, days = 30, reason } = body;
 
     if (!userId || !['grant', 'revoke'].includes(action)) {
       return NextResponse.json({ error: 'Valid userId and action ("grant" or "revoke") required.' }, { status: 400 });
     }
 
-    const targetUser = await prisma.user.findUnique({
-      where: { id: userId },
+    const targetUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ id: userId }, { clerkUserId: userId }, { firebaseUid: userId }],
+      },
     });
 
     if (!targetUser) {
@@ -26,46 +29,50 @@ export async function POST(req: Request) {
     }
 
     const now = new Date();
-    const adminIdentifier = user?.username || adminFirebaseUid || 'admin';
+    const adminIdentifier = user?.username || adminFirebaseUid || user?.id || 'admin';
 
     if (action === 'grant') {
       const grantDays = parseInt(days.toString(), 10) || 30;
-      const expiresAt = new Date(now.getTime() + grantDays * 24 * 60 * 60 * 1000);
+      let baseExpiry = now;
+      if (targetUser.is_vip && targetUser.vip_expires_at && new Date(targetUser.vip_expires_at) > now) {
+        baseExpiry = new Date(targetUser.vip_expires_at);
+      }
+      const expiresAt = new Date(baseExpiry.getTime() + grantDays * 24 * 60 * 60 * 1000);
 
       const updatedUser = await prisma.user.update({
-        where: { id: userId },
+        where: { id: targetUser.id },
         data: {
           membershipTier: 'VIP',
           is_vip: true,
-          vip_started_at: now,
+          vip_started_at: targetUser.vip_started_at || now,
           vip_expires_at: expiresAt,
         },
       });
 
       await prisma.subscription.upsert({
-        where: { userId },
+        where: { userId: targetUser.id },
         create: {
-          userId,
+          userId: targetUser.id,
           plan: 'VIP',
           isActive: true,
           subscriptionStatus: 'ACTIVE',
-          startDate: now,
+          startDate: targetUser.vip_started_at || now,
           endDate: expiresAt,
         },
         update: {
           plan: 'VIP',
           isActive: true,
           subscriptionStatus: 'ACTIVE',
-          startDate: now,
+          startDate: targetUser.vip_started_at || now,
           endDate: expiresAt,
         },
       });
 
       await prisma.notification.create({
         data: {
-          userId,
+          userId: targetUser.id,
           type: 'VIP_UPGRADED',
-          content: `👑 VIP Granted! Your account was upgraded to VIP by Admin for ${grantDays} days (expires ${expiresAt.toLocaleDateString()}).`,
+          content: `👑 VIP Granted! Your account was upgraded to VIP by Admin for ${grantDays} days (expires ${expiresAt.toLocaleDateString()}).${reason ? ` Note: ${reason}` : ''}`,
         },
       });
 
@@ -73,13 +80,35 @@ export async function POST(req: Request) {
         data: {
           adminUserId: user?.id || 'admin',
           adminFirebaseUid: adminFirebaseUid || null,
+          adminClerkId: user?.clerkUserId || null,
           action: 'GRANT_VIP',
-          targetUserId: userId,
+          targetUserId: targetUser.id,
           entityType: 'SUBSCRIPTION',
-          entityId: userId,
-          details: `Admin ${adminIdentifier} manually granted VIP to @${targetUser.username} (${grantDays} days, expires ${expiresAt.toISOString()})`,
+          entityId: targetUser.id,
+          details: `Admin ${adminIdentifier} manually granted VIP to @${targetUser.username} (${grantDays} days, expires ${expiresAt.toISOString()})${reason ? `. Reason: ${reason}` : ''}`,
         },
       });
+
+      // Sync Cloud Firestore
+      try {
+        const db = getAdminDb();
+        if (db) {
+          const firestoreData = {
+            is_vip: true,
+            isVIP: true,
+            membershipTier: 'VIP',
+            vip_expires_at: expiresAt.toISOString(),
+            subscription: {
+              isActive: true,
+              plan: 'VIP',
+              endDate: expiresAt.toISOString(),
+            },
+            updatedAt: now.toISOString(),
+          };
+          const uids = Array.from(new Set([targetUser.id, targetUser.clerkUserId, targetUser.firebaseUid])).filter(Boolean) as string[];
+          await Promise.all(uids.map((u) => db.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
+        }
+      } catch (e) {}
 
       return NextResponse.json({
         success: true,
@@ -95,7 +124,7 @@ export async function POST(req: Request) {
 
     if (action === 'revoke') {
       const updatedUser = await prisma.user.update({
-        where: { id: userId },
+        where: { id: targetUser.id },
         data: {
           membershipTier: 'FREE',
           is_vip: false,
@@ -104,9 +133,9 @@ export async function POST(req: Request) {
       });
 
       await prisma.subscription.upsert({
-        where: { userId },
+        where: { userId: targetUser.id },
         create: {
-          userId,
+          userId: targetUser.id,
           plan: 'FREE',
           isActive: false,
           subscriptionStatus: 'CANCELLED',
@@ -120,9 +149,9 @@ export async function POST(req: Request) {
 
       await prisma.notification.create({
         data: {
-          userId,
+          userId: targetUser.id,
           type: 'VIP_REVOKED',
-          content: '⚠️ VIP Status Changed: Your VIP subscription has been revoked by administration.',
+          content: `⚠️ VIP Status Changed: Your VIP subscription has been revoked by administration.${reason ? ` Reason: ${reason}` : ''}`,
         },
       });
 
@@ -130,13 +159,35 @@ export async function POST(req: Request) {
         data: {
           adminUserId: user?.id || 'admin',
           adminFirebaseUid: adminFirebaseUid || null,
+          adminClerkId: user?.clerkUserId || null,
           action: 'REVOKE_VIP',
-          targetUserId: userId,
+          targetUserId: targetUser.id,
           entityType: 'SUBSCRIPTION',
-          entityId: userId,
-          details: `Admin ${adminIdentifier} manually revoked VIP from @${targetUser.username}`,
+          entityId: targetUser.id,
+          details: `Admin ${adminIdentifier} manually revoked VIP from @${targetUser.username}${reason ? `. Reason: ${reason}` : ''}`,
         },
       });
+
+      // Sync Cloud Firestore
+      try {
+        const db = getAdminDb();
+        if (db) {
+          const firestoreData = {
+            is_vip: false,
+            isVIP: false,
+            membershipTier: 'FREE',
+            vip_expires_at: null,
+            subscription: {
+              isActive: false,
+              plan: 'FREE',
+              endDate: null,
+            },
+            updatedAt: now.toISOString(),
+          };
+          const uids = Array.from(new Set([targetUser.id, targetUser.clerkUserId, targetUser.firebaseUid])).filter(Boolean) as string[];
+          await Promise.all(uids.map((u) => db.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
+        }
+      } catch (e) {}
 
       return NextResponse.json({
         success: true,

@@ -30,7 +30,10 @@ export async function GET(req: Request) {
         plan: p.plan,
         region: p.region,
         status: p.status,
+        rejectionReason: p.rejectionReason,
+        screenshotUrl: p.screenshotUrl,
         createdAt: p.createdAt.toISOString(),
+        reviewedAt: p.reviewedAt ? p.reviewedAt.toISOString() : null,
       })),
     });
   } catch (error: any) {

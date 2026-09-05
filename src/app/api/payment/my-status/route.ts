@@ -10,7 +10,12 @@ export async function GET(req: Request) {
     }
 
     const latestRequest = await prisma.paymentRequest.findFirst({
-      where: { userId: user.id },
+      where: {
+        OR: [
+          { userId: user.id },
+          ...(user.clerkUserId ? [{ clerkUserId: user.clerkUserId }] : []),
+        ],
+      },
       orderBy: { createdAt: 'desc' },
     });
 

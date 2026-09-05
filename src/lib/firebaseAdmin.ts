@@ -125,6 +125,8 @@ export function getAdminDb(): Firestore | null {
   }
 }
 
+export const getFirestoreAdmin = getAdminDb;
+
 export async function verifyFirebaseIdToken(token: string) {
   try {
     const auth = getAdminAuth();
