@@ -5,6 +5,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import {
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -104,6 +106,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ─── Single Authoritative Auth State Listener ────────────────────────────────
   useEffect(() => {
+    // 1. Check for redirect result (mobile auth fallback)
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) {
+          console.log('[AUTH] Google redirect sign-in success. UID:', result.user.uid);
+          setFirebaseUser(result.user);
+          await initializeUserSession(result.user);
+        }
+      })
+      .catch((err) => {
+        console.warn('[AUTH] getRedirectResult notice:', err);
+      });
+
+    // 2. Continuous auth state observer
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       console.log('[AUTH] Auth state changed, UID:', fbUser?.uid || 'null');
       setFirebaseUser(fbUser);
@@ -193,6 +209,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (err: any) {
       console.error('[AUTH] Google login error:', err);
+      // If popup is blocked by strict mobile browser, fall back to redirect
+      if (err?.code === 'auth/popup-blocked') {
+        console.log('[AUTH] Popup was blocked by browser. Using redirect fallback...');
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
       const friendlyMsg = getFriendlyAuthErrorMessage(err);
       throw new Error(friendlyMsg);
     }
