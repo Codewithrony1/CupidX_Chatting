@@ -52,6 +52,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isNavigatingRef = useRef<boolean>(false);
 
   /**
+   * Safe, atomic browser navigation
+   */
+  const hardNavigate = (target: string) => {
+    if (typeof window !== 'undefined') {
+      window.location.replace(target);
+    } else {
+      router.replace(target);
+    }
+  };
+
+  /**
    * Evaluates if the user profile has completed first-time onboarding
    */
   const checkProfileCompletion = (u: User | null): boolean => {
@@ -112,7 +123,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (result?.user) {
           console.log('[AUTH] Google redirect sign-in success. UID:', result.user.uid);
           setFirebaseUser(result.user);
-          await initializeUserSession(result.user);
+          const profile = await initializeUserSession(result.user);
+          if (profile) {
+            const isComplete = checkProfileCompletion(profile);
+            hardNavigate(isComplete ? '/dashboard' : '/onboarding');
+          }
         }
       })
       .catch((err) => {
@@ -150,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
       console.log('[AUTH GUARD] Unauthenticated user accessing private route:', pathname, '-> redirecting to /login');
-      router.replace('/login');
+      hardNavigate('/login');
       setTimeout(() => { isNavigatingRef.current = false; }, 500);
       return;
     }
@@ -165,7 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isNavigatingRef.current = true;
         const target = isComplete ? '/dashboard' : '/onboarding';
         console.log('[AUTH GUARD] Authenticated user on auth page -> redirecting to:', target);
-        router.replace(target);
+        hardNavigate(target);
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
@@ -175,7 +190,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
         console.log('[AUTH GUARD] Profile already complete -> redirecting to /dashboard');
-        router.replace('/dashboard');
+        hardNavigate('/dashboard');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
@@ -185,12 +200,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
         console.log('[AUTH GUARD] Incomplete profile on protected route -> redirecting to /onboarding');
-        router.replace('/onboarding');
+        hardNavigate('/onboarding');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
     }
-  }, [loading, user, firebaseUser, pathname, router]);
+  }, [loading, user, firebaseUser, pathname]);
 
   // ─── 1. Google 1-Click Sign-in ────────────────────────────────────────────────
   const loginWithGoogle = async () => {
@@ -201,11 +216,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('[AUTH] Google login success. UID:', result.user.uid);
         setFirebaseUser(result.user);
         const profile = await initializeUserSession(result.user);
-        if (profile) {
-          const isComplete = checkProfileCompletion(profile);
-          const target = isComplete ? '/dashboard' : '/onboarding';
-          router.replace(target);
-        }
+        const isComplete = profile ? checkProfileCompletion(profile) : false;
+        const target = isComplete ? '/dashboard' : '/onboarding';
+        hardNavigate(target);
       }
     } catch (err: any) {
       console.error('[AUTH] Google login error:', err);
@@ -233,11 +246,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('[AUTH] Email login success. UID:', result.user.uid);
         setFirebaseUser(result.user);
         const profile = await initializeUserSession(result.user);
-        if (profile) {
-          const isComplete = checkProfileCompletion(profile);
-          const target = isComplete ? '/dashboard' : '/onboarding';
-          router.replace(target);
-        }
+        const isComplete = profile ? checkProfileCompletion(profile) : false;
+        const target = isComplete ? '/dashboard' : '/onboarding';
+        hardNavigate(target);
       }
     } catch (err: any) {
       console.error('[AUTH] Email login error:', err);
@@ -269,7 +280,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             displayName: name.trim(),
           }).catch(() => {});
         }
-        router.replace('/onboarding');
+        hardNavigate('/onboarding');
       }
     } catch (err: any) {
       console.error('[AUTH] Signup error:', err);
@@ -296,10 +307,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setFirebaseUser(null);
 
-      router.replace('/login');
+      hardNavigate('/login');
     } catch (e) {
       console.error('[AUTH] Logout error:', e);
-      router.replace('/login');
+      hardNavigate('/login');
     }
   };
 

@@ -147,8 +147,12 @@ export default function OnboardingPage() {
       await refreshUser();
 
       setTimeout(() => {
-        router.replace('/dashboard');
-      }, 800);
+        if (typeof window !== 'undefined') {
+          window.location.replace('/dashboard');
+        } else {
+          router.replace('/dashboard');
+        }
+      }, 500);
     } catch (err: any) {
       console.error('Onboarding save error:', err);
       setErrorMsg(err?.message || 'Failed to complete profile setup. Please try again.');
