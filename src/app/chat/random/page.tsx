@@ -146,6 +146,7 @@ export default function KnotChatRandomPage() {
   const isCurrentlyTypingRef = useRef(false);
 
   // Matchmaking control refs
+  const lastMessageSentTimeRef = useRef<number>(0);
   const queueListenerRef = useRef<(() => void) | null>(null);
   const matchListenerRef = useRef<(() => void) | null>(null);
   const messagesListenerRef = useRef<(() => void) | null>(null);
@@ -407,8 +408,21 @@ export default function KnotChatRandomPage() {
     const activeMid = activeMatchIdRef.current || matchId;
     if (!activeMid) return;
 
-    const senderUid = currentUidRef.current || currentUser?.firebaseUid || currentUser?.id || 'me';
+    // Rate-limiting: prevent spam flooding (max 1 message per 400ms)
+    const now = Date.now();
+    if (now - lastMessageSentTimeRef.current < 400) {
+      return;
+    }
+    lastMessageSentTimeRef.current = now;
+
+    // Length limit: 2,000 characters
     const textToSend = inputText.trim();
+    if (textToSend.length > 2000) {
+      alert('Message exceeds the maximum limit of 2,000 characters.');
+      return;
+    }
+
+    const senderUid = currentUidRef.current || currentUser?.firebaseUid || currentUser?.id || 'me';
     const imageToSend = selectedImageFile;
 
     const tempId = `temp_${Date.now()}`;
