@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { isVipAvatar } from '@/lib/avatars';
+import { getAdminDb } from '@/lib/firebaseAdmin';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -91,35 +92,48 @@ export async function PUT(req: Request) {
       return NextResponse.json({ success: true, profile: updated });
     }
 
-    // ─── 1. FREE vs VIP SERVER-SIDE FIELD LOCKS ──────────────────────────────
+    // ─── 1. PERMANENT LOCKS & FREE vs VIP LOCK ENFORCEMENT ──────────────────
+    const isProfileLocked = Boolean(user.genderDobLocked || user.profile?.ageGenderConfirmed);
     const inputDob = dob || dateOfBirth;
     const existingDob = user.dob || user.profile?.dob;
     const existingGender = user.gender || user.profile?.gender;
     const existingBio = user.profile?.bio || '';
+    const currentName = user.displayName || user.fullName || user.username;
 
-    // A. Free user trying to change DOB after already set
-    if (inputDob && existingDob && !isVIP) {
+    // A. Date of Birth: PERMANENTLY LOCKED for BOTH Free and VIP once set
+    if (inputDob && existingDob) {
       const newDobDate = new Date(inputDob).toISOString().slice(0, 10);
       const oldDobDate = new Date(existingDob).toISOString().slice(0, 10);
       if (newDobDate !== oldDobDate) {
         return NextResponse.json(
           {
-            error: 'Date of Birth is locked for Free members. Upgrade to VIP to change your birth date.',
-            isVipRequired: true,
+            error: 'Date of birth is permanently locked to preserve age verification and safety standards.',
+            isLocked: true,
           },
           { status: 403 }
         );
       }
     }
 
-    // B. Free user trying to change Gender after already set
-    if (gender && existingGender && existingGender !== 'unspecified' && !isVIP) {
+    // B. Free users cannot edit Full / Display Name once profile is set up
+    if (displayName !== undefined && displayName.trim() !== currentName && isProfileLocked && !isVIP) {
+      return NextResponse.json(
+        {
+          error: 'Your name is locked for Free members. Upgrade to CupidX VIP to edit your name.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
+    }
+
+    // C. Free users cannot edit Gender once profile is set up
+    if (gender !== undefined && existingGender && existingGender !== 'unspecified' && isProfileLocked && !isVIP) {
       const cleanNewGender = gender.trim().toLowerCase();
       const cleanOldGender = existingGender.trim().toLowerCase();
       if (cleanNewGender !== cleanOldGender) {
         return NextResponse.json(
           {
-            error: 'Gender is locked for Free members. Upgrade to VIP to change your gender.',
+            error: 'Gender is locked for Free members. Upgrade to CupidX VIP to change your gender.',
             isVipRequired: true,
           },
           { status: 403 }
@@ -127,7 +141,22 @@ export async function PUT(req: Request) {
       }
     }
 
-    // C. Free user trying to edit Bio
+    // D. Free users cannot edit Avatar / Profile Picture once profile is set up
+    const isChangingAvatar =
+      (avatarEmoji !== undefined && avatarEmoji !== '' && avatarEmoji !== user.profile?.avatarEmoji) ||
+      (avatarType !== undefined && avatarType !== (user.profile?.avatarType || 'EMOJI')) ||
+      Boolean(avatarData);
+    if (isChangingAvatar && isProfileLocked && !isVIP) {
+      return NextResponse.json(
+        {
+          error: 'Avatar customization is locked for Free members. Upgrade to CupidX VIP to unlock custom photos and premium avatars.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
+    }
+
+    // E. Free users cannot edit Bio
     if (bio !== undefined && !isVIP) {
       const cleanNewBio = bio.trim();
       if (cleanNewBio !== existingBio.trim()) {
@@ -141,7 +170,7 @@ export async function PUT(req: Request) {
       }
     }
 
-    // ─── 2. Display Name Change Limit: Max 4 per calendar day ─────────────────
+    // ─── 2. Display Name Change Limit for VIP: Max 4 per calendar day ─────────
     let cleanDisplayName: string | undefined = undefined;
     let nextNameChangesCount = user.profile?.nameChangesCount ?? 0;
     let nextNameChangesDate: Date | undefined = undefined;
@@ -162,7 +191,6 @@ export async function PUT(req: Request) {
         );
       }
 
-      const currentName = user.displayName || user.fullName || user.username;
       if (trimmed !== currentName) {
         const todayStr = new Date().toISOString().slice(0, 10);
         const lastChangeStr = user.profile?.nameChangesDate
@@ -193,7 +221,7 @@ export async function PUT(req: Request) {
     const cleanGender = gender !== undefined ? gender.trim().toLowerCase() : undefined;
     const parsedDob = inputDob ? new Date(inputDob) : undefined;
 
-    // Strict VIP checks
+    // Strict VIP checks for Discovery / Mood / Personality
     const isUpdatingVIPAvatarEmoji = avatarEmoji !== undefined && avatarEmoji !== '' && isVipAvatar(avatarEmoji);
     const isUpdatingVIPAvatarImage = (avatarData && avatarData.startsWith('data:image/')) || avatarType === 'IMAGE';
     const isUpdatingVIPPreferences = preferredGender !== undefined && preferredGender !== '' && preferredGender !== 'auto';
@@ -293,6 +321,31 @@ export async function PUT(req: Request) {
       where: { userId: user.id },
       data: profileUpdateData,
     });
+
+    // Sync to Cloud Firestore in the background via Admin SDK
+    try {
+      const adminDb = getAdminDb();
+      if (adminDb) {
+        const uids = Array.from(new Set([user.id, user.clerkUserId, user.firebaseUid])).filter(Boolean) as string[];
+        const fsUpdates: any = {
+          updatedAt: Date.now(),
+        };
+        if (cleanDisplayName) {
+          fsUpdates.displayName = cleanDisplayName;
+          fsUpdates.fullName = cleanDisplayName;
+        }
+        if (cleanGender && isVIP) {
+          fsUpdates.gender = cleanGender;
+        }
+        if (updatedProfile.avatarEmoji) fsUpdates['profile.avatarEmoji'] = updatedProfile.avatarEmoji;
+        if (updatedProfile.avatarType) fsUpdates['profile.avatarType'] = updatedProfile.avatarType;
+        if (updatedProfile.avatarUrl) fsUpdates['profile.avatarUrl'] = updatedProfile.avatarUrl;
+        if (cleanBio !== undefined) fsUpdates['profile.bio'] = cleanBio;
+        Promise.all(uids.map((u) => adminDb.collection('users').doc(u).set(fsUpdates, { merge: true }).catch(() => {}))).catch(() => {});
+      }
+    } catch (fsErr) {
+      console.warn('Firestore server sync notice:', fsErr);
+    }
 
     const remainingNameChanges = Math.max(0, 4 - (updatedProfile.nameChangesCount ?? 0));
 

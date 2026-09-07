@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { updateFirestoreUserProfile, calculateAge } from '@/lib/firestoreUser';
+import { calculateAge } from '@/lib/firestoreUser';
 import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
@@ -52,7 +52,9 @@ export default function OnboardingPage() {
     if (!authLoading && user) {
       const isComplete = Boolean(
         user.profileCompleted ||
-        (user.profile?.ageGenderConfirmed && user.gender && user.gender !== 'unspecified' && (user.dateOfBirth || user.profile?.dateOfBirth))
+        (user as any).genderDobLocked ||
+        user.profile?.ageGenderConfirmed ||
+        ((user.dateOfBirth || user.profile?.dateOfBirth) && user.gender && user.gender !== 'unspecified' && (user.fullName || user.displayName))
       );
       if (isComplete && !submitting && !success) {
         router.replace('/dashboard');
@@ -99,58 +101,38 @@ export default function OnboardingPage() {
       return;
     }
 
-    const effectiveUsername = (user?.username || (displayName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') || `user_${Date.now().toString().slice(-4)}`));
-
     setSubmitting(true);
     setErrorMsg('');
 
     try {
-      const uid = user?.id || user?.uid;
-
-      // 1. Save directly to Cloud Firestore
-      if (uid) {
-        await updateFirestoreUserProfile(uid, {
-          fullName: displayName.trim(),
-          displayName: displayName.trim(),
-          username: effectiveUsername,
-          usernameLower: effectiveUsername.toLowerCase(),
-          dateOfBirth,
-          gender,
-          profileCompleted: true,
-          profile: {
-            bio: user?.profile?.bio || 'Hey there! I am using CupidX.',
-            dateOfBirth,
-            gender,
-            age,
-            avatarEmoji: selectedEmoji,
-            avatarType: 'EMOJI',
-            ageGenderConfirmed: true,
-            themePreference: 'purple',
-            randomChatIntroSeen: true,
-            interests: '',
-          },
-        });
-      }
-
-      // 2. Background sync with backend
-      fetch('/api/auth/onboarding', {
+      // Direct authoritative API call to complete onboarding and permanently lock identity
+      const res = await fetch('/api/auth/onboarding', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          username: effectiveUsername,
           displayName: displayName.trim(),
-          avatarEmoji: selectedEmoji,
           dob: dateOfBirth,
           gender,
+          avatarEmoji: selectedEmoji,
         }),
-      }).catch(() => {});
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Failed to complete profile setup. Please check your information and try again.');
+        setSubmitting(false);
+        return;
+      }
 
       setSuccess(true);
       await refreshUser();
 
       setTimeout(() => {
         router.replace('/dashboard');
-      }, 500);
+      }, 400);
     } catch (err: any) {
       console.error('Onboarding save error:', err);
       setErrorMsg(err?.message || 'Failed to complete profile setup. Please try again.');

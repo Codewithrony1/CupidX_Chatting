@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { VIP_AVATAR_CATEGORIES } from '@/lib/avatars';
-import { formatDisplayDob, calculateAge, updateFirestoreUserProfile } from '@/lib/firestoreUser';
+import { formatDisplayDob, calculateAge } from '@/lib/firestoreUser';
 import AppShell from '@/components/AppShell';
 import BottomSheet from '@/components/ui/BottomSheet';
 import {
@@ -191,63 +191,29 @@ export default function ProfilePage() {
     setSaving(true);
     setSaveSuccess(false);
 
-    const uid = user?.id || user?.uid;
-
     try {
-      // 1. Save to Cloud Firestore
-      if (uid) {
-        const updates: any = {
-          fullName: displayName.trim(),
-          displayName: displayName.trim(),
-          profile: {
-            ...user?.profile,
-            showBio,
-            showGender,
-            preferredGender,
-            personalityPreferences: personalityTags.join(','),
-            avatarType,
-            avatarEmoji,
-          },
-        };
-
-        if (isVIP) {
-          updates.dateOfBirth = dateOfBirth;
-          updates.gender = gender;
-          updates.profile.bio = bio;
-          updates.profile.dateOfBirth = dateOfBirth;
-          updates.profile.gender = gender;
-          updates.profile.age = calculateAge(dateOfBirth);
-          updates.profile.mood = mood;
-          updates.profile.showMood = showMood;
-        }
-
-        await updateFirestoreUserProfile(uid, updates);
-      }
-
-      // 2. Sync to Backend Database API
+      // Save directly to Authoritative Database API (which also syncs Firestore server-side)
       const res = await fetch('/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          displayName,
+          displayName: isVIP ? displayName : undefined,
           bio: isVIP ? bio : undefined,
           showBio,
-          dob: isVIP ? dateOfBirth : undefined,
-          dateOfBirth: isVIP ? dateOfBirth : undefined,
           gender: isVIP ? gender : undefined,
           showGender,
-          preferredGender,
-          personalityPreferences: personalityTags.join(','),
+          preferredGender: isVIP ? preferredGender : undefined,
+          personalityPreferences: isVIP ? personalityTags.join(',') : undefined,
           mood: isVIP ? mood : undefined,
           showMood,
           moodDuration,
-          avatarType,
-          avatarEmoji,
-          avatarData: avatarData || undefined,
+          avatarType: isVIP ? avatarType : undefined,
+          avatarEmoji: isVIP ? avatarEmoji : undefined,
+          avatarData: isVIP ? (avatarData || undefined) : undefined,
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setSaveSuccess(true);
         await refreshUser();
@@ -360,38 +326,22 @@ export default function ProfilePage() {
               </label>
 
               {!isVIP ? (
-                /* FREE USER AVATAR PICKER: 😊 and 😎 ONLY */
+                /* FREE USER AVATAR: LOCKED */
                 <div className="space-y-3">
-                  <div className="flex items-center justify-center space-x-3">
-                    {['😊', '😎'].map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => {
-                          setAvatarEmoji(emoji);
-                          setAvatarType('EMOJI');
-                        }}
-                        className={`w-12 h-12 rounded-2xl text-2xl flex items-center justify-center transition-all cursor-pointer select-none ${
-                          avatarEmoji === emoji && avatarType === 'EMOJI'
-                            ? 'bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-pink-300 shadow-xl scale-110'
-                            : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-60 hover:opacity-100'
-                        }`}
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="p-3 rounded-2xl bg-white/5 border border-pink-500/20 text-center space-y-1.5">
-                    <p className="text-[11px] font-semibold text-pink-200/80">
-                      💎 Unlock 25+ Premium Avatars & Custom Image DP with CupidX VIP
+                  <div className="p-3 rounded-2xl bg-white/5 border border-pink-500/20 text-center space-y-2">
+                    <div className="flex items-center justify-center gap-2 text-xs font-bold text-pink-200">
+                      <Lock className="w-3.5 h-3.5 text-yellow-400" />
+                      <span>Avatar is locked ({avatarEmoji})</span>
+                    </div>
+                    <p className="text-[11px] text-pink-200/70">
+                      💎 Upgrade to CupidX VIP to unlock 25+ Premium Avatars &amp; Custom Profile Photos
                     </p>
                     <Link
                       href="/vip"
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-slate-950 font-black text-xs shadow-md hover:scale-105 transition-all"
                     >
                       <Crown className="w-3.5 h-3.5 fill-current" />
-                      <span>Explore VIP →</span>
+                      <span>Unlock Avatars with VIP →</span>
                     </Link>
                   </div>
                 </div>
@@ -488,18 +438,42 @@ export default function ProfilePage() {
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Full / Display Name</label>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-300 font-bold border border-pink-500/20">
-                    {`Name changes left today: ${Math.max(0, 4 - ((user?.profile as any)?.nameChangesCount ?? 0))}/4`}
-                  </span>
+                  {isVIP ? (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-300 font-bold border border-pink-500/20">
+                      {`Name changes left today: ${Math.max(0, 4 - ((user?.profile as any)?.nameChangesCount ?? 0))}/4`}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 font-bold border border-rose-500/20 flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-rose-400" />
+                      <span>Locked for Free</span>
+                    </span>
+                  )}
                 </div>
-                <input
-                  type="text"
-                  maxLength={50}
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. Rony Rai"
-                  className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-semibold"
-                />
+                {isVIP ? (
+                  <input
+                    type="text"
+                    maxLength={50}
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="e.g. Rony Rai"
+                    className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-semibold"
+                  />
+                ) : (
+                  <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">
+                      {displayName || user?.fullName || user?.username}
+                    </span>
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1 font-bold">
+                      <Lock className="w-3 h-3 text-yellow-400" />
+                      <span>Locked</span>
+                    </span>
+                  </div>
+                )}
+                {!isVIP && (
+                  <p className="text-[10px] text-pink-200/50">
+                    Profile name is locked after initial setup. Upgrade to VIP to edit your name.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -563,7 +537,7 @@ export default function ProfilePage() {
 
               {isVIP ? (
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-1">
-                  <Crown className="w-3 h-3 fill-current" /> Editable with VIP 💎
+                  <Crown className="w-3 h-3 fill-current" /> Gender Editable with VIP 💎
                 </span>
               ) : (
                 <span className="text-[10px] px-2.5 py-0.5 rounded-full font-extrabold border bg-rose-500/15 text-rose-300 border-rose-500/30 flex items-center gap-1">
@@ -573,7 +547,7 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* Date of Birth Field */}
+            {/* Date of Birth Field — Permanently Locked */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">
@@ -584,30 +558,20 @@ export default function ProfilePage() {
                 </span>
               </div>
 
-              {isVIP ? (
-                <input
-                  type="date"
-                  max={new Date().toISOString().split('T')[0]}
-                  value={dateOfBirth}
-                  onChange={(e) => setDateOfBirth(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs font-semibold cursor-pointer"
-                />
-              ) : (
-                <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Calendar className="w-4 h-4 text-slate-400" />
-                    <span className="text-xs font-bold text-white">
-                      {formatDisplayDob(dateOfBirth || user?.dateOfBirth || user?.profile?.dateOfBirth)}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 flex items-center gap-1 font-bold">
-                    <Lock className="w-3 h-3 text-yellow-400" />
-                    <span>Locked</span>
+              <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Calendar className="w-4 h-4 text-slate-400" />
+                  <span className="text-xs font-bold text-white">
+                    {formatDisplayDob(dateOfBirth || user?.dateOfBirth || user?.profile?.dateOfBirth)}
                   </span>
                 </div>
-              )}
+                <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1 font-bold">
+                  <Shield className="w-3 h-3 text-emerald-400" />
+                  <span>Age Verified</span>
+                </span>
+              </div>
               <p className="text-[10px] text-pink-200/50">
-                {isVIP ? 'VIP members can update their date of birth anytime.' : 'Date of birth is permanently locked for Free members.'}
+                Date of birth is permanently locked to protect community safety and age verification (18+).
               </p>
             </div>
 

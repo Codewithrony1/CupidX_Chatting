@@ -39,87 +39,88 @@ export async function GET(req: Request) {
   }
 }
 
+import { getAdminDb } from '@/lib/firebaseAdmin';
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const { username, displayName: inputDisplayName, avatarEmoji: inputAvatarEmoji, age: inputAge, gender: inputGender, dob: inputDob, email: inputEmail } = body;
-
-    if (!username) {
-      return NextResponse.json({ error: 'Username is required' }, { status: 400 });
-    }
-
-    const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
-    const cleanDisplayName = (inputDisplayName || '').trim() || cleanUsername;
-    const selectedEmoji = inputAvatarEmoji || '😊';
-    const cleanGender = inputGender ? inputGender.toString().trim().toLowerCase() : 'unspecified';
-    const parsedDob = inputDob ? new Date(inputDob) : null;
-    
-    let parsedAge = 18;
-    if (parsedDob && !isNaN(parsedDob.getTime())) {
-      const today = new Date();
-      let calculatedAge = today.getFullYear() - parsedDob.getFullYear();
-      const m = today.getMonth() - parsedDob.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < parsedDob.getDate())) {
-        calculatedAge--;
-      }
-      parsedAge = Math.min(99, Math.max(18, calculatedAge));
-    } else if (inputAge) {
-      parsedAge = Math.min(99, Math.max(18, parseInt(inputAge.toString(), 10)));
-    }
-
-    const validation = usernameSchema.safeParse(cleanUsername);
-    if (!validation.success) {
-      return NextResponse.json(
-        { error: validation.error.issues[0]?.message || 'Invalid username format' },
-        { status: 400 }
-      );
-    }
-
-    let user = await getCurrentUser(req);
-
-
-
+    const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
 
-    if (user.username !== cleanUsername) {
-      const taken = await prisma.user.findFirst({
-        where: { username: cleanUsername, id: { not: user.id } },
-      });
+    const body = await req.json().catch(() => ({}));
+    const { displayName, dob, gender, avatarEmoji } = body;
 
-      if (taken) {
-        return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
-      }
+    const cleanDisplayName = (displayName || '').trim();
+    if (cleanDisplayName.length < 2 || cleanDisplayName.length > 50) {
+      return NextResponse.json(
+        { error: 'Please enter a valid full name (2 to 50 characters).' },
+        { status: 400 }
+      );
     }
 
-    user = await prisma.user.update({
+    if (!dob) {
+      return NextResponse.json({ error: 'Date of birth is required.' }, { status: 400 });
+    }
+
+    const parsedDob = new Date(dob);
+    if (isNaN(parsedDob.getTime())) {
+      return NextResponse.json({ error: 'Please enter a valid date of birth.' }, { status: 400 });
+    }
+
+    const today = new Date();
+    if (parsedDob > today) {
+      return NextResponse.json({ error: 'Date of birth cannot be in the future.' }, { status: 400 });
+    }
+
+    // Strict server-side age calculation (minimum 18 years old)
+    let calculatedAge = today.getFullYear() - parsedDob.getFullYear();
+    const m = today.getMonth() - parsedDob.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < parsedDob.getDate())) {
+      calculatedAge--;
+    }
+
+    if (calculatedAge < 18) {
+      return NextResponse.json(
+        { error: 'You must be at least 18 years old to join CupidX.' },
+        { status: 400 }
+      );
+    }
+
+    const validGenders = ['male', 'female', 'other', 'prefer_not_to_say'];
+    const cleanGender = gender && validGenders.includes(gender.toString().trim().toLowerCase())
+      ? gender.toString().trim().toLowerCase()
+      : 'male';
+
+    const selectedEmoji = avatarEmoji || '😊';
+
+    // Update User & Profile in Prisma DB with Permanent Lock
+    const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
-        username: cleanUsername,
-        displayName: cleanDisplayName,
         fullName: cleanDisplayName,
+        displayName: cleanDisplayName,
         gender: cleanGender,
-        dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
-        email: inputEmail ? inputEmail.trim() : user.email,
+        dob: parsedDob,
+        genderDobLocked: true, // Permanent lock for identity
         profile: {
           upsert: {
             update: {
               avatarType: 'EMOJI',
               avatarEmoji: selectedEmoji,
-              age: parsedAge,
+              age: calculatedAge,
               gender: cleanGender,
-              dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
-              ageGenderConfirmed: true,
+              dob: parsedDob,
+              ageGenderConfirmed: true, // Permanent lock
             },
             create: {
               avatarType: 'EMOJI',
               avatarEmoji: selectedEmoji,
-              age: parsedAge,
+              age: calculatedAge,
               gender: cleanGender,
-              dob: parsedDob && !isNaN(parsedDob.getTime()) ? parsedDob : undefined,
-              ageGenderConfirmed: true,
-              bio: 'Hey there! I am using Cupidx.',
+              dob: parsedDob,
+              ageGenderConfirmed: true, // Permanent lock
+              bio: 'Hey there! I am using CupidX.',
             },
           },
         },
@@ -127,27 +128,60 @@ export async function POST(req: Request) {
       include: { profile: true, subscription: true },
     });
 
-    const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
+    const isVIP = updatedUser.membershipTier === 'VIP' || (updatedUser.subscription?.isActive === true && updatedUser.subscription?.plan === 'VIP');
+
+    // Server-side non-blocking Firestore sync via Firebase Admin
+    try {
+      const adminDb = getAdminDb();
+      if (adminDb) {
+        const firestoreData = {
+          fullName: cleanDisplayName,
+          displayName: cleanDisplayName,
+          gender: cleanGender,
+          dateOfBirth: parsedDob.toISOString().slice(0, 10),
+          profileCompleted: true,
+          updatedAt: Date.now(),
+          profile: {
+            fullName: cleanDisplayName,
+            displayName: cleanDisplayName,
+            gender: cleanGender,
+            dateOfBirth: parsedDob.toISOString().slice(0, 10),
+            age: calculatedAge,
+            avatarEmoji: selectedEmoji,
+            avatarType: 'EMOJI',
+            ageGenderConfirmed: true,
+          },
+        };
+        const uids = Array.from(new Set([updatedUser.id, updatedUser.clerkUserId, updatedUser.firebaseUid])).filter(Boolean) as string[];
+        Promise.all(uids.map((u) => adminDb.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {}))).catch(() => {});
+      }
+    } catch (fsErr) {
+      console.warn('Firestore server sync notice:', fsErr);
+    }
+
     const token = signToken({
-      userId: user.id,
-      username: user.username,
-      role: user.role,
+      userId: updatedUser.id,
+      username: updatedUser.username,
+      role: updatedUser.role,
     });
 
     const response = NextResponse.json({
       success: true,
       message: 'Profile onboarded successfully',
       user: {
-        id: user.id,
-        username: user.username,
-        fullName: user.fullName,
-        displayName: user.displayName,
-        email: user.email,
-        role: user.role,
+        id: updatedUser.id,
+        clerkUserId: updatedUser.clerkUserId,
+        username: updatedUser.username,
+        fullName: updatedUser.fullName,
+        displayName: updatedUser.displayName,
+        email: updatedUser.email,
+        role: updatedUser.role,
         membershipTier: isVIP ? 'VIP' : 'FREE',
         is_vip: isVIP,
-        profile: user.profile,
-        subscription: user.subscription,
+        profileCompleted: true,
+        profileLocked: true,
+        profile: updatedUser.profile,
+        subscription: updatedUser.subscription,
       },
     });
 

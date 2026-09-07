@@ -48,13 +48,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!u) return false;
     return Boolean(
       u.profileCompleted === true ||
-      (u.dateOfBirth && u.gender && u.gender !== 'unspecified') ||
-      (u.profile?.dateOfBirth && u.profile?.gender && u.profile?.gender !== 'unspecified')
+      u.profileLocked === true ||
+      u.genderDobLocked === true ||
+      u.profile?.ageGenderConfirmed === true ||
+      ((u.dateOfBirth || u.profile?.dateOfBirth) && u.gender && u.gender !== 'unspecified' && (u.fullName || u.displayName))
     );
   };
 
   /**
-   * Initializes user profile once from Firestore & links with Clerk
+   * Initializes user profile by syncing canonical backend user (/api/auth/me) and Firestore
    */
   const initializeUserSession = async (cUser: any): Promise<UserProfile | null> => {
     if (!cUser) {
@@ -74,21 +76,114 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const displayName = cUser.fullName || cUser.username || cUser.firstName || 'User';
       const photoURL = cUser.imageUrl || null;
 
-      const firestoreProfile = await getOrCreateFirestoreUser({
+      // Parallel fetch: Canonical backend DB (/api/auth/me) + Firestore document
+      const [backendRes, firestoreProfile] = await Promise.all([
+        fetch('/api/auth/me', {
+          headers: { 'x-clerk-user-id': cUser.id },
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        getOrCreateFirestoreUser({
+          uid: cUser.id,
+          displayName,
+          email,
+          photoURL,
+        }).catch(() => null),
+      ]);
+
+      const backendUser = backendRes?.user;
+
+      const baseProfile: UserProfile = firestoreProfile || {
+        id: cUser.id,
         uid: cUser.id,
-        displayName,
+        clerkUserId: cUser.id,
+        firebaseUid: cUser.id,
+        username: cUser.username || `user_${cUser.id.slice(-5)}`,
+        usernameLower: (cUser.username || `user_${cUser.id.slice(-5)}`).toLowerCase(),
+        fullName: displayName,
+        displayName: displayName,
         email,
-        photoURL,
-      });
+        role: 'USER' as const,
+        membershipTier: 'FREE',
+        is_vip: false,
+        isVIP: false,
+        online: true,
+        status: 'active' as const,
+        profileCompleted: false,
+        profileLocked: false,
+        genderDobLocked: false,
+        dateOfBirth: null,
+        gender: 'unspecified',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        profile: {
+          bio: 'Hey there! I am using CupidX.',
+          age: 18,
+          dateOfBirth: null,
+          gender: 'unspecified',
+          themePreference: 'purple',
+          avatarType: 'EMOJI',
+          avatarEmoji: '😊',
+          avatarUrl: null,
+          interests: '',
+          randomChatIntroSeen: false,
+          ageGenderConfirmed: false,
+        },
+        subscription: {
+          isActive: false,
+          plan: 'FREE',
+        },
+      };
 
-      setUser(firestoreProfile);
+      const isProfileDone = Boolean(
+        backendUser?.profileCompleted ||
+        backendUser?.profileLocked ||
+        backendUser?.genderDobLocked ||
+        backendUser?.profile?.ageGenderConfirmed ||
+        baseProfile.profileCompleted ||
+        baseProfile.profile?.ageGenderConfirmed ||
+        ((backendUser?.dob || baseProfile.dateOfBirth || baseProfile.profile?.dateOfBirth) &&
+          (backendUser?.gender || baseProfile.gender) !== 'unspecified' &&
+          (backendUser?.fullName || baseProfile.fullName))
+      );
 
-      // Background session sync with API routes
-      fetch('/api/auth/me', {
-        headers: { 'x-clerk-user-id': cUser.id },
-      }).catch(() => {});
+      const mergedProfile: UserProfile = {
+        ...baseProfile,
+        id: backendUser?.id || baseProfile.id,
+        uid: cUser.id,
+        clerkUserId: cUser.id,
+        username: backendUser?.username || baseProfile.username,
+        usernameLower: (backendUser?.username || baseProfile.username).toLowerCase(),
+        fullName: backendUser?.fullName || baseProfile.fullName,
+        displayName: backendUser?.displayName || baseProfile.displayName,
+        email: backendUser?.email || baseProfile.email,
+        role: (backendUser?.role as any) || baseProfile.role,
+        membershipTier: backendUser?.membershipTier || baseProfile.membershipTier,
+        is_vip: Boolean(backendUser?.is_vip ?? baseProfile.is_vip),
+        isVIP: Boolean(backendUser?.is_vip ?? baseProfile.isVIP),
+        dateOfBirth: backendUser?.dob || baseProfile.dateOfBirth,
+        gender: backendUser?.gender || baseProfile.gender,
+        genderDobLocked: Boolean(backendUser?.genderDobLocked ?? baseProfile.genderDobLocked),
+        profileLocked: Boolean(backendUser?.profileLocked ?? baseProfile.profileLocked ?? isProfileDone),
+        profileCompleted: isProfileDone,
+        profile: {
+          ...baseProfile.profile,
+          ...(backendUser?.profile || {}),
+          avatarEmoji: backendUser?.profile?.avatarEmoji || baseProfile.profile?.avatarEmoji || '😊',
+          avatarType: backendUser?.profile?.avatarType || baseProfile.profile?.avatarType || 'EMOJI',
+          avatarUrl: backendUser?.profile?.avatarUrl || baseProfile.profile?.avatarUrl || null,
+          ageGenderConfirmed: Boolean(
+            backendUser?.profile?.ageGenderConfirmed ||
+            baseProfile.profile?.ageGenderConfirmed ||
+            backendUser?.genderDobLocked
+          ),
+          age: backendUser?.dob ? calculateAge(backendUser.dob) : baseProfile.profile?.age,
+        },
+        subscription: backendUser?.subscription || baseProfile.subscription,
+      };
 
-      return firestoreProfile;
+      setUser(mergedProfile);
+      return mergedProfile;
     } catch (err) {
       console.error('[AUTH] Profile load error:', err);
       return null;

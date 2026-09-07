@@ -25,6 +25,8 @@ export interface UserProfile {
   online: boolean;
   status: 'active' | 'suspended';
   profileCompleted: boolean;
+  profileLocked?: boolean;
+  genderDobLocked?: boolean;
   dateOfBirth?: string | null; // Format: "YYYY-MM-DD"
   gender: string; // "male", "female", "other", "prefer_not_to_say", "unspecified"
   createdAt: number;
