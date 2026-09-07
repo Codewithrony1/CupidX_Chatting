@@ -5,6 +5,7 @@ import { ClerkProvider } from '@clerk/nextjs';
 import { AuthProvider } from '@/context/AuthContext';
 import { SocketProvider } from '@/context/SocketContext';
 import PWAInstallPrompt from '@/components/PWAInstallPrompt';
+import { Analytics } from '@vercel/analytics/next';
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -49,6 +50,7 @@ export default function RootLayout({
               {children}
             </SocketProvider>
           </AuthProvider>
+          <Analytics />
         </body>
       </html>
     </ClerkProvider>
