@@ -1,52 +1,61 @@
 /**
  * CupidX Authentication Error Translator
- * Maps Firebase Auth error codes to user-friendly messages.
+ * Maps Clerk authentication error codes to user-friendly messages.
  */
 
 export function getFriendlyAuthErrorMessage(error: any): string {
   if (!error) return 'An unexpected error occurred. Please try again.';
 
+  // If Clerk error array is present
+  if (Array.isArray(error?.errors) && error.errors.length > 0) {
+    const firstError = error.errors[0];
+    if (firstError?.longMessage) return firstError.longMessage;
+    if (firstError?.message) return firstError.message;
+    if (firstError?.code) {
+      const mapped = mapClerkErrorCode(firstError.code);
+      if (mapped) return mapped;
+    }
+  }
+
   const code = typeof error === 'string' ? error : error?.code || error?.message || '';
+  const mapped = mapClerkErrorCode(code);
+  if (mapped) return mapped;
 
+  if (typeof error?.message === 'string' && error.message.length > 0) {
+    return error.message;
+  }
+
+  return 'Authentication failed. Please try again.';
+}
+
+function mapClerkErrorCode(code: string): string {
   switch (code) {
-    // Credential & User Errors
-    case 'auth/invalid-credential':
-    case 'auth/wrong-password':
-    case 'auth/user-not-found':
-      return 'Email or password is incorrect.';
-    case 'auth/invalid-email':
-      return 'Please enter a valid email address.';
-    case 'auth/user-disabled':
-      return 'This account has been disabled. Please contact support.';
-    case 'auth/email-already-in-use':
+    // Identifier & Account Errors
+    case 'form_identifier_not_found':
+      return 'No account was found with this email or username. Please check your spelling or sign up.';
+    case 'form_password_incorrect':
+      return 'Incorrect password. Please try again or reset your password.';
+    case 'form_identifier_exists':
       return 'An account already exists with this email address. Please sign in instead.';
-    case 'auth/weak-password':
-      return 'Please choose a stronger password (minimum 6 characters).';
-
-    // Popup & Provider Errors
-    case 'auth/popup-closed-by-user':
-      return 'Google sign-in was cancelled.';
-    case 'auth/popup-blocked':
-      return 'Your browser blocked the Google sign-in window. Please allow popups for this site and try again.';
-    case 'auth/unauthorized-domain':
-      return 'This domain is not authorized for Google sign-in in Firebase Console. Please add cupidxchat.in and www.cupidxchat.in to Firebase Console -> Authentication -> Settings -> Authorized Domains.';
-    case 'auth/cancelled-popup-request':
-      return 'Only one sign-in window can be open at a time.';
-    case 'auth/operation-not-allowed':
-      return 'This sign-in method is not enabled in Firebase Console.';
-
-    // Network & Rate Limits
-    case 'auth/network-request-failed':
-      return 'Network error. Please check your internet connection and try again.';
-    case 'auth/too-many-requests':
-      return 'Too many failed attempts. Please wait a moment and try again.';
-    case 'auth/requires-recent-login':
-      return 'Please sign in again to complete this action.';
-
+    case 'form_password_length_too_short':
+      return 'Please choose a stronger password (minimum 8 characters).';
+    case 'form_password_pwned':
+      return 'This password has appeared in a data breach. Please choose a more secure password.';
+    case 'form_code_incorrect':
+      return 'The verification code you entered is incorrect. Please check and try again.';
+    case 'verification_expired':
+      return 'The verification code has expired. Please request a new code.';
+    case 'session_exists':
+      return 'You are already signed in. Redirecting to your dashboard...';
+    case 'user_locked':
+      return 'Account temporarily locked due to too many failed attempts. Please try again later.';
+    case 'strategy_for_user_invalid':
+      return 'This sign-in method is not enabled for your account.';
+    case 'too_many_requests':
+      return 'Too many attempts. Please wait a few moments and try again.';
+    case 'network_error':
+      return 'Network connection error. Please check your internet and try again.';
     default:
-      if (typeof error?.message === 'string' && error.message.length > 0 && !error.message.includes('FirebaseError')) {
-        return error.message;
-      }
-      return 'Authentication failed. Please try again.';
+      return '';
   }
 }

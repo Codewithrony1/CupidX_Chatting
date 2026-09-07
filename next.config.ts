@@ -9,6 +9,27 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  async headers() {
+    return [
+      {
+        source: '/(login|signup|register|dashboard|onboarding|sso-callback|chat/:path*|premium|api/:path*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'no-store',
+          },
+          {
+            key: 'Vercel-CDN-Cache-Control',
+            value: 'no-store',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

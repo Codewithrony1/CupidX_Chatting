@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -147,11 +149,7 @@ export default function OnboardingPage() {
       await refreshUser();
 
       setTimeout(() => {
-        if (typeof window !== 'undefined') {
-          window.location.replace('/dashboard');
-        } else {
-          router.replace('/dashboard');
-        }
+        router.replace('/dashboard');
       }, 500);
     } catch (err: any) {
       console.error('Onboarding save error:', err);

@@ -75,9 +75,10 @@ export interface FirestoreMessage {
 
 // ─── Ensure User Identity ─────────────────────────────────────────────────────
 
-export async function ensureFirebaseAuth(userId?: string): Promise<string> {
+export async function ensureMatchmakingUid(userId?: string): Promise<string> {
   return userId || 'user_' + Math.random().toString(36).substring(2, 11);
 }
+export const ensureFirebaseAuth = ensureMatchmakingUid;
 
 // ─── Queue Operations ─────────────────────────────────────────────────────────
 
@@ -85,7 +86,8 @@ export async function ensureFirebaseAuth(userId?: string): Promise<string> {
  * Join the matchmaking queue.
  */
 export async function joinQueue(params: {
-  firebaseUid: string;
+  uid?: string;
+  firebaseUid?: string;
   userId: string;
   username: string;
   displayName: string;
@@ -96,10 +98,11 @@ export async function joinQueue(params: {
   mood?: string;
   isVIP?: boolean;
 }): Promise<number> {
+  const activeUid = params.uid || params.firebaseUid || params.userId;
   const now = Date.now();
   const entry: QueueEntry = {
-    uid: params.firebaseUid,
-    userId: params.userId || params.firebaseUid,
+    uid: activeUid,
+    userId: params.userId || activeUid,
     username: params.username || 'user',
     displayName: params.displayName || params.username || 'User',
     avatarUrl: params.avatarUrl || '',
@@ -116,16 +119,16 @@ export async function joinQueue(params: {
     updatedAt: now,
   };
 
-  await setDoc(doc(db, 'matchmaking', params.firebaseUid), entry);
+  await setDoc(doc(db, 'matchmaking', activeUid), entry);
   return now;
 }
 
 /**
  * Keep the searching presence alive without overwriting matched status.
  */
-export async function heartbeatQueue(firebaseUid: string): Promise<void> {
+export async function heartbeatQueue(uid: string): Promise<void> {
   try {
-    const ref = doc(db, 'matchmaking', firebaseUid);
+    const ref = doc(db, 'matchmaking', uid);
     const snap = await getDoc(ref);
     if (snap.exists() && snap.data()?.status === 'searching') {
       await updateDoc(ref, {
@@ -140,9 +143,9 @@ export async function heartbeatQueue(firebaseUid: string): Promise<void> {
 /**
  * Remove user from matchmaking queue.
  */
-export async function leaveQueue(firebaseUid: string): Promise<void> {
+export async function leaveQueue(uid: string): Promise<void> {
   try {
-    await deleteDoc(doc(db, 'matchmaking', firebaseUid));
+    await deleteDoc(doc(db, 'matchmaking', uid));
   } catch {
     // Ignore
   }
@@ -154,7 +157,8 @@ export async function leaveQueue(firebaseUid: string): Promise<void> {
  * Scan for active searching candidates and atomically pair.
  */
 export async function findAndMatch(params: {
-  firebaseUid: string;
+  uid?: string;
+  firebaseUid?: string;
   userId: string;
   username: string;
   displayName: string;
@@ -164,7 +168,8 @@ export async function findAndMatch(params: {
   genderPref?: string;
   isVIP?: boolean;
 }): Promise<string | null> {
-  const { firebaseUid, genderPref = 'auto', isVIP = false } = params;
+  const selfUid = params.uid || params.firebaseUid || params.userId;
+  const { genderPref = 'auto', isVIP = false } = params;
   const now = Date.now();
   const ACTIVE_HEARTBEAT_THRESHOLD = now - 30000; // Must have sent heartbeat in last 30s
 
@@ -188,7 +193,7 @@ export async function findAndMatch(params: {
     }
 
     // Filter out self and inactive candidates
-    if (d.uid !== firebaseUid && d.userId !== params.userId) {
+    if (d.uid !== selfUid && d.userId !== params.userId) {
       if (d.updatedAt && d.updatedAt >= ACTIVE_HEARTBEAT_THRESHOLD) {
         candidates.push(d);
       }
@@ -212,7 +217,7 @@ export async function findAndMatch(params: {
     try {
       const success = await runTransaction(db, async (tx) => {
         const candidateRef = doc(db, 'matchmaking', candidate.uid);
-        const selfRef = doc(db, 'matchmaking', firebaseUid);
+        const selfRef = doc(db, 'matchmaking', selfUid);
 
         const [candidateSnap, selfSnap] = await Promise.all([
           tx.get(candidateRef),
@@ -233,9 +238,9 @@ export async function findAndMatch(params: {
         const matchRef = doc(db, 'matches', matchId);
         const matchData: MatchDoc = {
           matchId,
-          user1Uid: firebaseUid,
+          user1Uid: selfUid,
           user2Uid: candidate.uid,
-          user1DbId: selfData.userId || firebaseUid,
+          user1DbId: selfData.userId || selfUid,
           user2DbId: candidate.userId || candidate.uid,
           user1Username: selfData.username || 'user',
           user2Username: candidate.username || 'user',
@@ -258,7 +263,7 @@ export async function findAndMatch(params: {
         tx.update(candidateRef, {
           status: 'matched',
           matchId,
-          partnerUid: firebaseUid,
+          partnerUid: selfUid,
           matchedAt: matchNow,
           updatedAt: matchNow,
         });
@@ -292,13 +297,13 @@ export async function findAndMatch(params: {
  * Listen to own queue doc. Only fires for matches created after sessionStartedAt.
  */
 export function listenToMyQueueEntry(
-  firebaseUid: string,
+  uid: string,
   sessionStartedAt: number,
   onMatched: (matchId: string, partnerUid: string) => void,
   onError?: (e: Error) => void
 ): () => void {
   return onSnapshot(
-    doc(db, 'matchmaking', firebaseUid),
+    doc(db, 'matchmaking', uid),
     (snap) => {
       if (!snap.exists()) return;
       const data = snap.data() as QueueEntry;
@@ -395,12 +400,12 @@ export async function endMatch(matchId: string, endedByUid?: string): Promise<vo
 }
 
 export async function cleanupSession(
-  firebaseUid: string,
+  uid: string,
   matchId: string | null
 ): Promise<void> {
   await Promise.allSettled([
-    matchId ? endMatch(matchId, firebaseUid) : Promise.resolve(),
-    leaveQueue(firebaseUid),
+    matchId ? endMatch(matchId, uid) : Promise.resolve(),
+    leaveQueue(uid),
   ]);
 }
 

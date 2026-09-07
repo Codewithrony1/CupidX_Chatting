@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { AuthenticateWithRedirectCallback } from '@clerk/nextjs';
 import FloatingHearts from '@/components/FloatingHearts';
 

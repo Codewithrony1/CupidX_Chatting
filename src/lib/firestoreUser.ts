@@ -9,7 +9,8 @@ import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 export interface UserProfile {
   id: string;
   uid: string;
-  firebaseUid: string;
+  clerkUserId?: string | null;
+  firebaseUid?: string;
   username: string;
   usernameLower: string;
   fullName: string;
@@ -21,7 +22,6 @@ export interface UserProfile {
   isVIP?: boolean;
   vip_expires_at?: string | null;
   vip_started_at?: string | null;
-  clerkUserId?: string | null;
   online: boolean;
   status: 'active' | 'suspended';
   profileCompleted: boolean;
@@ -101,30 +101,31 @@ export interface GenericAuthUser {
 /**
  * Generate a clean username from displayName or email or fallback.
  */
-export function generateCleanUsername(fbUser: GenericAuthUser): string {
-  const raw = fbUser.displayName || (fbUser.email ? fbUser.email.split('@')[0] : '') || `user_${fbUser.uid.slice(-5)}`;
+export function generateCleanUsername(authUser: GenericAuthUser): string {
+  const raw = authUser.displayName || (authUser.email ? authUser.email.split('@')[0] : '') || `user_${authUser.uid.slice(-5)}`;
   const clean = raw.toLowerCase().replace(/[^a-z0-9_]/g, '');
-  return clean.length >= 3 ? clean : `user_${fbUser.uid.slice(-5)}`;
+  return clean.length >= 3 ? clean : `user_${authUser.uid.slice(-5)}`;
 }
 
 /**
  * Fetch existing Firestore user document or initialize a new one.
  * Infallible: Protected with timeout race so cold Firestore connections never freeze auth.
  */
-export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser): Promise<UserProfile> {
-  const cleanUsername = generateCleanUsername(fbUser);
+export async function getOrCreateFirestoreUser(authUser: GenericAuthUser): Promise<UserProfile> {
+  const cleanUsername = generateCleanUsername(authUser);
   const now = Date.now();
-  const displayName = fbUser.displayName || cleanUsername;
+  const displayName = authUser.displayName || cleanUsername;
 
   const fallbackUser: UserProfile = {
-    id: fbUser.uid,
-    uid: fbUser.uid,
-    firebaseUid: fbUser.uid,
+    id: authUser.uid,
+    uid: authUser.uid,
+    clerkUserId: authUser.uid,
+    firebaseUid: authUser.uid,
     username: cleanUsername,
     usernameLower: cleanUsername.toLowerCase(),
     fullName: displayName,
     displayName: displayName,
-    email: fbUser.email || null,
+    email: authUser.email || null,
     role: 'USER',
     membershipTier: 'FREE',
     is_vip: false,
@@ -143,7 +144,7 @@ export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser): Promise
       gender: 'unspecified',
       preferredGender: 'auto',
       mood: '😊 Happy',
-      avatarUrl: fbUser.photoURL || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${cleanUsername}`,
+      avatarUrl: authUser.photoURL || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${cleanUsername}`,
       avatarEmoji: '😊',
       themePreference: 'purple',
       interests: '',
@@ -157,7 +158,7 @@ export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser): Promise
   };
 
   try {
-    const userRef = doc(db, 'users', fbUser.uid);
+    const userRef = doc(db, 'users', authUser.uid);
 
     // Timeout protection: If Firestore takes > 2500ms, proceed with fallback immediately
     const fetchPromise = getDoc(userRef);
@@ -171,9 +172,10 @@ export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser): Promise
       
       const enriched: UserProfile = {
         ...data,
-        id: fbUser.uid,
-        uid: fbUser.uid,
-        firebaseUid: fbUser.uid,
+        id: authUser.uid,
+        uid: authUser.uid,
+        clerkUserId: authUser.uid,
+        firebaseUid: authUser.uid,
         profileCompleted: Boolean(
           data.profileCompleted ||
           (data.dateOfBirth && data.gender && data.gender !== 'unspecified') ||
@@ -186,7 +188,7 @@ export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser): Promise
         },
       };
 
-      console.log('[PROFILE] Loaded Firestore profile for UID:', fbUser.uid, 'profileCompleted:', enriched.profileCompleted);
+      console.log('[PROFILE] Loaded Firestore profile for UID:', authUser.uid, 'profileCompleted:', enriched.profileCompleted);
 
       // Update online status in background
       updateDoc(userRef, {
@@ -196,11 +198,11 @@ export async function getOrCreateFirestoreUser(fbUser: GenericAuthUser): Promise
       
       return enriched;
     } else if (snap && !snap.exists()) {
-      console.log('[PROFILE] User document missing in Firestore, creating new profile for UID:', fbUser.uid);
+      console.log('[PROFILE] User document missing in Firestore, creating new profile for UID:', authUser.uid);
       setDoc(userRef, fallbackUser).catch((e) => console.warn('[PROFILE] Firestore setDoc notice:', e));
       return fallbackUser;
     } else {
-      console.warn('[PROFILE] Firestore read timed out (>2.5s), proceeding with fallback for UID:', fbUser.uid);
+      console.warn('[PROFILE] Firestore read timed out (>2.5s), proceeding with fallback for UID:', authUser.uid);
       setDoc(userRef, fallbackUser).catch(() => {});
       return fallbackUser;
     }

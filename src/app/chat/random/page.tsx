@@ -1,12 +1,14 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
 import AppShell from '@/components/AppShell';
-import dynamic from 'next/dynamic';
+import nextDynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import {
   Heart,
@@ -30,7 +32,7 @@ import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
 
 // Firestore matchmaking
 import {
-  ensureFirebaseAuth,
+  ensureMatchmakingUid,
   joinQueue,
   heartbeatQueue,
   leaveQueue,
@@ -45,7 +47,7 @@ import {
   type FirestoreMessage,
 } from '@/lib/firestoreMatchmaking';
 
-const ProfilePreviewSheet = dynamic(() => import('@/components/chat/ProfilePreviewSheet'), { ssr: false });
+const ProfilePreviewSheet = nextDynamic(() => import('@/components/chat/ProfilePreviewSheet'), { ssr: false });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -262,12 +264,12 @@ export default function KnotChatRandomPage() {
     stopAllListeners();
 
     try {
-      const fbUid = (await ensureFirebaseAuth(currentUser?.id)) || currentUser?.id || 'user_' + Date.now();
-      currentUidRef.current = fbUid;
+      const clientUid = (await ensureMatchmakingUid(currentUser?.clerkUserId || currentUser?.id)) || currentUser?.id || 'user_' + Date.now();
+      currentUidRef.current = clientUid;
 
       const prefs = {
-        firebaseUid: fbUid,
-        userId: currentUser?.id || fbUid,
+        uid: clientUid,
+        userId: currentUser?.id || clientUid,
         username: currentUser?.username || 'user',
         displayName: currentUser?.displayName || currentUser?.fullName || currentUser?.username || 'User',
         avatarUrl: currentUser?.profile?.avatarUrl || '',
@@ -284,14 +286,14 @@ export default function KnotChatRandomPage() {
       // 2. Heartbeat every 4 seconds
       heartbeatIntervalRef.current = setInterval(() => {
         if (!activeMatchIdRef.current) {
-          heartbeatQueue(fbUid);
+          heartbeatQueue(clientUid);
         }
       }, 4000);
 
       // 3. Listen to own queue doc for incoming matches
-      queueListenerRef.current = listenToMyQueueEntry(fbUid, sessionStartedAt, (mid) => {
+      queueListenerRef.current = listenToMyQueueEntry(clientUid, sessionStartedAt, (mid) => {
         if (activeMatchIdRef.current) return;
-        attachActiveMatch(mid, fbUid);
+        attachActiveMatch(mid, clientUid);
       });
 
       // 4. Initial scan
@@ -300,7 +302,7 @@ export default function KnotChatRandomPage() {
       isScanningRef.current = false;
 
       if (immediateMatchId) {
-        attachActiveMatch(immediateMatchId, fbUid);
+        attachActiveMatch(immediateMatchId, clientUid);
         return;
       }
 
@@ -319,7 +321,7 @@ export default function KnotChatRandomPage() {
           isScanningRef.current = false;
 
           if (mid && !activeMatchIdRef.current) {
-            attachActiveMatch(mid, fbUid);
+            attachActiveMatch(mid, clientUid);
           }
         } catch (e) {
           isScanningRef.current = false;
@@ -399,7 +401,7 @@ export default function KnotChatRandomPage() {
       return;
     }
 
-    const senderUid = currentUidRef.current || currentUser?.firebaseUid || currentUser?.id || 'me';
+    const senderUid = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || 'me';
     const imageToSend = selectedImageFile;
 
     const tempId = `temp_${Date.now()}`;

@@ -1,6 +1,8 @@
 'use client';
 
-import dynamic from 'next/dynamic';
+export const dynamic = 'force-dynamic';
+
+import nextDynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Heart, Shield, User, MessageCircle, Lock, ArrowRight, FastForward, CheckCircle2, Sparkles, Crown, X } from 'lucide-react';
@@ -8,7 +10,7 @@ import FloatingHearts from '@/components/FloatingHearts';
 import CupidXLogo from '@/components/CupidXLogo';
 import { useAuth } from '@/context/AuthContext';
 
-const Canvas3D = dynamic(() => import('@/components/Canvas3D'), {
+const Canvas3D = nextDynamic(() => import('@/components/Canvas3D'), {
   ssr: false,
   loading: () => <div className="absolute inset-0 bg-[#120019] -z-10 animate-pulse" />,
 });
