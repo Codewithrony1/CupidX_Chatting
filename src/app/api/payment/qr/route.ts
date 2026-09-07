@@ -34,9 +34,9 @@ export async function GET() {
     const merchantUpiId = settingsMap.get('merchantUpiId') || process.env.MERCHANT_UPI_ID || 'cupidxchat@upi';
     const merchantName = settingsMap.get('merchantName') || 'CupidX Chat';
 
-    const indiaPriceWeekly = parseFloat(settingsMap.get('indiaPriceWeekly') || '29');
-    const indiaPriceMonthly = parseFloat(settingsMap.get('indiaPriceMonthly') || '99');
-    const indiaPriceYearly = parseFloat(settingsMap.get('indiaPriceYearly') || '499');
+    const indiaPriceMonthly = parseFloat(settingsMap.get('indiaPriceMonthly') || '29');
+    const indiaPriceThreeMonths = parseFloat(settingsMap.get('indiaPriceThreeMonths') || '99');
+    const indiaPriceYearly = parseFloat(settingsMap.get('indiaPriceYearly') || '399');
     const intlPriceMonthly = parseFloat(settingsMap.get('intlPriceMonthly') || '2');
     const intlPriceYearly = parseFloat(settingsMap.get('intlPriceYearly') || '12');
 
@@ -47,7 +47,6 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       paymentQrUrlIndia,
-      paymentQrUrlIndiaWeekly,
       paymentQrUrlIndiaMonthly,
       paymentQrUrlIndiaYearly,
       paymentQrUrlInternational,
@@ -57,14 +56,14 @@ export async function GET() {
         india: {
           currency: 'INR',
           symbol: '₹',
-          weekly: indiaPriceWeekly,
           monthly: indiaPriceMonthly,
+          threeMonths: indiaPriceThreeMonths,
           yearly: indiaPriceYearly,
-          qrWeekly: paymentQrUrlIndiaWeekly,
           qrMonthly: paymentQrUrlIndiaMonthly,
+          qrThreeMonths: paymentQrUrlIndiaMonthly,
           qrYearly: paymentQrUrlIndiaYearly,
-          upiWeekly: buildUpiUri(indiaPriceWeekly, 'Weekly'),
           upiMonthly: buildUpiUri(indiaPriceMonthly, 'Monthly'),
+          upiThreeMonths: buildUpiUri(indiaPriceThreeMonths, '3 Months'),
           upiYearly: buildUpiUri(indiaPriceYearly, 'Yearly'),
         },
         international: {
@@ -82,7 +81,6 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       paymentQrUrlIndia: '/uploads/qr/payment-qr-india.jpg',
-      paymentQrUrlIndiaWeekly: '/uploads/qr/payment-qr-india.jpg',
       paymentQrUrlIndiaMonthly: '/uploads/qr/payment-qr-india.jpg',
       paymentQrUrlIndiaYearly: '/uploads/qr/payment-qr-india-199.jpg',
       paymentQrUrlInternational: '/lexino-qr.jpg',
@@ -92,11 +90,11 @@ export async function GET() {
         india: {
           currency: 'INR',
           symbol: '₹',
-          weekly: 29,
-          monthly: 99,
-          yearly: 499,
-          qrWeekly: '/uploads/qr/payment-qr-india.jpg',
+          monthly: 29,
+          threeMonths: 99,
+          yearly: 399,
           qrMonthly: '/uploads/qr/payment-qr-india.jpg',
+          qrThreeMonths: '/uploads/qr/payment-qr-india.jpg',
           qrYearly: '/uploads/qr/payment-qr-india-199.jpg',
         },
         international: {

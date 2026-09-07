@@ -371,6 +371,7 @@ export default function KnotChatRandomPage() {
 
     if (fbUid && currentMid) {
       await cleanupSession(fbUid, currentMid).catch(() => {});
+      fetch(`/api/chat/${currentMid}/next`, { method: 'POST' }).catch(() => {});
     } else if (fbUid) {
       await leaveQueue(fbUid).catch(() => {});
     }
@@ -378,6 +379,25 @@ export default function KnotChatRandomPage() {
     if (socket && socketConnected) socket.emit('next_partner');
 
     handleStartMatch();
+  };
+
+  const handleEndChat = async () => {
+    setShowOptionsMenu(false);
+    const fbUid = currentUidRef.current;
+    const currentMid = activeMatchIdRef.current || matchId;
+
+    stopAllTimers();
+    stopAllListeners();
+    activeMatchIdRef.current = null;
+
+    if (fbUid && currentMid) {
+      await cleanupSession(fbUid, currentMid).catch(() => {});
+      fetch(`/api/chat/${currentMid}/end`, { method: 'POST' }).catch(() => {});
+    } else if (fbUid) {
+      await leaveQueue(fbUid).catch(() => {});
+    }
+
+    setMatchStatus('ended');
   };
 
   // ─── SEND MESSAGE ─────────────────────────────────────────────────────────
@@ -426,16 +446,40 @@ export default function KnotChatRandomPage() {
     isCurrentlyTypingRef.current = false;
 
     try {
-      await sendFirestoreMessage(
-        activeMid,
-        senderUid,
-        currentUser?.username || 'user',
-        textToSend,
-        imageToSend
-      );
+      if (imageToSend) {
+        // Enforce VIP check and upload through secure backend API
+        const uploadRes = await fetch('/api/chat/upload-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            matchId: activeMid,
+            content: textToSend,
+            imageData: imageToSend,
+          }),
+        });
+
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) {
+          if (uploadRes.status === 403 || uploadData.isVipRequired) {
+            setShowVipModal(true);
+            throw new Error(uploadData.error || 'Photo sharing is a VIP feature. Upgrade to VIP to send photos in random chats.');
+          }
+          throw new Error(uploadData.error || 'Failed to upload photo.');
+        }
+      } else {
+        // Regular real-time text message
+        await sendFirestoreMessage(
+          activeMid,
+          senderUid,
+          currentUser?.username || 'user',
+          textToSend,
+          null
+        );
+      }
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
-    } catch (err) {
+    } catch (err: any) {
       console.error('Send message error:', err);
+      alert(err?.message || 'Failed to send message.');
       setMessages((prev) =>
         prev.map((m) => (m.id === tempId ? { ...m, status: 'FAILED' as const } : m))
       );
@@ -707,10 +751,7 @@ export default function KnotChatRandomPage() {
                         <span>Block &amp; Skip</span>
                       </button>
                       <button
-                        onClick={() => {
-                          setShowOptionsMenu(false);
-                          setMatchStatus('ended');
-                        }}
+                        onClick={handleEndChat}
                         className="w-full px-3 py-2 rounded-xl text-left text-slate-400 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors cursor-pointer"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -838,14 +879,27 @@ export default function KnotChatRandomPage() {
               onSubmit={handleSendMessage}
               className="p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] bg-[#0d0119]/95 backdrop-blur-xl border-t border-pink-500/20 flex items-center space-x-2 z-30 shrink-0"
             >
-              <button
-                type="button"
-                onClick={handleImageAttachmentClick}
-                className="p-2.5 rounded-2xl bg-white/5 hover:bg-white/10 text-pink-300 hover:text-white border border-white/10 transition-all cursor-pointer shrink-0"
-                title={isVIP ? 'Send photo' : 'Upgrade to VIP for photo sharing'}
-              >
-                <Paperclip className="w-4 h-4" />
-              </button>
+              {!isVIP ? (
+                <button
+                  type="button"
+                  onClick={() => setShowVipModal(true)}
+                  className="px-2.5 py-1.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 flex items-center gap-1 transition-all cursor-pointer shrink-0 shadow-sm"
+                  title="Photo sharing is a VIP feature. Upgrade to VIP to send photos in random chats."
+                >
+                  <span className="text-sm leading-none">📷</span>
+                  <span className="text-xs leading-none">🔒</span>
+                  <span className="hidden sm:inline font-extrabold uppercase text-[10px] tracking-wider text-yellow-400">VIP Only</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleImageAttachmentClick}
+                  className="p-2.5 rounded-2xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 hover:text-white border border-pink-500/30 transition-all cursor-pointer shrink-0"
+                  title="Send photo"
+                >
+                  <span className="text-base leading-none">📷</span>
+                </button>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -882,15 +936,16 @@ export default function KnotChatRandomPage() {
         {matchStatus === 'ended' && (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-6 max-w-md mx-auto">
             <div className="w-16 h-16 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400">
-              <AlertCircle className="w-8 h-8" />
+              <AlertCircle className="w-8 h-8 text-pink-400" />
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <h3 className="text-lg font-black text-white">Connection Ended</h3>
+              <p className="text-sm font-bold text-pink-400">
+                Your chat partner has disconnected.
+              </p>
               <p className="text-xs text-slate-400">
-                {partner
-                  ? `@${partner.username} has left the chat.`
-                  : 'Your chat partner has disconnected or skipped.'}
+                Your ephemeral chat has ended. Click below to start a new random conversation.
               </p>
             </div>
 
@@ -899,7 +954,7 @@ export default function KnotChatRandomPage() {
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-600 to-purple-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-pink-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
             >
               <FastForward className="w-4 h-4" />
-              <span>FIND NEXT PERSON ⏭</span>
+              <span>FIND SOMEONE NEW ⏭</span>
             </button>
           </div>
         )}
@@ -1021,6 +1076,7 @@ export default function KnotChatRandomPage() {
       <SelfHostedVipModal
         isOpen={showVipModal}
         onClose={() => setShowVipModal(false)}
+        reason="photo"
         onSuccess={() => {
           refreshUser();
           setShowVipModal(false);

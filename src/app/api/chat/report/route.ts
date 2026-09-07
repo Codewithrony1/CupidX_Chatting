@@ -9,11 +9,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { targetUserId, reason, chatSessionId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const rawTargetId = body.targetUserId || body.reportedUserId;
+    const reason = body.reason;
+    const chatSessionId = body.chatSessionId || body.matchId;
 
-    if (!targetUserId || !reason) {
+    if (!rawTargetId || !reason) {
       return NextResponse.json({ error: 'Missing targetUserId or reason' }, { status: 400 });
     }
+
+    // Resolve target User by id, clerkUserId, or firebaseUid
+    const targetUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: rawTargetId },
+          { clerkUserId: rawTargetId },
+          { firebaseUid: rawTargetId },
+          { username: rawTargetId },
+        ],
+      },
+    });
+
+    const targetUserId = targetUser ? targetUser.id : rawTargetId;
 
     // Capture snapshot of active conversation messages before wiping ephemeral chat
     let snapshotMessages: string | null = null;
@@ -60,7 +77,7 @@ export async function POST(req: Request) {
         );
       }
     } catch (e) {
-      console.warn('Snapshot capture fallback:', e);
+      console.warn('Prisma snapshot capture error:', e);
     }
 
     const report = await prisma.report.create({

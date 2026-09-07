@@ -103,29 +103,33 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6. Plan & Pricing Configuration
-    const normalizedPlan = (plan || 'monthly').toLowerCase();
+    // 6. Plan & Pricing Configuration (Server-Side Canonical Source of Truth)
+    const normalizedPlan = (plan || 'monthly').toLowerCase().trim();
     let durationDays = 30;
-    let amount = 99.0;
-    let planId = 'premium_monthly';
+    let amount = 29.0;
+    let planId = 'vip_monthly';
+    let canonicalPlan = 'monthly';
 
-    if (normalizedPlan === 'weekly' || normalizedPlan === '7days') {
-      durationDays = 7;
-      amount = 29.0;
-      planId = 'premium_weekly';
-    } else if (normalizedPlan === 'yearly' || normalizedPlan === '365days' || normalizedPlan === 'pro_yearly') {
+    if (normalizedPlan.includes('year') || normalizedPlan === '365days' || normalizedPlan === 'vip_yearly' || normalizedPlan === 'yearly') {
       durationDays = 365;
-      amount = 499.0;
-      planId = 'premium_yearly';
+      amount = 399.0;
+      planId = 'vip_yearly';
+      canonicalPlan = 'yearly';
+    } else if (normalizedPlan.includes('3month') || normalizedPlan.includes('three') || normalizedPlan === 'vip_3months' || normalizedPlan === '3months') {
+      durationDays = 90;
+      amount = 99.0;
+      planId = 'vip_3months';
+      canonicalPlan = '3months';
     } else {
       durationDays = 30;
-      amount = 99.0;
-      planId = 'premium_monthly';
+      amount = 29.0;
+      planId = 'vip_monthly';
+      canonicalPlan = 'monthly';
     }
 
     // Check if custom price setting is configured in database
     try {
-      const settingKey = normalizedPlan === 'weekly' ? 'priceWeekly' : (normalizedPlan === 'yearly' ? 'priceYearly' : 'priceMonthly');
+      const settingKey = canonicalPlan === 'yearly' ? 'indiaPriceYearly' : (canonicalPlan === '3months' ? 'indiaPriceThreeMonths' : 'indiaPriceMonthly');
       const customPrice = await prisma.appSetting.findUnique({ where: { key: settingKey } });
       if (customPrice && !isNaN(parseFloat(customPrice.value))) {
         amount = parseFloat(customPrice.value);
@@ -146,7 +150,7 @@ export async function POST(req: Request) {
         userEmail: clerkEmail,
         userFullName: clerkName,
         username: user.username,
-        plan: normalizedPlan,
+        plan: canonicalPlan,
         planId,
         region: region || 'india',
         amount,

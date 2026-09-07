@@ -35,6 +35,24 @@ export async function POST(
       }),
     ]);
 
+    // Also sync to Firestore so partner client receives 'ended' status immediately
+    try {
+      const { getAdminDb } = await import('@/lib/firebaseAdmin');
+      const adminDb = getAdminDb();
+      if (adminDb) {
+        await adminDb.collection('matches').doc(chatSessionId).set(
+          {
+            status: 'ended',
+            endedAt: Date.now(),
+            endedBy: user.id,
+          },
+          { merge: true }
+        );
+      }
+    } catch (e) {
+      console.warn('Firestore end chat sync error:', e);
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Chat ended and temporary messages deleted',

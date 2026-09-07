@@ -51,11 +51,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { targetUserId, action } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const rawTargetId = body.targetUserId || body.blockedUserId;
+    const action = body.action || 'block';
 
-    if (!targetUserId || !action) {
-      return NextResponse.json({ error: 'Missing targetUserId or action' }, { status: 400 });
+    if (!rawTargetId) {
+      return NextResponse.json({ error: 'Missing targetUserId or blockedUserId' }, { status: 400 });
     }
+
+    const targetUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: rawTargetId },
+          { clerkUserId: rawTargetId },
+          { firebaseUid: rawTargetId },
+          { username: rawTargetId },
+        ],
+      },
+    });
+
+    if (!targetUser) {
+      return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
+    }
+
+    const targetUserId = targetUser.id;
 
     if (action === 'block') {
       const existing = await prisma.block.findUnique({

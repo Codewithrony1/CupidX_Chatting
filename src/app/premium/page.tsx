@@ -45,18 +45,18 @@ export default function PremiumPage() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
 
-  // Plan Selection
-  const [selectedPlan, setSelectedPlan] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
+  // Plan Selection: Monthly (₹29), 3 Months (₹99), Yearly (₹399)
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | '3months' | 'yearly'>('monthly');
 
   // Dynamic QR & Pricing Settings
   const [pricing, setPricing] = useState({
-    weekly: 29,
-    monthly: 99,
-    yearly: 499,
+    monthly: 29,
+    threeMonths: 99,
+    yearly: 399,
     merchantUpiId: 'cupidxchat@upi',
     merchantName: 'CupidX Chat',
-    qrWeekly: '/uploads/qr/payment-qr-india.jpg',
     qrMonthly: '/uploads/qr/payment-qr-india.jpg',
+    qrThreeMonths: '/uploads/qr/payment-qr-india.jpg',
     qrYearly: '/uploads/qr/payment-qr-india-199.jpg',
   });
 
@@ -86,8 +86,9 @@ export default function PremiumPage() {
   const isVipActive = isVIP && (!vipExpiryDate || vipExpiryDate.getTime() > Date.now());
 
   // Compute Active Price & UPI String
-  const activeAmount = pricing[selectedPlan] || (selectedPlan === 'weekly' ? 29 : (selectedPlan === 'yearly' ? 499 : 99));
-  const upiPayUri = `upi://pay?pa=${pricing.merchantUpiId}&pn=${encodeURIComponent(pricing.merchantName)}&am=${activeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`CupidX VIP ${selectedPlan.toUpperCase()}`)}`;
+  const activeAmount = selectedPlan === 'yearly' ? pricing.yearly : (selectedPlan === '3months' ? pricing.threeMonths : pricing.monthly);
+  const planLabel = selectedPlan === 'yearly' ? 'Yearly (₹399)' : (selectedPlan === '3months' ? '3 Months (₹99)' : 'Monthly (₹29)');
+  const upiPayUri = `upi://pay?pa=${pricing.merchantUpiId}&pn=${encodeURIComponent(pricing.merchantName)}&am=${activeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`CupidX VIP ${planLabel}`)}`;
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiPayUri)}`;
 
   // Fetch Pricing & QR Settings
@@ -98,13 +99,13 @@ export default function PremiumPage() {
         const data = await res.json();
         if (data.pricing?.india) {
           setPricing({
-            weekly: data.pricing.india.weekly || 29,
-            monthly: data.pricing.india.monthly || 99,
-            yearly: data.pricing.india.yearly || 499,
+            monthly: data.pricing.india.monthly || 29,
+            threeMonths: data.pricing.india.threeMonths || 99,
+            yearly: data.pricing.india.yearly || 399,
             merchantUpiId: data.merchantUpiId || 'cupidxchat@upi',
             merchantName: data.merchantName || 'CupidX Chat',
-            qrWeekly: data.pricing.india.qrWeekly || '/uploads/qr/payment-qr-india.jpg',
             qrMonthly: data.pricing.india.qrMonthly || '/uploads/qr/payment-qr-india.jpg',
+            qrThreeMonths: data.pricing.india.qrThreeMonths || '/uploads/qr/payment-qr-india.jpg',
             qrYearly: data.pricing.india.qrYearly || '/uploads/qr/payment-qr-india-199.jpg',
           });
         }
@@ -397,28 +398,28 @@ export default function PremiumPage() {
           </div>
 
           <div className="grid grid-cols-3 gap-2.5">
-            {/* Weekly Plan */}
-            <div
-              onClick={() => setSelectedPlan('weekly')}
-              className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
-                selectedPlan === 'weekly'
-                  ? 'bg-gradient-to-b from-pink-500/20 to-purple-600/20 border-pink-500 shadow-lg shadow-pink-500/20 text-white'
-                  : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-400'
-              }`}
-            >
-              <span className="text-[10px] font-black uppercase tracking-wider block text-slate-300">Weekly</span>
-              <div className="flex items-baseline space-x-0.5 my-1">
-                <span className="text-xl font-black text-white">₹{pricing.weekly}</span>
-                <span className="text-[10px] text-slate-400">/ 7d</span>
-              </div>
-              <p className="text-[10px] text-slate-400">Trial pass</p>
-            </div>
-
-            {/* Monthly Plan (Most Popular) */}
+            {/* Monthly Plan */}
             <div
               onClick={() => setSelectedPlan('monthly')}
               className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
                 selectedPlan === 'monthly'
+                  ? 'bg-gradient-to-b from-pink-500/20 to-purple-600/20 border-pink-500 shadow-lg shadow-pink-500/20 text-white'
+                  : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-400'
+              }`}
+            >
+              <span className="text-[10px] font-black uppercase tracking-wider block text-pink-300">Monthly</span>
+              <div className="flex items-baseline space-x-0.5 my-1">
+                <span className="text-xl font-black text-white">₹{pricing.monthly}</span>
+                <span className="text-[10px] text-slate-400">/ 30d</span>
+              </div>
+              <p className="text-[10px] text-slate-400">₹0.96/day</p>
+            </div>
+
+            {/* 3 Months Plan (Most Popular) */}
+            <div
+              onClick={() => setSelectedPlan('3months')}
+              className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                selectedPlan === '3months'
                   ? 'bg-gradient-to-b from-pink-500/20 to-purple-600/20 border-pink-500 shadow-xl shadow-pink-500/30 text-white'
                   : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-400'
               }`}
@@ -426,12 +427,12 @@ export default function PremiumPage() {
               <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-gradient-to-r from-pink-500 to-purple-600 text-[8px] font-black text-white uppercase tracking-wider whitespace-nowrap shadow-md">
                 Popular
               </span>
-              <span className="text-[10px] font-black uppercase tracking-wider block text-pink-300">Monthly</span>
+              <span className="text-[10px] font-black uppercase tracking-wider block text-purple-300">3 Months</span>
               <div className="flex items-baseline space-x-0.5 my-1">
-                <span className="text-xl font-black text-white">₹{pricing.monthly}</span>
-                <span className="text-[10px] text-slate-400">/ 30d</span>
+                <span className="text-xl font-black text-white">₹{pricing.threeMonths}</span>
+                <span className="text-[10px] text-slate-400">/ 90d</span>
               </div>
-              <p className="text-[10px] text-slate-400">₹3.3/day</p>
+              <p className="text-[10px] text-slate-400">Save 40%</p>
             </div>
 
             {/* Yearly Plan (Best Value) */}
@@ -451,7 +452,7 @@ export default function PremiumPage() {
                 <span className="text-xl font-black text-white">₹{pricing.yearly}</span>
                 <span className="text-[10px] text-slate-400">/ 365d</span>
               </div>
-              <p className="text-[10px] text-yellow-300/80">Save 60%</p>
+              <p className="text-[10px] text-yellow-300/80">Save 65%</p>
             </div>
           </div>
         </div>

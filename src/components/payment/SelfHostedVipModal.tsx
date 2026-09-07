@@ -30,7 +30,8 @@ interface SelfHostedVipModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  defaultPlan?: 'monthly' | 'yearly';
+  defaultPlan?: 'monthly' | '3months' | 'yearly';
+  reason?: string;
 }
 
 export default function SelfHostedVipModal({
@@ -38,13 +39,14 @@ export default function SelfHostedVipModal({
   onClose,
   onSuccess,
   defaultPlan = 'monthly',
+  reason,
 }: SelfHostedVipModalProps) {
   const { user, refreshUser } = useAuth();
 
   // Steps: 'REGION_SELECT' | 'QR_VIEW' | 'FORM_VIEW' | 'STATUS_VIEW'
   const [step, setStep] = useState<'REGION_SELECT' | 'QR_VIEW' | 'FORM_VIEW' | 'STATUS_VIEW'>('REGION_SELECT');
   const [selectedRegion, setSelectedRegion] = useState<'india' | 'international'>('india');
-  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>(defaultPlan);
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | '3months' | 'yearly'>(defaultPlan);
 
   // Dynamic QR & Pricing configs from server
   const [paymentQrUrlIndia, setPaymentQrUrlIndia] = useState<string>('/uploads/qr/payment-qr-india.jpg');
@@ -52,9 +54,9 @@ export default function SelfHostedVipModal({
   const [paymentQrUrlIndiaYearly, setPaymentQrUrlIndiaYearly] = useState<string>('/uploads/qr/payment-qr-india-199.jpg');
   const [paymentQrUrlInternational, setPaymentQrUrlInternational] = useState<string>('/lexino-qr.jpg');
   const [merchantUpiId, setMerchantUpiId] = useState<string>('cupidxchat@upi');
-  const [merchantName, setMerchantName] = useState<string>('Lexino Enterprises');
+  const [merchantName, setMerchantName] = useState<string>('CupidX Chat');
   const [pricing, setPricing] = useState({
-    india: { currency: 'INR', symbol: '₹', monthly: 29, yearly: 199 },
+    india: { currency: 'INR', symbol: '₹', monthly: 29, threeMonths: 99, yearly: 399 },
     international: { currency: 'USD', symbol: '$', monthly: 2, yearly: 12 },
   });
 
@@ -75,7 +77,10 @@ export default function SelfHostedVipModal({
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const activePricing = selectedRegion === 'india' ? pricing.india : pricing.international;
-  const activeAmount = selectedPlan === 'yearly' ? activePricing.yearly : activePricing.monthly;
+  const activeAmount =
+    selectedPlan === 'yearly'
+      ? activePricing.yearly
+      : (selectedPlan === '3months' ? (activePricing as any).threeMonths || 99 : activePricing.monthly);
   const activeQrUrl =
     selectedRegion === 'india'
       ? (selectedPlan === 'yearly' ? paymentQrUrlIndiaYearly : paymentQrUrlIndiaMonthly)
@@ -249,7 +254,9 @@ export default function SelfHostedVipModal({
                 <Sparkles className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
               </h3>
               <p className="text-[10px] text-pink-300/80 font-medium">
-                {step === 'REGION_SELECT' ? 'Select your payment region' : 'Scan QR & Submit Payment Proof'}
+                {reason === 'photo'
+                  ? 'Photo sharing is a VIP feature. Upgrade to VIP to send photos.'
+                  : (step === 'REGION_SELECT' ? 'Select your payment region' : 'Scan QR & Submit Payment Proof')}
               </p>
             </div>
           </div>
@@ -264,6 +271,17 @@ export default function SelfHostedVipModal({
 
         {/* Modal Body */}
         <div className="p-5 space-y-5 text-center relative z-10 overflow-y-auto">
+          {reason === 'photo' && (
+            <div className="p-3 rounded-2xl bg-gradient-to-r from-pink-500/20 to-purple-600/20 border border-pink-500/30 text-left space-y-1">
+              <p className="text-xs font-black text-white flex items-center gap-1.5">
+                <span>📷 VIP Photo Sharing</span>
+              </p>
+              <p className="text-[11px] text-pink-200">
+                Photo sharing is a VIP feature. Upgrade to VIP to send photos in random chats.
+              </p>
+            </div>
+          )}
+
           {/* STEP 1: REGION SELECTION */}
           {step === 'REGION_SELECT' && (
             <div className="space-y-4 py-2">
@@ -292,8 +310,8 @@ export default function SelfHostedVipModal({
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="text-base font-black text-pink-400">₹{pricing.india.monthly}</span>
-                    <span className="text-[10px] text-slate-400 block">/ 30 days</span>
+                    <span className="text-base font-black text-pink-400">₹29</span>
+                    <span className="text-[10px] text-slate-400 block">Starting at ₹29</span>
                   </div>
                 </button>
 
@@ -337,44 +355,62 @@ export default function SelfHostedVipModal({
                 </button>
               </div>
 
-              {/* Plan Selection Buttons */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* Plan Selection Buttons: 3 Plans (Monthly ₹29, 3 Months ₹99, Yearly ₹399) */}
+              <div className="grid grid-cols-3 gap-2">
+                {/* Monthly */}
                 <button
                   type="button"
                   onClick={() => setSelectedPlan('monthly')}
-                  className={`p-3 rounded-2xl border text-left transition-all relative cursor-pointer ${
+                  className={`p-2.5 rounded-2xl border text-left transition-all relative cursor-pointer ${
                     selectedPlan === 'monthly'
                       ? 'bg-gradient-to-br from-pink-500/20 to-purple-600/20 border-pink-500 shadow-lg shadow-pink-500/20 text-white'
                       : 'bg-white/5 border-white/10 hover:border-white/20 text-slate-400'
                   }`}
                 >
-                  <span className="text-[11px] font-black block text-slate-300">1 Month VIP</span>
-                  <div className="flex items-baseline space-x-1 mt-0.5">
-                    <span className="text-lg font-black text-pink-400">
-                      {activePricing.symbol}{activePricing.monthly}
-                    </span>
-                    <span className="text-[10px] text-slate-400">/ 30 days</span>
+                  <span className="text-[10px] font-black block text-slate-300">Monthly</span>
+                  <div className="mt-0.5">
+                    <span className="text-base font-black text-pink-400">₹29</span>
+                    <span className="text-[9px] text-slate-400 block">/ 1 month</span>
                   </div>
                 </button>
 
+                {/* 3 Months */}
                 <button
                   type="button"
-                  onClick={() => setSelectedPlan('yearly')}
-                  className={`p-3 rounded-2xl border text-left transition-all relative cursor-pointer ${
-                    selectedPlan === 'yearly'
-                      ? 'bg-gradient-to-br from-pink-500/20 to-purple-600/20 border-yellow-400 shadow-lg shadow-yellow-500/20 text-white'
+                  onClick={() => setSelectedPlan('3months')}
+                  className={`p-2.5 rounded-2xl border text-left transition-all relative cursor-pointer ${
+                    selectedPlan === '3months'
+                      ? 'bg-gradient-to-br from-pink-500/20 to-purple-600/20 border-pink-500 shadow-xl shadow-pink-500/30 text-white'
                       : 'bg-white/5 border-white/10 hover:border-white/20 text-slate-400'
                   }`}
                 >
-                  <span className="absolute -top-2 right-2 px-1.5 py-0.2 rounded-full bg-yellow-400 text-[8px] font-black text-slate-950 uppercase tracking-wider">
+                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full bg-gradient-to-r from-pink-500 to-purple-600 text-[7px] font-black text-white uppercase tracking-wider whitespace-nowrap">
+                    Popular
+                  </span>
+                  <span className="text-[10px] font-black block text-slate-300">3 Months</span>
+                  <div className="mt-0.5">
+                    <span className="text-base font-black text-pink-300">₹99</span>
+                    <span className="text-[9px] text-slate-400 block">/ 3 months</span>
+                  </div>
+                </button>
+
+                {/* 1 Year */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlan('yearly')}
+                  className={`p-2.5 rounded-2xl border text-left transition-all relative cursor-pointer ${
+                    selectedPlan === 'yearly'
+                      ? 'bg-gradient-to-br from-yellow-500/20 to-amber-600/20 border-yellow-400 shadow-lg shadow-yellow-500/20 text-white'
+                      : 'bg-white/5 border-white/10 hover:border-white/20 text-slate-400'
+                  }`}
+                >
+                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full bg-yellow-400 text-[7px] font-black text-slate-950 uppercase tracking-wider whitespace-nowrap">
                     Best Value
                   </span>
-                  <span className="text-[11px] font-black block text-slate-300">6 Months VIP</span>
-                  <div className="flex items-baseline space-x-1 mt-0.5">
-                    <span className="text-lg font-black text-yellow-400">
-                      {activePricing.symbol}{activePricing.yearly}
-                    </span>
-                    <span className="text-[10px] text-slate-400">/ 180 days</span>
+                  <span className="text-[10px] font-black block text-slate-300">Yearly</span>
+                  <div className="mt-0.5">
+                    <span className="text-base font-black text-yellow-400">₹399</span>
+                    <span className="text-[9px] text-slate-400 block">/ 1 year</span>
                   </div>
                 </button>
               </div>

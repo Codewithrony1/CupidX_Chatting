@@ -40,12 +40,12 @@ export async function POST(
     const planNormalized = (paymentRequest.plan || '').toLowerCase();
     const amount = Number(paymentRequest.amount) || 0;
 
-    // Determine duration based on plan or amount
+    // Determine duration based on plan or amount (₹29 = 30 days, ₹99 = 90 days, ₹399 = 365 days)
     let durationDays = 30;
-    if (planNormalized.includes('week') || planNormalized === '7days' || amount === 29) {
-      durationDays = 7;
-    } else if (planNormalized.includes('year') || planNormalized === '365days' || amount === 499) {
+    if (planNormalized.includes('year') || planNormalized === '365days' || amount === 399) {
       durationDays = 365;
+    } else if (planNormalized.includes('3month') || planNormalized.includes('three') || amount === 99) {
+      durationDays = 90;
     } else {
       durationDays = 30;
     }
