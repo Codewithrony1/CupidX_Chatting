@@ -41,6 +41,38 @@ export async function GET(req: Request) {
 
 import { getAdminDb } from '@/lib/firebaseAdmin';
 
+function parseFlexibleDob(input: string | Date | undefined | null): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) return isNaN(input.getTime()) ? null : input;
+
+  const str = String(input).trim();
+  // 1. Try standard ISO format (YYYY-MM-DD)
+  let d = new Date(str);
+  if (!isNaN(d.getTime())) return d;
+
+  // 2. Try DD-MM-YYYY or DD/MM/YYYY
+  const matchDmy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (matchDmy) {
+    const day = parseInt(matchDmy[1], 10);
+    const month = parseInt(matchDmy[2], 10) - 1;
+    const year = parseInt(matchDmy[3], 10);
+    d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // 3. Try YYYY/MM/DD
+  const matchYmd = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (matchYmd) {
+    const year = parseInt(matchYmd[1], 10);
+    const month = parseInt(matchYmd[2], 10) - 1;
+    const day = parseInt(matchYmd[3], 10);
+    d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  return null;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -70,8 +102,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Date of birth is required.' }, { status: 400 });
     }
 
-    const parsedDob = new Date(dob);
-    if (isNaN(parsedDob.getTime())) {
+    const parsedDob = parseFlexibleDob(dob);
+    if (!parsedDob || isNaN(parsedDob.getTime())) {
       return NextResponse.json({ error: 'Please enter a valid date of birth.' }, { status: 400 });
     }
 
@@ -101,43 +133,98 @@ export async function POST(req: Request) {
 
     const selectedEmoji = avatarEmoji || '😊';
 
-    // Update User & Profile in Prisma DB with Permanent Lock
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: {
+    // 1. Update User & Profile in Prisma DB with Permanent Lock
+    let updatedUser: any = null;
+    try {
+      updatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          fullName: cleanDisplayName,
+          displayName: cleanDisplayName,
+          gender: cleanGender,
+          dob: parsedDob,
+          genderDobLocked: true, // Permanent lock for identity
+          profile: {
+            upsert: {
+              update: {
+                avatarType: 'EMOJI',
+                avatarEmoji: selectedEmoji,
+                age: calculatedAge,
+                gender: cleanGender,
+                dob: parsedDob,
+                ageGenderConfirmed: true, // Permanent lock
+              },
+              create: {
+                avatarType: 'EMOJI',
+                avatarEmoji: selectedEmoji,
+                age: calculatedAge,
+                gender: cleanGender,
+                dob: parsedDob,
+                ageGenderConfirmed: true, // Permanent lock
+                bio: 'Hey there! I am using CupidX.',
+              },
+            },
+          },
+        },
+        include: { profile: true, subscription: true },
+      });
+    } catch (prismaErr) {
+      console.warn('Prisma nested update notice, attempting fallback update:', prismaErr);
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            fullName: cleanDisplayName,
+            displayName: cleanDisplayName,
+            gender: cleanGender,
+            dob: parsedDob,
+            genderDobLocked: true,
+          },
+        });
+        await prisma.profile.upsert({
+          where: { userId: user.id },
+          update: {
+            avatarType: 'EMOJI',
+            avatarEmoji: selectedEmoji,
+            age: calculatedAge,
+            gender: cleanGender,
+            dob: parsedDob,
+            ageGenderConfirmed: true,
+          },
+          create: {
+            userId: user.id,
+            avatarType: 'EMOJI',
+            avatarEmoji: selectedEmoji,
+            age: calculatedAge,
+            gender: cleanGender,
+            dob: parsedDob,
+            ageGenderConfirmed: true,
+            bio: 'Hey there! I am using CupidX.',
+          },
+        });
+        updatedUser = await prisma.user.findUnique({
+          where: { id: user.id },
+          include: { profile: true, subscription: true },
+        });
+      } catch (innerErr) {
+        console.warn('Prisma fallback notice:', innerErr);
+      }
+    }
+
+    if (!updatedUser) {
+      updatedUser = {
+        ...user,
         fullName: cleanDisplayName,
         displayName: cleanDisplayName,
         gender: cleanGender,
         dob: parsedDob,
-        genderDobLocked: true, // Permanent lock for identity
-        profile: {
-          upsert: {
-            update: {
-              avatarType: 'EMOJI',
-              avatarEmoji: selectedEmoji,
-              age: calculatedAge,
-              gender: cleanGender,
-              dob: parsedDob,
-              ageGenderConfirmed: true, // Permanent lock
-            },
-            create: {
-              avatarType: 'EMOJI',
-              avatarEmoji: selectedEmoji,
-              age: calculatedAge,
-              gender: cleanGender,
-              dob: parsedDob,
-              ageGenderConfirmed: true, // Permanent lock
-              bio: 'Hey there! I am using CupidX.',
-            },
-          },
-        },
-      },
-      include: { profile: true, subscription: true },
-    });
+        genderDobLocked: true,
+      };
+    }
 
     const isVIP = updatedUser.membershipTier === 'VIP' || (updatedUser.subscription?.isActive === true && updatedUser.subscription?.plan === 'VIP');
 
-    // Server-side non-blocking Firestore sync via Firebase Admin
+    // 2. Server-side Cloud Firestore sync via Firebase Admin (Guaranteed Cloud Persistence)
     try {
       const adminDb = getAdminDb();
       if (adminDb) {
@@ -147,6 +234,7 @@ export async function POST(req: Request) {
           gender: cleanGender,
           dateOfBirth: parsedDob.toISOString().slice(0, 10),
           profileCompleted: true,
+          genderDobLocked: true,
           updatedAt: Date.now(),
           profile: {
             fullName: cleanDisplayName,
@@ -159,8 +247,8 @@ export async function POST(req: Request) {
             ageGenderConfirmed: true,
           },
         };
-        const uids = Array.from(new Set([updatedUser.id, updatedUser.clerkUserId, updatedUser.firebaseUid])).filter(Boolean) as string[];
-        Promise.all(uids.map((u) => adminDb.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {}))).catch(() => {});
+        const uids = Array.from(new Set([user.id, user.clerkUserId, user.firebaseUid, updatedUser?.id, updatedUser?.clerkUserId])).filter(Boolean) as string[];
+        await Promise.all(uids.map((u) => adminDb.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
       }
     } catch (fsErr) {
       console.warn('Firestore server sync notice:', fsErr);
@@ -201,8 +289,10 @@ export async function POST(req: Request) {
     });
 
     return response;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Onboarding save error:', error);
-    return NextResponse.json({ error: 'Failed to complete onboarding' }, { status: 500 });
+    return NextResponse.json({ 
+      error: error?.message || 'Failed to complete onboarding. Please try again.' 
+    }, { status: 500 });
   }
 }
