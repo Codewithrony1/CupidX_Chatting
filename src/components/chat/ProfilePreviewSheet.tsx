@@ -6,7 +6,7 @@ import { Heart, Crown, Sparkles, User, Shield, X, MapPin } from 'lucide-react';
 
 interface PartnerProfile {
   id: string;
-  username: string;
+  username?: string;
   fullName?: string;
   displayName?: string;
   avatarType?: string;
@@ -32,7 +32,7 @@ export default function ProfilePreviewSheet({
 }: ProfilePreviewSheetProps) {
   if (!partner) return null;
 
-  const displayName = partner.displayName || partner.fullName || partner.username;
+  const displayName = partner.displayName || partner.fullName || 'Stranger';
   const isImageAvatar = partner.isVIP && partner.avatarType === 'IMAGE' && partner.avatarUrl;
   const avatarEmoji = partner.avatarEmoji || '😊';
 
@@ -41,16 +41,16 @@ export default function ProfilePreviewSheet({
     : [];
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} title={`@${partner.username}'s Profile`}>
+    <BottomSheet isOpen={isOpen} onClose={onClose} title={`${displayName}'s Profile`}>
       <div className="space-y-5 py-2 text-white">
         
-        {/* Header Avatar & Handle */}
+        {/* Header Avatar */}
         <div className="text-center space-y-3">
           <div className="relative w-24 h-24 mx-auto">
             {isImageAvatar ? (
               <img
                 src={partner.avatarUrl!}
-                alt={partner.username}
+                alt={displayName}
                 className="w-24 h-24 rounded-3xl object-cover border-2 border-pink-500/40 shadow-xl shadow-pink-500/20"
               />
             ) : (
@@ -68,14 +68,13 @@ export default function ProfilePreviewSheet({
 
           <div>
             <h3 className="text-xl font-black tracking-tight text-white">{displayName}</h3>
-            <div className="flex items-center justify-center space-x-1.5 mt-0.5">
-              <span className="text-xs text-pink-200/70 font-semibold">@{partner.username}</span>
-              {partner.isVIP && (
+            {partner.isVIP && (
+              <div className="flex items-center justify-center space-x-1.5 mt-1">
                 <span className="text-[10px] font-black text-yellow-300 bg-yellow-500/20 px-2 py-0.5 rounded-full border border-yellow-500/30 flex items-center gap-1">
                   <Crown className="w-3 h-3 fill-current" /> 💎 VIP
                 </span>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
 

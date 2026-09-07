@@ -496,14 +496,14 @@ export default function SelfHostedVipModal({
               {/* Payment / Transaction ID Input */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-300 block">
-                  Payment / Transaction / UTR ID
+                  UTR / Transaction Number
                 </label>
                 <input
                   type="text"
-                  placeholder={selectedRegion === 'india' ? 'e.g. 423984920192' : 'e.g. TXN-998273615'}
+                  placeholder="[ Enter transaction number ]"
                   value={paymentId}
                   onChange={(e) => setPaymentId(e.target.value.toUpperCase())}
-                  className="w-full px-3.5 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-pink-500/40 uppercase tracking-wider"
+                  className="w-full px-3.5 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-pink-500/40 uppercase tracking-wider placeholder:normal-case placeholder:font-sans placeholder:text-slate-500"
                 />
               </div>
 

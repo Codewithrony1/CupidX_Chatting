@@ -199,7 +199,7 @@ export default function DashboardPage() {
               <span>Good day</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              {user?.username ? `Hi, @${user.username} 👋` : 'Hi there 👋'}
+              {user?.displayName || user?.fullName ? `Hi, ${user.displayName || user.fullName} 👋` : 'Hi there 👋'}
             </h1>
           </div>
 
@@ -271,7 +271,7 @@ export default function DashboardPage() {
             <Search className="absolute left-4 top-3.5 w-4 h-4 text-pink-400" />
             <input
               type="text"
-              placeholder="🔍 Search username..."
+              placeholder="🔍 Search users..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-3 rounded-2xl glass-input text-xs text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-2 focus:ring-pink-500/50"
@@ -290,12 +290,12 @@ export default function DashboardPage() {
                   <div className="flex items-center space-x-2.5">
                     <img
                       src={u.avatarUrl || '/default-avatar.png'}
-                      alt={u.username}
+                      alt={u.displayName || 'User'}
                       className="w-8 h-8 rounded-full object-cover bg-slate-800"
                     />
                     <div>
-                      <p className="text-xs font-bold text-white">@{u.username}</p>
-                      <p className="text-[10px] text-pink-200/60">{u.displayName}</p>
+                      <p className="text-xs font-bold text-white">{u.displayName || 'User'}</p>
+                      <p className="text-[10px] text-pink-200/60">{u.isOnline ? 'Online now' : 'Active Member'}</p>
                     </div>
                   </div>
 
@@ -460,13 +460,13 @@ export default function DashboardPage() {
           <div className="space-y-2.5 text-xs">
             <div className="flex items-center space-x-3">
               <img
-                src={user?.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user?.username}`}
-                alt={user?.username || 'User'}
+                src={user?.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user?.displayName || user?.id || 'cupidx'}`}
+                alt={user?.displayName || 'User'}
                 className="w-10 h-10 rounded-full object-cover bg-slate-800 border border-pink-400/50"
               />
               <div>
-                <h4 className="text-sm font-bold text-white">@{user?.username}</h4>
-                <p className="text-[11px] text-pink-200/70">{user?.fullName}</p>
+                <h4 className="text-sm font-bold text-white">{user?.displayName || user?.fullName || 'My Profile'}</h4>
+                <p className="text-[11px] text-pink-200/70">{user?.gender ? (user.gender.charAt(0).toUpperCase() + user.gender.slice(1)) : 'Active Member'}</p>
               </div>
             </div>
 

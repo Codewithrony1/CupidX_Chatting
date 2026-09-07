@@ -187,7 +187,7 @@ export default function OnboardingPage() {
               <input
                 type="text"
                 required
-                placeholder="Enter your name"
+                placeholder="John Smith"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-1 focus:ring-pink-500 font-semibold"

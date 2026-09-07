@@ -122,15 +122,25 @@ export async function POST(req: Request) {
       buffer[10] === 0x42 &&
       buffer[11] === 0x50;
 
-    if (!isPng && !isJpg && !isWebp) {
+    const isGif =
+      buffer.length >= 4 &&
+      buffer[0] === 0x47 &&
+      buffer[1] === 0x49 &&
+      buffer[2] === 0x46 &&
+      buffer[3] === 0x38; // 'GIF8' (GIF87a / GIF89a)
+
+    if (!isPng && !isJpg && !isWebp && !isGif) {
       return NextResponse.json(
-        { error: 'Invalid image format. Only JPEG, PNG, and WebP files are permitted.' },
+        {
+          error:
+            'Invalid file format. Only JPG, JPEG, PNG, WEBP, and GIF image files are permitted. Documents, archives, scripts, and non-image files are strictly rejected.',
+        },
         { status: 400 }
       );
     }
 
     // Correct extension based on validated magic bytes
-    ext = isPng ? 'png' : isWebp ? 'webp' : 'jpg';
+    ext = isPng ? 'png' : isWebp ? 'webp' : (isGif ? 'gif' : 'jpg');
 
     // 6. Save image to disk securely
     const randomKey = crypto.randomBytes(16).toString('hex');
@@ -153,7 +163,7 @@ export async function POST(req: Request) {
             .collection('messages')
             .add({
               senderUid: user.id,
-              senderUsername: user.username || 'user',
+              senderUsername: user.displayName || user.fullName || 'User',
               content: content.trim(),
               imageUrl,
               createdAt: Date.now(),

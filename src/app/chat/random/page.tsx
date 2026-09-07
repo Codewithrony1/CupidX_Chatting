@@ -53,7 +53,7 @@ const ProfilePreviewSheet = nextDynamic(() => import('@/components/chat/ProfileP
 
 interface RandomPartner {
   id: string;
-  username: string;
+  username?: string;
   fullName: string;
   displayName?: string;
   avatarType?: string;
@@ -194,13 +194,14 @@ export default function KnotChatRandomPage() {
   }, []);
 
   // ─── Build partner object ─────────────────────────────────────────────────
+  // ─── Build partner object ─────────────────────────────────────────────────
   function buildPartner(matchDoc: MatchDoc, myUid: string): RandomPartner {
-    const isUser1 = matchDoc.user1Uid === myUid;
+    const isUser1 = matchDoc.user1Uid === myUid || (matchDoc as any).user1ClerkId === myUid;
     return {
       id: isUser1 ? matchDoc.user2Uid : matchDoc.user1Uid,
-      username: isUser1 ? matchDoc.user2Username : matchDoc.user1Username,
-      fullName: isUser1 ? matchDoc.user2DisplayName : matchDoc.user1DisplayName,
+      username: isUser1 ? (matchDoc.user2DisplayName || 'Stranger') : (matchDoc.user1DisplayName || 'Stranger'),
       displayName: isUser1 ? matchDoc.user2DisplayName : matchDoc.user1DisplayName,
+      fullName: isUser1 ? matchDoc.user2DisplayName : matchDoc.user1DisplayName,
       avatarUrl: isUser1 ? matchDoc.user2AvatarUrl : matchDoc.user1AvatarUrl,
       avatarEmoji: isUser1 ? matchDoc.user2AvatarEmoji : matchDoc.user1AvatarEmoji,
       gender: isUser1 ? matchDoc.user2Gender : matchDoc.user1Gender,
@@ -209,14 +210,24 @@ export default function KnotChatRandomPage() {
   }
 
   // ─── Attach active match ──────────────────────────────────────────────────
-  const attachActiveMatch = useCallback((mid: string, myUid: string) => {
+  const attachActiveMatch = useCallback((mid: string, partnerData?: any) => {
     if (activeMatchIdRef.current === mid) return;
     activeMatchIdRef.current = mid;
     setMatchId(mid);
+    if (partnerData) {
+      setPartner(partnerData);
+    }
+    setMatchStatus('connected');
 
     stopAllTimers();
+    if (queueListenerRef.current) {
+      queueListenerRef.current();
+      queueListenerRef.current = null;
+    }
 
-    // 1. Listen to match status & partner details
+    const myUid = currentUser?.id || '';
+
+    // 1. Listen to match status & partner details from Firestore
     matchListenerRef.current?.();
     matchListenerRef.current = listenToMatch(mid, (matchDoc: MatchDoc) => {
       if (matchDoc.status === 'ended') {
@@ -224,7 +235,9 @@ export default function KnotChatRandomPage() {
         activeMatchIdRef.current = null;
         return;
       }
-      setPartner(buildPartner(matchDoc, myUid));
+      if (!partnerData && myUid) {
+        setPartner(buildPartner(matchDoc, myUid));
+      }
       setMatchStatus('connected');
     });
 
@@ -236,7 +249,7 @@ export default function KnotChatRandomPage() {
         const mapped: RandomMessage[] = firestoreMsgs.map((m) => ({
           id: m.id,
           senderId: m.senderUid,
-          senderUsername: m.senderUsername,
+          senderUsername: m.senderUsername || 'Stranger',
           content: m.content,
           imageUrl: m.imageUrl,
           createdAt: resolveTimestamp(m.createdAt),
@@ -247,92 +260,96 @@ export default function KnotChatRandomPage() {
       },
       () => setReconnecting(true)
     );
-  }, []);
+  }, [currentUser?.id]);
 
-  // ─── START MATCHMAKING ────────────────────────────────────────────────────
-  const handleStartMatch = useCallback(async () => {
-    setMatchStatus('searching');
-    setPartner(null);
-    setMessages([]);
-    setMatchId(null);
-    setSearchError(null);
-    setReconnecting(false);
-    activeMatchIdRef.current = null;
-    isScanningRef.current = false;
+  // ─── START MATCHMAKING (Server-Controlled) ─────────────────────────────────
+  const handleStartMatch = useCallback(
+    async (skipCurrent = false, excludePartnerId?: string | null) => {
+      setMatchStatus('searching');
+      setPartner(null);
+      setMessages([]);
+      setMatchId(null);
+      setSearchError(null);
+      setReconnecting(false);
+      activeMatchIdRef.current = null;
 
-    stopAllTimers();
-    stopAllListeners();
+      stopAllTimers();
+      stopAllListeners();
 
-    try {
-      const clientUid = (await ensureMatchmakingUid(currentUser?.clerkUserId || currentUser?.id)) || currentUser?.id || 'user_' + Date.now();
-      currentUidRef.current = clientUid;
+      try {
+        const currentUserId = currentUser?.id;
+        if (!currentUserId) return;
 
-      const prefs = {
-        uid: clientUid,
-        userId: currentUser?.id || clientUid,
-        username: currentUser?.username || 'user',
-        displayName: currentUser?.displayName || currentUser?.fullName || currentUser?.username || 'User',
-        avatarUrl: currentUser?.profile?.avatarUrl || '',
-        avatarEmoji: currentUser?.profile?.avatarEmoji || '😊',
-        gender: currentUser?.profile?.gender || 'unspecified',
-        genderPref: currentUser?.profile?.preferredGender || 'auto',
-        mood: currentUser?.profile?.mood || '',
-        isVIP,
-      };
+        // Call server-controlled matchmaking API
+        const res = await fetch('/api/matchmaking/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            skipCurrentMatch: skipCurrent,
+            excludePartnerId: excludePartnerId || null,
+          }),
+        });
 
-      // 1. Join queue with current session timestamp
-      const sessionStartedAt = await joinQueue(prefs);
-
-      // 2. Heartbeat every 4 seconds
-      heartbeatIntervalRef.current = setInterval(() => {
-        if (!activeMatchIdRef.current) {
-          heartbeatQueue(clientUid);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to join matchmaking.');
         }
-      }, 4000);
 
-      // 3. Listen to own queue doc for incoming matches
-      queueListenerRef.current = listenToMyQueueEntry(clientUid, sessionStartedAt, (mid) => {
-        if (activeMatchIdRef.current) return;
-        attachActiveMatch(mid, clientUid);
-      });
+        const data = await res.json();
 
-      // 4. Initial scan
-      isScanningRef.current = true;
-      const immediateMatchId = await findAndMatch(prefs);
-      isScanningRef.current = false;
-
-      if (immediateMatchId) {
-        attachActiveMatch(immediateMatchId, clientUid);
-        return;
-      }
-
-      // 5. Continuous match scanner every 2.5s while searching
-      matchingIntervalRef.current = setInterval(async () => {
-        if (activeMatchIdRef.current || isScanningRef.current) {
-          if (activeMatchIdRef.current && matchingIntervalRef.current) {
-            clearInterval(matchingIntervalRef.current);
-          }
+        // Case 1: Immediately matched by server
+        if (data.matched && data.chatSessionId) {
+          attachActiveMatch(data.chatSessionId, data.partner);
           return;
         }
 
-        try {
-          isScanningRef.current = true;
-          const mid = await findAndMatch(prefs);
-          isScanningRef.current = false;
+        // Case 2: In waiting queue -> dual push & polling
+        const sessionStartedAt = Date.now();
 
-          if (mid && !activeMatchIdRef.current) {
-            attachActiveMatch(mid, clientUid);
+        // 1. Push: Listen to own queue doc in Firestore for instant notification
+        queueListenerRef.current = listenToMyQueueEntry(currentUserId, sessionStartedAt, async (mid) => {
+          if (activeMatchIdRef.current) return;
+          try {
+            const statusRes = await fetch('/api/matchmaking/status');
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.matched && statusData.chatSessionId) {
+                attachActiveMatch(statusData.chatSessionId, statusData.partner);
+              }
+            }
+          } catch (e) {
+            console.warn('Push match status error:', e);
           }
-        } catch (e) {
-          isScanningRef.current = false;
-          console.warn('Match scan error:', e);
-        }
-      }, 2500);
-    } catch (err: any) {
-      console.error('Matchmaking error:', err);
-      setSearchError(err?.message || 'Could not connect to matchmaking queue.');
-    }
-  }, [currentUser, isVIP, attachActiveMatch]);
+        });
+
+        // 2. Infallible Polling: Poll /api/matchmaking/status every 1200ms
+        matchingIntervalRef.current = setInterval(async () => {
+          if (activeMatchIdRef.current) {
+            if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+            return;
+          }
+
+          try {
+            const statusRes = await fetch('/api/matchmaking/status');
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.matched && statusData.chatSessionId) {
+                if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+                attachActiveMatch(statusData.chatSessionId, statusData.partner);
+              }
+            }
+          } catch (e) {
+            console.warn('Status poll error:', e);
+          }
+        }, 1200);
+      } catch (err: any) {
+        console.error('Matchmaking error:', err);
+        setSearchError(err?.message || 'Could not connect to matchmaking queue.');
+        setMatchStatus('idle');
+      }
+    },
+    [currentUser?.id, attachActiveMatch]
+  );
 
   // ─── Auto-start on mount when user is ready ───────────────────────────────
   useEffect(() => {
@@ -347,54 +364,57 @@ export default function KnotChatRandomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
-  // ─── CANCEL SEARCH ────────────────────────────────────────────────────────
+  // ─── CANCEL SEARCH (Server-Side + Race-Safe) ───────────────────────────────
   const handleCancelSearch = async () => {
     stopAllTimers();
     stopAllListeners();
     activeMatchIdRef.current = null;
-
-    if (currentUidRef.current) {
-      await leaveQueue(currentUidRef.current).catch(() => {});
-    }
-    if (socket && socketConnected) socket.emit('leave_random_queue');
     setMatchStatus('idle');
+
+    try {
+      const res = await fetch('/api/matchmaking/cancel', { method: 'POST' });
+      const data = await res.json();
+      if (data.matched && data.chatSessionId) {
+        // Match won the race condition right before cancellation
+        const statusRes = await fetch('/api/matchmaking/status');
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          if (statusData.matched && statusData.chatSessionId) {
+            attachActiveMatch(statusData.chatSessionId, statusData.partner);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Cancel error:', e);
+    }
   };
 
   // ─── NEXT PARTNER ─────────────────────────────────────────────────────────
   const handleNextPartner = async () => {
-    const fbUid = currentUidRef.current;
     const currentMid = activeMatchIdRef.current || matchId;
+    const currentPartnerId = partner?.id;
 
     stopAllTimers();
     stopAllListeners();
     activeMatchIdRef.current = null;
 
-    if (fbUid && currentMid) {
-      await cleanupSession(fbUid, currentMid).catch(() => {});
+    if (currentMid) {
       fetch(`/api/chat/${currentMid}/next`, { method: 'POST' }).catch(() => {});
-    } else if (fbUid) {
-      await leaveQueue(fbUid).catch(() => {});
     }
 
-    if (socket && socketConnected) socket.emit('next_partner');
-
-    handleStartMatch();
+    handleStartMatch(true, currentPartnerId);
   };
 
   const handleEndChat = async () => {
     setShowOptionsMenu(false);
-    const fbUid = currentUidRef.current;
     const currentMid = activeMatchIdRef.current || matchId;
 
     stopAllTimers();
     stopAllListeners();
     activeMatchIdRef.current = null;
 
-    if (fbUid && currentMid) {
-      await cleanupSession(fbUid, currentMid).catch(() => {});
+    if (currentMid) {
       fetch(`/api/chat/${currentMid}/end`, { method: 'POST' }).catch(() => {});
-    } else if (fbUid) {
-      await leaveQueue(fbUid).catch(() => {});
     }
 
     setMatchStatus('ended');
@@ -421,7 +441,8 @@ export default function KnotChatRandomPage() {
       return;
     }
 
-    const senderUid = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || 'me';
+    const senderUid = currentUser?.id || 'me';
+    const senderDisplayName = currentUser?.displayName || currentUser?.fullName || 'Stranger';
     const imageToSend = selectedImageFile;
 
     const tempId = `temp_${Date.now()}`;
@@ -429,7 +450,7 @@ export default function KnotChatRandomPage() {
       id: tempId,
       clientMessageId: tempId,
       senderId: senderUid,
-      senderUsername: currentUser?.username || 'me',
+      senderUsername: senderDisplayName,
       content: textToSend,
       imageUrl: imagePreview || null,
       createdAt: new Date().toISOString(),
@@ -467,14 +488,27 @@ export default function KnotChatRandomPage() {
           throw new Error(uploadData.error || 'Failed to upload photo.');
         }
       } else {
-        // Regular real-time text message
-        await sendFirestoreMessage(
-          activeMid,
-          senderUid,
-          currentUser?.username || 'user',
-          textToSend,
-          null
-        );
+        // Send message via backend API with IDOR and participant verification
+        const msgRes = await fetch('/api/chat/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chatSessionId: activeMid,
+            content: textToSend,
+            clientMessageId: tempId,
+          }),
+        });
+
+        if (!msgRes.ok) {
+          // Fallback direct send
+          await sendFirestoreMessage(
+            activeMid,
+            senderUid,
+            senderDisplayName,
+            textToSend,
+            null
+          );
+        }
       }
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
     } catch (err: any) {
@@ -517,8 +551,21 @@ export default function KnotChatRandomPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const validImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+    const fileName = file.name.toLowerCase();
+    const hasValidExt = validExtensions.some((ext) => fileName.endsWith(ext));
+
+    if (!validImageTypes.includes(file.type.toLowerCase()) || !hasValidExt) {
+      alert('Only image files (JPG, JPEG, PNG, WEBP, GIF) are allowed. PDFs, documents, archives, and scripts are strictly rejected.');
+      e.target.value = '';
+      return;
+    }
+
     if (file.size > 5 * 1024 * 1024) {
       alert('Image size exceeds 5MB limit.');
+      e.target.value = '';
       return;
     }
     const reader = new FileReader();
@@ -622,7 +669,7 @@ export default function KnotChatRandomPage() {
             )}
 
             <button
-              onClick={handleStartMatch}
+              onClick={() => handleStartMatch()}
               className="w-full py-4 rounded-3xl bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-black text-sm uppercase tracking-wider shadow-2xl shadow-pink-500/30 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-5 h-5" />
@@ -687,7 +734,7 @@ export default function KnotChatRandomPage() {
               <div className="flex items-center space-x-3">
                 <div onClick={() => setShowProfileSheet(true)} className="relative cursor-pointer">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 flex items-center justify-center text-white font-black text-sm border-2 border-pink-400/50 shadow-md">
-                    {partner?.avatarEmoji || (partner?.username ? partner.username.substring(0, 2).toUpperCase() : '👤')}
+                    {partner?.avatarEmoji || (partner?.displayName ? partner.displayName.substring(0, 2).toUpperCase() : '👤')}
                   </div>
                   <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#0d0119]" />
                 </div>
@@ -695,7 +742,7 @@ export default function KnotChatRandomPage() {
                 <div onClick={() => setShowProfileSheet(true)} className="cursor-pointer">
                   <div className="flex items-center space-x-1.5">
                     <h3 className="text-sm font-black text-white truncate max-w-[140px] sm:max-w-[200px]">
-                      @{partner?.username || 'stranger'}
+                      {partner?.displayName || partner?.fullName || 'Stranger'}
                     </h3>
                     {partner?.isVIP && (
                       <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current shrink-0" />
@@ -768,7 +815,7 @@ export default function KnotChatRandomPage() {
               <div className="text-center my-2">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] text-slate-400">
                   <ShieldCheck className="w-3.5 h-3.5 text-pink-400" />
-                  <span>Connected with @{partner?.username} • Be polite &amp; respectful</span>
+                  <span>Connected with {partner?.displayName || partner?.fullName || 'Stranger'} • Be polite &amp; respectful</span>
                 </span>
               </div>
 
@@ -903,7 +950,7 @@ export default function KnotChatRandomPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/jpeg,image/png,image/webp,image/gif"
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -942,7 +989,7 @@ export default function KnotChatRandomPage() {
             <div className="space-y-1.5">
               <h3 className="text-lg font-black text-white">Connection Ended</h3>
               <p className="text-sm font-bold text-pink-400">
-                Your chat partner has disconnected.
+                Your stranger has disconnected.
               </p>
               <p className="text-xs text-slate-400">
                 Your ephemeral chat has ended. Click below to start a new random conversation.
@@ -950,11 +997,11 @@ export default function KnotChatRandomPage() {
             </div>
 
             <button
-              onClick={handleStartMatch}
+              onClick={() => handleStartMatch()}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-600 to-purple-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-pink-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
             >
               <FastForward className="w-4 h-4" />
-              <span>FIND SOMEONE NEW ⏭</span>
+              <span>Find Someone New</span>
             </button>
           </div>
         )}

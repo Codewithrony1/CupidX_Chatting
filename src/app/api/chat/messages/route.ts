@@ -75,7 +75,7 @@ export async function POST(req: Request) {
         const matches = imageData.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
         if (matches && matches.length === 3) {
           const rawExt = matches[1].toLowerCase();
-          const ext = rawExt === 'jpeg' ? 'jpg' : (rawExt === 'png' ? 'png' : (rawExt === 'webp' ? 'webp' : 'jpg'));
+          let ext = rawExt === 'jpeg' ? 'jpg' : (rawExt === 'png' ? 'png' : (rawExt === 'webp' ? 'webp' : 'jpg'));
           const base64Data = matches[2];
           const buffer = Buffer.from(base64Data, 'base64');
 
@@ -87,10 +87,13 @@ export async function POST(req: Request) {
           const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
           const isJpg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
           const isWebp = buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46;
+          const isGif = buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38;
 
-          if (!isPng && !isJpg && !isWebp) {
-            return NextResponse.json({ error: 'Invalid image format. Only JPEG, PNG, and WebP are allowed.' }, { status: 400 });
+          if (!isPng && !isJpg && !isWebp && !isGif) {
+            return NextResponse.json({ error: 'Invalid file format. Only JPG, JPEG, PNG, WEBP, and GIF image files are allowed.' }, { status: 400 });
           }
+
+          ext = isPng ? 'png' : (isWebp ? 'webp' : (isGif ? 'gif' : 'jpg'));
 
           const randomKey = crypto.randomBytes(12).toString('hex');
           const filename = `chat_img_${Date.now()}_${randomKey}.${ext}`;
@@ -108,7 +111,7 @@ export async function POST(req: Request) {
       const existingMessage = await prisma.message.findFirst({
         where: { clientMessageId },
         include: {
-          sender: { select: { username: true } },
+          sender: { select: { username: true, displayName: true, fullName: true } },
         },
       });
 
@@ -121,7 +124,7 @@ export async function POST(req: Request) {
             clientMessageId: existingMessage.clientMessageId,
             chatSessionId: existingMessage.chatSessionId,
             senderId: existingMessage.senderId,
-            senderUsername: existingMessage.sender.username,
+            senderUsername: existingMessage.sender.displayName || existingMessage.sender.fullName || 'Stranger',
             content: existingMessage.content,
             imageUrl: existingMessage.imageUrl,
             createdAt: existingMessage.createdAt.toISOString(),
@@ -141,10 +144,31 @@ export async function POST(req: Request) {
       },
       include: {
         sender: {
-          select: { username: true },
+          select: { username: true, displayName: true, fullName: true },
         },
       },
     });
+
+    // 7. Sync to Firestore matches/{chatSessionId}/messages for sub-50ms push delivery
+    try {
+      const { getAdminDb } = await import('@/lib/firebaseAdmin');
+      const adminDb = getAdminDb();
+      if (adminDb) {
+        await adminDb
+          .collection('matches')
+          .doc(chatSessionId)
+          .collection('messages')
+          .add({
+            senderUid: user.id,
+            senderUsername: user.displayName || user.fullName || 'Stranger',
+            content: (content || '').trim(),
+            imageUrl: finalImageUrl,
+            createdAt: Date.now(),
+          });
+      }
+    } catch (e) {
+      console.warn('Firestore message sync error:', e);
+    }
 
     return NextResponse.json({
       success: true,
@@ -153,7 +177,7 @@ export async function POST(req: Request) {
         clientMessageId: message.clientMessageId,
         chatSessionId: message.chatSessionId,
         senderId: message.senderId,
-        senderUsername: message.sender.username,
+        senderUsername: message.sender.displayName || message.sender.fullName || 'Stranger',
         content: message.content,
         imageUrl: message.imageUrl,
         createdAt: message.createdAt.toISOString(),

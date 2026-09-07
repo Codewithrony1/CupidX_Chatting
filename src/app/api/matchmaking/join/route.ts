@@ -11,6 +11,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}));
+    const { skipCurrentMatch = false, excludePartnerId = null } = body;
     const userProfile = user.profile;
     const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
 
@@ -18,17 +19,69 @@ export async function POST(req: Request) {
     const preferredGender = body.preferredGender || userProfile?.preferredGender || 'auto';
     const language = body.language || userProfile?.language || 'english';
 
-    // 1. Clean up / end any prior ACTIVE chat sessions for this user so they get fresh matches
-    await prisma.chatSession.updateMany({
-      where: {
-        status: 'ACTIVE',
-        OR: [{ userAId: user.id }, { userBId: user.id }],
-      },
-      data: { status: 'ENDED' },
-    });
+    // 1. Check if user already belongs to an active match (Requirement 6: ONE USER = ONE ACTIVE MATCH)
+    if (!skipCurrentMatch) {
+      const existingSession = await prisma.chatSession.findFirst({
+        where: {
+          status: 'ACTIVE',
+          OR: [{ userAId: user.id }, { userBId: user.id }],
+        },
+        include: {
+          userA: { include: { profile: true } },
+          userB: { include: { profile: true } },
+        },
+      });
 
-    // 2. Clean up stale WAITING queue entries (>60s inactive)
-    const STALE_THRESHOLD = new Date(Date.now() - 60 * 1000);
+      if (existingSession) {
+        const partner = existingSession.userAId === user.id ? existingSession.userB : existingSession.userA;
+        return NextResponse.json({
+          matched: true,
+          chatSessionId: existingSession.id,
+          partner: {
+            id: partner.id,
+            displayName: partner.displayName || partner.fullName || 'Stranger',
+            avatarUrl: partner.profile?.avatarUrl || null,
+            avatarEmoji: partner.profile?.avatarEmoji || '😊',
+            gender: partner.profile?.gender || partner.gender || 'unspecified',
+            mood: partner.profile?.mood || '',
+            bio: partner.profile?.bio || '',
+            isVIP: partner.membershipTier === 'VIP' || partner.is_vip,
+          },
+        });
+      }
+    } else {
+      // User explicitly skipped / requested next match: terminate prior active sessions
+      const oldSessions = await prisma.chatSession.findMany({
+        where: {
+          status: 'ACTIVE',
+          OR: [{ userAId: user.id }, { userBId: user.id }],
+        },
+      });
+
+      for (const s of oldSessions) {
+        try {
+          const { getAdminDb } = await import('@/lib/firebaseAdmin');
+          const adminDb = getAdminDb();
+          if (adminDb) {
+            await adminDb.collection('matches').doc(s.id).set(
+              { status: 'ended', endedAt: Date.now(), endedBy: user.id },
+              { merge: true }
+            );
+          }
+        } catch (e) {}
+      }
+
+      await prisma.chatSession.updateMany({
+        where: {
+          status: 'ACTIVE',
+          OR: [{ userAId: user.id }, { userBId: user.id }],
+        },
+        data: { status: 'ENDED' },
+      });
+    }
+
+    // 2. Clean up stale WAITING queue entries (>25s inactive)
+    const STALE_THRESHOLD = new Date(Date.now() - 25 * 1000);
     await prisma.matchmakingQueue.updateMany({
       where: {
         status: 'WAITING',
@@ -37,7 +90,7 @@ export async function POST(req: Request) {
       data: { status: 'EXPIRED' },
     });
 
-    // 3. Find list of blocked or banned user IDs
+    // 3. Find list of blocked or banned user IDs + excludePartnerId
     const blockedRelations = await prisma.block.findMany({
       where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
     });
@@ -48,7 +101,9 @@ export async function POST(req: Request) {
     });
     const bannedUserIds = bannedRelations.map((b) => (b.bannedByUserId === user.id ? b.bannedUserId : b.bannedByUserId));
 
-    const excludeUserIds = Array.from(new Set([user.id, ...blockedUserIds, ...bannedUserIds]));
+    const excludeUserIds = Array.from(
+      new Set([user.id, ...blockedUserIds, ...bannedUserIds, ...(excludePartnerId ? [excludePartnerId] : [])])
+    );
 
     // 4. Find all active WAITING candidates currently on the website
     const candidates = await prisma.matchmakingQueue.findMany({
@@ -61,7 +116,7 @@ export async function POST(req: Request) {
       take: 10,
     });
 
-    // 5. Try to match with the earliest waiting candidate
+    // 5. Try to atomically match with the earliest waiting candidate
     for (const candidate of candidates) {
       const newChatSessionId = crypto.randomUUID();
 
@@ -82,7 +137,7 @@ export async function POST(req: Request) {
           });
 
           if (updatedCandidate.count === 0) {
-            return null; // Candidate was already taken by someone else
+            return null; // Candidate was claimed by someone else in a race condition
           }
 
           // Mark current user as MATCHED
@@ -127,18 +182,69 @@ export async function POST(req: Request) {
             include: { profile: true },
           });
 
+          // Sync active match & queue docs to Firestore for sub-50ms push delivery
+          try {
+            const { getAdminDb } = await import('@/lib/firebaseAdmin');
+            const adminDb = getAdminDb();
+            if (adminDb) {
+              const matchNow = Date.now();
+              await adminDb.collection('matches').doc(newChatSessionId).set({
+                matchId: newChatSessionId,
+                user1Uid: user.id,
+                user2Uid: candidate.userId,
+                user1DisplayName: user.displayName || user.fullName || 'Stranger',
+                user2DisplayName: partnerUser?.displayName || partnerUser?.fullName || 'Stranger',
+                user1AvatarUrl: user.profile?.avatarUrl || null,
+                user2AvatarUrl: partnerUser?.profile?.avatarUrl || null,
+                user1AvatarEmoji: user.profile?.avatarEmoji || '😊',
+                user2AvatarEmoji: partnerUser?.profile?.avatarEmoji || '😊',
+                user1Gender: user.profile?.gender || user.gender || 'unspecified',
+                user2Gender: partnerUser?.profile?.gender || partnerUser?.gender || 'unspecified',
+                user1IsVIP: Boolean(user.membershipTier === 'VIP' || user.is_vip),
+                user2IsVIP: Boolean(partnerUser?.membershipTier === 'VIP' || partnerUser?.is_vip),
+                status: 'active',
+                createdAt: matchNow,
+              });
+
+              // Notify both queue docs in Firestore so listeners fire immediately
+              await adminDb.collection('matchmaking').doc(candidate.userId).set(
+                {
+                  status: 'matched',
+                  matchId: newChatSessionId,
+                  partnerUid: user.id,
+                  matchedAt: matchNow,
+                  updatedAt: matchNow,
+                },
+                { merge: true }
+              );
+
+              await adminDb.collection('matchmaking').doc(user.id).set(
+                {
+                  status: 'matched',
+                  matchId: newChatSessionId,
+                  partnerUid: candidate.userId,
+                  matchedAt: matchNow,
+                  updatedAt: matchNow,
+                },
+                { merge: true }
+              );
+            }
+          } catch (e) {
+            console.warn('Firestore match sync error:', e);
+          }
+
           return NextResponse.json({
             matched: true,
             chatSessionId: newChatSessionId,
             partner: partnerUser
               ? {
                   id: partnerUser.id,
-                  username: partnerUser.username,
-                  fullName: partnerUser.fullName,
-                  displayName: partnerUser.displayName || partnerUser.fullName,
+                  displayName: partnerUser.displayName || partnerUser.fullName || 'Stranger',
                   avatarUrl: partnerUser.profile?.avatarUrl || null,
                   avatarEmoji: partnerUser.profile?.avatarEmoji || '😊',
                   gender: partnerUser.profile?.gender || partnerUser.gender || 'unspecified',
+                  mood: partnerUser.profile?.mood || '',
+                  bio: partnerUser.profile?.bio || '',
                   isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
                 }
               : null,
@@ -149,7 +255,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6. No immediate candidate available: Put user into WAITING queue
+    // 6. No immediate candidate available: Put user into WAITING queue (Requirement 5: One active queue entry)
     await prisma.matchmakingQueue.upsert({
       where: { userId: user.id },
       update: {
@@ -172,6 +278,26 @@ export async function POST(req: Request) {
         updatedAt: new Date(),
       },
     });
+
+    // Mirror to Firestore queue entry
+    try {
+      const { getAdminDb } = await import('@/lib/firebaseAdmin');
+      const adminDb = getAdminDb();
+      if (adminDb) {
+        await adminDb.collection('matchmaking').doc(user.id).set(
+          {
+            uid: user.id,
+            userId: user.id,
+            status: 'searching',
+            matchId: null,
+            partnerUid: null,
+            joinedAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          { merge: true }
+        );
+      }
+    } catch (e) {}
 
     return NextResponse.json({
       matched: false,

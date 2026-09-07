@@ -535,12 +535,12 @@ export default function PremiumPage() {
           {/* UTR Input */}
           <div className="space-y-1.5 text-left">
             <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-              <span>UPI UTR / Transaction Reference ID</span>
+              <span>UTR / Transaction Number</span>
               <span className="text-[10px] text-slate-500 font-normal">12-digit number</span>
             </label>
             <input
               type="text"
-              placeholder="e.g. 423984920192 or UPI Ref No"
+              placeholder="[ Enter transaction number ]"
               value={utrNumber}
               onChange={(e) => setUtrNumber(e.target.value.replace(/\s+/g, ''))}
               className="w-full px-3.5 py-3 rounded-xl bg-black/60 border border-slate-800 text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-pink-500/50 uppercase tracking-wider placeholder:normal-case placeholder:font-sans placeholder:text-slate-600"
