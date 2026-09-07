@@ -193,9 +193,13 @@ export default function ProfilePage() {
 
     try {
       // Save directly to Authoritative Database API (which also syncs Firestore server-side)
+      const effectiveClerkId = user?.clerkUserId || user?.id || user?.uid;
       const res = await fetch('/api/profile', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+        },
         body: JSON.stringify({
           displayName: isVIP ? displayName : undefined,
           bio: isVIP ? bio : undefined,

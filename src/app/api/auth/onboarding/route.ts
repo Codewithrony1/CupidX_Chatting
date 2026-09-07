@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { usernameSchema } from '@/lib/validation/username';
-import { signToken, getCurrentUser } from '@/lib/auth';
+import { signToken, getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
 
 export async function GET(req: Request) {
   try {
@@ -43,13 +43,20 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser(req);
+    const body = await req.json().catch(() => ({}));
+    const { displayName, dob, gender, avatarEmoji, clerkUserId } = body;
+
+    let user = await getCurrentUser(req);
+    if (!user) {
+      const fallbackClerkId = clerkUserId || req.headers.get('x-clerk-user-id');
+      if (fallbackClerkId) {
+        user = await getOrCreateUserFromClerk(fallbackClerkId);
+      }
+    }
+
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
-
-    const body = await req.json().catch(() => ({}));
-    const { displayName, dob, gender, avatarEmoji } = body;
 
     const cleanDisplayName = (displayName || '').trim();
     if (cleanDisplayName.length < 2 || cleanDisplayName.length > 50) {

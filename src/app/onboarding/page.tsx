@@ -5,13 +5,15 @@ export const dynamic = 'force-dynamic';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { useUser } from '@clerk/nextjs';
 import { calculateAge } from '@/lib/firestoreUser';
 import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { user, loading: authLoading, refreshUser } = useAuth();
+  const { user, clerkUser, loading: authLoading, refreshUser } = useAuth();
+  const { user: directClerkUser } = useUser();
 
   const [displayName, setDisplayName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -24,13 +26,19 @@ export default function OnboardingPage() {
 
   // Pre-fill existing data if available
   useEffect(() => {
-    if (user) {
-      if (user.fullName && user.fullName !== 'CupidX User') {
-        setDisplayName(user.fullName);
-      } else if (user.displayName && user.displayName !== 'CupidX User') {
-        setDisplayName(user.displayName);
-      }
+    const activeName =
+      (user?.fullName && user.fullName !== 'CupidX User' ? user.fullName : null) ||
+      (user?.displayName && user.displayName !== 'CupidX User' ? user.displayName : null) ||
+      directClerkUser?.fullName ||
+      clerkUser?.fullName ||
+      directClerkUser?.firstName ||
+      '';
 
+    if (activeName && !displayName) {
+      setDisplayName(activeName);
+    }
+
+    if (user) {
       if (user.dateOfBirth || user.profile?.dateOfBirth) {
         setDateOfBirth(user.dateOfBirth || user.profile?.dateOfBirth || '');
       }
@@ -45,7 +53,7 @@ export default function OnboardingPage() {
         setSelectedEmoji(user.profile.avatarEmoji);
       }
     }
-  }, [user]);
+  }, [user, directClerkUser, clerkUser]);
 
   // If already complete, redirect to dashboard
   useEffect(() => {
@@ -105,13 +113,17 @@ export default function OnboardingPage() {
     setErrorMsg('');
 
     try {
+      const effectiveClerkId = directClerkUser?.id || clerkUser?.id || user?.clerkUserId || user?.id || user?.uid;
+
       // Direct authoritative API call to complete onboarding and permanently lock identity
       const res = await fetch('/api/auth/onboarding', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
         },
         body: JSON.stringify({
+          clerkUserId: effectiveClerkId,
           displayName: displayName.trim(),
           dob: dateOfBirth,
           gender,
