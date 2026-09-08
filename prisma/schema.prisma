@@ -18,6 +18,8 @@ model User {
   gender          String        @default("unspecified") // "male", "female", "non-binary", "prefer_not_to_say", "unspecified"
   dob             DateTime?
   genderDobLocked Boolean       @default(false) // Admin override lock
+  profileCompleted Boolean      @default(false)
+  profileLocked   Boolean       @default(false)
   passwordHash    String?       @default("")
   role            String        @default("USER") // "USER" or "ADMIN"
   membershipTier  String        @default("FREE") // "FREE" or "VIP"
@@ -63,6 +65,8 @@ model Profile {
   gender                 String    @default("unspecified") // "male", "female", "non-binary", "prefer_not_to_say", "unspecified"
   dob                    DateTime?
   ageGenderConfirmed     Boolean   @default(false)
+  profileCompleted       Boolean   @default(false)
+  profileLocked          Boolean   @default(false)
   ageGenderChangesCount  Int       @default(0)
   showGender             Boolean   @default(true)
   preferredGender        String    @default("auto") // "auto", "male", "female", "any"

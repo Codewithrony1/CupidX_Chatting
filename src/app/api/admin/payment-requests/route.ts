@@ -37,6 +37,7 @@ export async function GET(req: Request) {
           select: {
             id: true,
             firebaseUid: true,
+            clerkUserId: true,
             username: true,
             fullName: true,
             displayName: true,
@@ -52,10 +53,13 @@ export async function GET(req: Request) {
 
     const enrichedRequests = requests.map((item) => ({
       ...item,
+      clerkUserId: item.clerkUserId || item.user.clerkUserId || item.user.id,
+      userName: item.userFullName || item.user.fullName || item.user.displayName || item.user.username,
+      userEmail: item.userEmail || item.user.email || null,
       clerkUser: {
-        id: item.user.id,
-        email: item.user.email || null,
-        name: item.user.fullName || item.user.username,
+        id: item.clerkUserId || item.user.clerkUserId || item.user.id,
+        email: item.userEmail || item.user.email || null,
+        name: item.userFullName || item.user.fullName || item.user.username,
         avatar: null,
       },
     }));

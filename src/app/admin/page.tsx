@@ -177,6 +177,47 @@ export default function AdminPage() {
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
   const [broadcastStatus, setBroadcastStatus] = useState('');
 
+  // Random Chat Control
+  const [randomChatEnabled, setRandomChatEnabled] = useState(true);
+  const [togglingChat, setTogglingChat] = useState(false);
+
+  // Fetch Random Chat state
+  const fetchRandomChat = async () => {
+    try {
+      const res = await fetch('/api/admin/settings/random-chat');
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data.enabled === 'boolean') {
+          setRandomChatEnabled(data.enabled);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Toggle Random Chat
+  const handleToggleRandomChat = async () => {
+    setTogglingChat(true);
+    const nextVal = !randomChatEnabled;
+    try {
+      const res = await fetch('/api/admin/settings/random-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextVal }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRandomChatEnabled(data.enabled);
+        fetchAuditLogs();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTogglingChat(false);
+    }
+  };
+
   // 1-Click Copy helper
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyToClipboard = (text: string, id: string) => {
@@ -297,11 +338,13 @@ export default function AdminPage() {
     fetchUsers();
     fetchQrSettings();
     fetchAuditLogs();
+    fetchRandomChat();
 
     // Auto-refresh polling every 5s for real-time payments queue
     const interval = setInterval(() => {
       fetchStats();
       fetchRequests();
+      fetchRandomChat();
     }, 5000);
 
     return () => clearInterval(interval);
@@ -543,6 +586,22 @@ export default function AdminPage() {
         </div>
 
         <div className="flex items-center space-x-3">
+          {/* Global Matchmaking Switch */}
+          <button
+            type="button"
+            onClick={handleToggleRandomChat}
+            disabled={togglingChat}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black border transition-all flex items-center gap-2 cursor-pointer ${
+              randomChatEnabled
+                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-sm'
+                : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-sm'
+            }`}
+            title="Click to toggle Random Chat matchmaking service globally"
+          >
+            <span className={`w-2 h-2 rounded-full ${randomChatEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+            <span>{togglingChat ? 'SAVING...' : randomChatEnabled ? 'RANDOM CHAT: ON' : 'RANDOM CHAT: OFF'}</span>
+          </button>
+
           <Link
             href="/dashboard"
             className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-bold border border-white/10 transition-colors flex items-center gap-1.5"
@@ -556,6 +615,7 @@ export default function AdminPage() {
               fetchRequests();
               fetchUsers();
               fetchAuditLogs();
+              fetchRandomChat();
             }}
             className="px-3.5 py-2 rounded-xl bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 border border-pink-500/30 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
             title="Refresh All Data"
@@ -1122,7 +1182,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* TAB 4: PAYMENT SETTINGS */}
+        {/* TAB 4: APP & PAYMENT SETTINGS */}
         {activeTab === 'SETTINGS' && (
           <div className="space-y-6">
             {qrSuccessMsg && (
@@ -1137,6 +1197,47 @@ export default function AdminPage() {
                 <span>{qrErrorMsg}</span>
               </div>
             )}
+
+            {/* Random Chat Engine Service Switch */}
+            <div className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl ${
+                    randomChatEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                  }`}>
+                    <Radio className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-black text-white flex items-center gap-2">
+                      <span>Random Matchmaking Engine</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                        randomChatEnabled
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                      }`}>
+                        {randomChatEnabled ? 'Live & Active' : 'Offline / Paused'}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-400 max-w-2xl">
+                      When disabled, new users cannot enter matchmaking and are immediately shown: &ldquo;Random Chat is currently unavailable. Please try again later.&rdquo; False searching is prevented, while existing active chats stay connected until users disconnect.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={togglingChat}
+                  onClick={handleToggleRandomChat}
+                  className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg disabled:opacity-50 ${
+                    randomChatEnabled
+                      ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                  }`}
+                >
+                  {togglingChat ? 'Updating...' : randomChatEnabled ? 'Turn Random Chat OFF' : 'Turn Random Chat ON'}
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* 1. Indian QR Code Slot */}

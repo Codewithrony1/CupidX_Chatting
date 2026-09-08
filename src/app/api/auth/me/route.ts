@@ -8,7 +8,10 @@ export async function GET(req: Request) {
     if (user) {
       const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
       const isProfileDone = Boolean(
+        user.profileCompleted ||
+        user.profileLocked ||
         user.genderDobLocked ||
+        user.profile?.profileCompleted ||
         user.profile?.ageGenderConfirmed ||
         (user.dob && user.gender && user.gender !== 'unspecified' && user.fullName)
       );

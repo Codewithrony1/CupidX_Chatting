@@ -50,12 +50,99 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
 
   if (user) {
     if (!user.clerkUserId) {
-      user = await prisma.user.update({
+      await prisma.user.update({
         where: { id: user.id },
         data: { clerkUserId: cleanId },
-        include: { profile: true, subscription: true },
       });
+      user.clerkUserId = cleanId;
     }
+
+    // Self-healing check: if profile is not marked completed in Prisma, verify Firestore and Clerk metadata
+    if (!user.profileCompleted || !user.genderDobLocked || user.gender === 'unspecified' || !user.dob) {
+      let isCompletedInCloud = false;
+      let cloudDob: Date | null = null;
+      let cloudGender: string = 'unspecified';
+      let cloudName: string | null = null;
+      let cloudAvatarEmoji: string = '😊';
+      let isCloudVip = false;
+
+      // A. Check Firestore Admin doc
+      try {
+        const { getAdminDb } = await import('./firebaseAdmin');
+        const adminDb = getAdminDb();
+        if (adminDb) {
+          const snap = await adminDb.collection('users').doc(cleanId).get();
+          if (snap.exists) {
+            const d = snap.data();
+            if (d?.profileCompleted || d?.genderDobLocked || (d?.dateOfBirth && d?.gender && d?.gender !== 'unspecified')) {
+              isCompletedInCloud = true;
+              if (d?.dateOfBirth) cloudDob = new Date(d.dateOfBirth);
+              if (d?.gender && d?.gender !== 'unspecified') cloudGender = d.gender;
+              if (d?.fullName || d?.displayName) cloudName = d.fullName || d.displayName;
+              if (d?.profile?.avatarEmoji) cloudAvatarEmoji = d.profile.avatarEmoji;
+            }
+            if (d?.is_vip || d?.isVIP || d?.membershipTier === 'VIP') {
+              isCloudVip = true;
+            }
+          }
+        }
+      } catch (fsErr) {}
+
+      // B. Check Clerk User publicMetadata
+      try {
+        const client = await clerkClient();
+        const cDetail = await client.users.getUser(cleanId);
+        const meta: any = cDetail?.publicMetadata || {};
+        if (meta?.profileCompleted || meta?.genderDobLocked || (meta?.dob && meta?.gender && meta?.gender !== 'unspecified')) {
+          isCompletedInCloud = true;
+          if (meta?.dob && !cloudDob) cloudDob = new Date(meta.dob);
+          if (meta?.gender && cloudGender === 'unspecified') cloudGender = meta.gender;
+          if ((meta?.displayName || meta?.fullName) && !cloudName) cloudName = meta.displayName || meta.fullName;
+          if (meta?.avatarEmoji) cloudAvatarEmoji = meta.avatarEmoji;
+        }
+        if (meta?.is_vip || meta?.membershipTier === 'VIP') {
+          isCloudVip = true;
+        }
+      } catch (clerkErr) {}
+
+      if (isCompletedInCloud) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            profileCompleted: true,
+            profileLocked: true,
+            genderDobLocked: true,
+            ...(isCloudVip ? { is_vip: true, membershipTier: 'VIP' } : {}),
+            ...(cloudName ? { fullName: cloudName, displayName: cloudName } : {}),
+            ...(cloudDob ? { dob: cloudDob } : {}),
+            ...(cloudGender !== 'unspecified' ? { gender: cloudGender } : {}),
+            profile: {
+              upsert: {
+                update: {
+                  profileCompleted: true,
+                  profileLocked: true,
+                  ageGenderConfirmed: true,
+                  avatarEmoji: cloudAvatarEmoji,
+                  ...(cloudDob ? { dob: cloudDob } : {}),
+                  ...(cloudGender !== 'unspecified' ? { gender: cloudGender } : {}),
+                },
+                create: {
+                  profileCompleted: true,
+                  profileLocked: true,
+                  ageGenderConfirmed: true,
+                  avatarEmoji: cloudAvatarEmoji,
+                  bio: 'Hey there! I am using CupidX.',
+                  ...(cloudDob ? { dob: cloudDob } : {}),
+                  ...(cloudGender !== 'unspecified' ? { gender: cloudGender } : {}),
+                },
+              },
+            },
+          },
+          include: { profile: true, subscription: true },
+        });
+      }
+    }
+
     return user;
   }
 
@@ -93,7 +180,49 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
   }
 
   // 3. Provision new user in database with collision-free username
+  // Check if cloud profile already exists in Firestore or Clerk metadata
+  let isCloudCompleted = false;
+  let cloudDob: Date | null = null;
+  let cloudGender: string = 'unspecified';
+  let cloudName: string | null = null;
+  let cloudAvatarEmoji: string = '😊';
+  let isCloudVip = false;
+
+  try {
+    const { getAdminDb } = await import('./firebaseAdmin');
+    const adminDb = getAdminDb();
+    if (adminDb) {
+      const snap = await adminDb.collection('users').doc(cleanId).get();
+      if (snap.exists) {
+        const d = snap.data();
+        if (d?.profileCompleted || d?.genderDobLocked || (d?.dateOfBirth && d?.gender && d?.gender !== 'unspecified')) {
+          isCloudCompleted = true;
+          if (d?.dateOfBirth) cloudDob = new Date(d.dateOfBirth);
+          if (d?.gender && d?.gender !== 'unspecified') cloudGender = d.gender;
+          if (d?.fullName || d?.displayName) cloudName = d.fullName || d.displayName;
+          if (d?.profile?.avatarEmoji) cloudAvatarEmoji = d.profile.avatarEmoji;
+        }
+        if (d?.is_vip || d?.isVIP || d?.membershipTier === 'VIP') {
+          isCloudVip = true;
+        }
+      }
+    }
+  } catch (fsErr) {}
+
+  const meta: any = clerkDetail?.publicMetadata || {};
+  if (meta?.profileCompleted || meta?.genderDobLocked || (meta?.dob && meta?.gender && meta?.gender !== 'unspecified')) {
+    isCloudCompleted = true;
+    if (meta?.dob && !cloudDob) cloudDob = new Date(meta.dob);
+    if (meta?.gender && cloudGender === 'unspecified') cloudGender = meta.gender;
+    if ((meta?.displayName || meta?.fullName) && !cloudName) cloudName = meta.displayName || meta.fullName;
+    if (meta?.avatarEmoji) cloudAvatarEmoji = meta.avatarEmoji;
+  }
+  if (meta?.is_vip || meta?.membershipTier === 'VIP') {
+    isCloudVip = true;
+  }
+
   const rawName =
+    cloudName ||
     clerkDetail?.fullName ||
     (clerkDetail?.firstName ? `${clerkDetail.firstName} ${clerkDetail.lastName || ''}`.trim() : null) ||
     clerkDetail?.username ||
@@ -117,14 +246,24 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
         displayName: rawName,
         email,
         role: 'USER',
-        membershipTier: 'FREE',
+        membershipTier: isCloudVip ? 'VIP' : 'FREE',
+        is_vip: isCloudVip,
+        dob: cloudDob,
+        gender: cloudGender,
+        profileCompleted: isCloudCompleted,
+        profileLocked: isCloudCompleted,
+        genderDobLocked: isCloudCompleted,
         profile: {
           create: {
             age: 18,
-            gender: 'unspecified',
+            gender: cloudGender,
+            dob: cloudDob,
             bio: 'Hey there! I am using CupidX.',
-            avatarEmoji: '😊',
+            avatarEmoji: cloudAvatarEmoji,
             avatarType: 'EMOJI',
+            profileCompleted: isCloudCompleted,
+            profileLocked: isCloudCompleted,
+            ageGenderConfirmed: isCloudCompleted,
           },
         },
       },

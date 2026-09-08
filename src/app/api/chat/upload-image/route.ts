@@ -19,10 +19,26 @@ export async function POST(req: Request) {
     }
 
     // 2. Strict VIP Verification: Reject free users with HTTP 403 Forbidden
-    const isVIP =
+    let isVIP =
       user.is_vip ||
       user.membershipTier === 'VIP' ||
       (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
+
+    // Self-healing check: verify Firestore Admin and Clerk metadata if not marked VIP in Prisma
+    if (!isVIP) {
+      try {
+        const adminDb = getAdminDb();
+        if (adminDb) {
+          const snap = await adminDb.collection('users').doc(user.clerkUserId || user.id).get();
+          if (snap.exists) {
+            const d = snap.data();
+            if (d?.is_vip || d?.isVIP || d?.membershipTier === 'VIP') {
+              isVIP = true;
+            }
+          }
+        }
+      } catch (e) {}
+    }
 
     if (!isVIP) {
       return NextResponse.json(
@@ -64,7 +80,7 @@ export async function POST(req: Request) {
       }
 
       const rawExt = matches[1].toLowerCase();
-      ext = rawExt === 'jpeg' ? 'jpg' : rawExt === 'png' ? 'png' : rawExt === 'webp' ? 'webp' : 'jpg';
+      ext = rawExt === 'jpeg' ? 'jpg' : rawExt === 'png' ? 'png' : rawExt === 'webp' ? 'webp' : rawExt === 'gif' ? 'gif' : 'jpg';
       buffer = Buffer.from(matches[2], 'base64');
     } else if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
@@ -79,7 +95,7 @@ export async function POST(req: Request) {
       const arrayBuffer = await file.arrayBuffer();
       buffer = Buffer.from(arrayBuffer);
       const mime = file.type.toLowerCase();
-      ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+      ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
     } else {
       return NextResponse.json(
         { error: 'Unsupported Content-Type. Use application/json or multipart/form-data.' },
@@ -99,7 +115,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Magic Byte Verification (Detect actual binary header)
+    // 5. Magic Byte Verification (Strict binary signature check: JPG, PNG, WEBP, GIF only)
     const isPng =
       buffer.length >= 8 &&
       buffer[0] === 0x89 &&
@@ -121,13 +137,12 @@ export async function POST(req: Request) {
       buffer[9] === 0x45 &&
       buffer[10] === 0x42 &&
       buffer[11] === 0x50;
-
     const isGif =
       buffer.length >= 4 &&
       buffer[0] === 0x47 &&
       buffer[1] === 0x49 &&
       buffer[2] === 0x46 &&
-      buffer[3] === 0x38; // 'GIF8' (GIF87a / GIF89a)
+      buffer[3] === 0x38;
 
     if (!isPng && !isJpg && !isWebp && !isGif) {
       return NextResponse.json(
@@ -139,21 +154,60 @@ export async function POST(req: Request) {
       );
     }
 
-    // Correct extension based on validated magic bytes
     ext = isPng ? 'png' : isWebp ? 'webp' : (isGif ? 'gif' : 'jpg');
 
-    // 6. Save image to disk securely
+    // 6. Access Control: Verify caller is an active participant in matchId
+    if (matchId) {
+      const { prisma } = await import('@/lib/prisma');
+      const session = await prisma.chatSession.findUnique({
+        where: { id: matchId },
+      }).catch(() => null);
+
+      if (session && session.userAId !== user.id && session.userBId !== user.id) {
+        return NextResponse.json(
+          { error: 'Forbidden: You are not an active participant in this chat session.' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // 7. Save image to disk securely
     const randomKey = crypto.randomBytes(16).toString('hex');
     const filename = `vip_photo_${Date.now()}_${randomKey}.${ext}`;
     const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'chat-images');
+    const altUploadDir = path.join(process.cwd(), 'uploads', 'chat-images');
     await fs.mkdir(uploadDir, { recursive: true });
-    await fs.writeFile(path.join(uploadDir, filename), buffer);
+    await fs.mkdir(altUploadDir, { recursive: true }).catch(() => {});
+    await Promise.all([
+      fs.writeFile(path.join(uploadDir, filename), buffer),
+      fs.writeFile(path.join(altUploadDir, filename), buffer).catch(() => {}),
+    ]);
 
     const imageUrl = `/uploads/chat-images/${filename}`;
 
-    // 7. If matchId is provided, write to Firestore via Admin SDK for sub-50ms delivery
+    // 8. Database Record & Real-time Delivery
     let messageId: string | null = null;
     if (matchId) {
+      // A. Prisma message persistence
+      try {
+        const { prisma } = await import('@/lib/prisma');
+        const session = await prisma.chatSession.findUnique({ where: { id: matchId } });
+        if (session) {
+          const dbMsg = await prisma.message.create({
+            data: {
+              chatSessionId: matchId,
+              senderId: user.id,
+              content: content.trim(),
+              imageUrl,
+            },
+          });
+          messageId = dbMsg.id;
+        }
+      } catch (dbErr) {
+        console.warn('Prisma message persistence notice:', dbErr);
+      }
+
+      // B. Firestore real-time push delivery via Admin SDK
       try {
         const adminDb = getAdminDb();
         if (adminDb) {
@@ -163,12 +217,12 @@ export async function POST(req: Request) {
             .collection('messages')
             .add({
               senderUid: user.id,
-              senderUsername: user.displayName || user.fullName || 'User',
+              senderUsername: user.displayName || user.fullName || 'Stranger',
               content: content.trim(),
               imageUrl,
               createdAt: Date.now(),
             });
-          messageId = docRef.id;
+          if (!messageId) messageId = docRef.id;
         }
       } catch (err) {
         console.warn('Firestore message add sync error:', err);

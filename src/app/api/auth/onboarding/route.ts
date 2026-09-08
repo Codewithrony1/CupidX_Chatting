@@ -144,6 +144,8 @@ export async function POST(req: Request) {
           gender: cleanGender,
           dob: parsedDob,
           genderDobLocked: true, // Permanent lock for identity
+          profileCompleted: true,
+          profileLocked: true,
           profile: {
             upsert: {
               update: {
@@ -153,6 +155,8 @@ export async function POST(req: Request) {
                 gender: cleanGender,
                 dob: parsedDob,
                 ageGenderConfirmed: true, // Permanent lock
+                profileCompleted: true,
+                profileLocked: true,
               },
               create: {
                 avatarType: 'EMOJI',
@@ -161,6 +165,8 @@ export async function POST(req: Request) {
                 gender: cleanGender,
                 dob: parsedDob,
                 ageGenderConfirmed: true, // Permanent lock
+                profileCompleted: true,
+                profileLocked: true,
                 bio: 'Hey there! I am using CupidX.',
               },
             },
@@ -179,6 +185,8 @@ export async function POST(req: Request) {
             gender: cleanGender,
             dob: parsedDob,
             genderDobLocked: true,
+            profileCompleted: true,
+            profileLocked: true,
           },
         });
         await prisma.profile.upsert({
@@ -190,6 +198,8 @@ export async function POST(req: Request) {
             gender: cleanGender,
             dob: parsedDob,
             ageGenderConfirmed: true,
+            profileCompleted: true,
+            profileLocked: true,
           },
           create: {
             userId: user.id,
@@ -199,6 +209,8 @@ export async function POST(req: Request) {
             gender: cleanGender,
             dob: parsedDob,
             ageGenderConfirmed: true,
+            profileCompleted: true,
+            profileLocked: true,
             bio: 'Hey there! I am using CupidX.',
           },
         });
@@ -219,6 +231,8 @@ export async function POST(req: Request) {
         gender: cleanGender,
         dob: parsedDob,
         genderDobLocked: true,
+        profileCompleted: true,
+        profileLocked: true,
       };
     }
 
@@ -234,6 +248,7 @@ export async function POST(req: Request) {
           gender: cleanGender,
           dateOfBirth: parsedDob.toISOString().slice(0, 10),
           profileCompleted: true,
+          profileLocked: true,
           genderDobLocked: true,
           updatedAt: Date.now(),
           profile: {
@@ -244,6 +259,8 @@ export async function POST(req: Request) {
             age: calculatedAge,
             avatarEmoji: selectedEmoji,
             avatarType: 'EMOJI',
+            profileCompleted: true,
+            profileLocked: true,
             ageGenderConfirmed: true,
           },
         };
@@ -252,6 +269,29 @@ export async function POST(req: Request) {
       }
     } catch (fsErr) {
       console.warn('Firestore server sync notice:', fsErr);
+    }
+
+    // 3. Save to Clerk User publicMetadata for permanent cross-session cloud persistence
+    try {
+      const targetClerkId = user.clerkUserId || clerkUserId || user.id;
+      if (targetClerkId) {
+        const { clerkClient } = await import('@clerk/nextjs/server');
+        const client = await clerkClient();
+        await client.users.updateUserMetadata(targetClerkId, {
+          publicMetadata: {
+            profileCompleted: true,
+            profileLocked: true,
+            genderDobLocked: true,
+            dob: parsedDob.toISOString().slice(0, 10),
+            gender: cleanGender,
+            fullName: cleanDisplayName,
+            displayName: cleanDisplayName,
+            avatarEmoji: selectedEmoji,
+          },
+        });
+      }
+    } catch (clerkSyncErr) {
+      console.warn('Clerk metadata sync notice:', clerkSyncErr);
     }
 
     const token = signToken({

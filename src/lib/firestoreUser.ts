@@ -204,8 +204,7 @@ export async function getOrCreateFirestoreUser(authUser: GenericAuthUser): Promi
       setDoc(userRef, fallbackUser).catch((e) => console.warn('[PROFILE] Firestore setDoc notice:', e));
       return fallbackUser;
     } else {
-      console.warn('[PROFILE] Firestore read timed out (>2.5s), proceeding with fallback for UID:', authUser.uid);
-      setDoc(userRef, fallbackUser).catch(() => {});
+      console.warn('[PROFILE] Firestore read timed out (>2.5s), proceeding with memory fallback for UID:', authUser.uid);
       return fallbackUser;
     }
   } catch (err) {

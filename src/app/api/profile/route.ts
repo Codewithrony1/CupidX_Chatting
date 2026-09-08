@@ -93,7 +93,14 @@ export async function PUT(req: Request) {
     }
 
     // ─── 1. PERMANENT LOCKS & FREE vs VIP LOCK ENFORCEMENT ──────────────────
-    const isProfileLocked = Boolean(user.genderDobLocked || user.profile?.ageGenderConfirmed);
+    const isProfileLocked = Boolean(
+      user.profileCompleted ||
+      user.profileLocked ||
+      user.genderDobLocked ||
+      user.profile?.profileCompleted ||
+      user.profile?.ageGenderConfirmed ||
+      (user.dob && user.gender && user.gender !== 'unspecified')
+    );
     const inputDob = dob || dateOfBirth;
     const existingDob = user.dob || user.profile?.dob;
     const existingGender = user.gender || user.profile?.gender;

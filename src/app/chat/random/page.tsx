@@ -94,6 +94,8 @@ export default function KnotChatRandomPage() {
   const [messages, setMessages] = useState<RandomMessage[]>([]);
   const [reconnecting, setReconnecting] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [randomChatDisabled, setRandomChatDisabled] = useState(false);
+  const [checkingAvailability, setCheckingAvailability] = useState(true);
 
   // ── Input & messaging ──
   const [inputText, setInputText] = useState('');
@@ -292,6 +294,12 @@ export default function KnotChatRandomPage() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
+          if (res.status === 503 || errData.disabled) {
+            setRandomChatDisabled(true);
+            setSearchError('Random Chat is currently unavailable. Please try again later.');
+            setMatchStatus('idle');
+            return;
+          }
           throw new Error(errData.error || 'Failed to join matchmaking.');
         }
 
@@ -351,16 +359,39 @@ export default function KnotChatRandomPage() {
     [currentUser?.id, attachActiveMatch]
   );
 
-  // ─── Auto-start on mount when user is ready ───────────────────────────────
+  // ─── Check availability & auto-start on mount when user is ready ──────────
   useEffect(() => {
+    let isMounted = true;
     if (currentUser?.id) {
-      const hasSeenIntro = (currentUser as any)?.profile?.randomChatIntroSeen;
-      if (!hasSeenIntro) {
-        setShowIntroModal(true);
-      } else {
-        handleStartMatch();
-      }
+      fetch('/api/settings/random-chat')
+        .then((res) => res.json())
+        .then((data) => {
+          if (!isMounted) return;
+          setCheckingAvailability(false);
+          if (data && data.enabled === false) {
+            setRandomChatDisabled(true);
+            setSearchError('Random Chat is currently unavailable. Please try again later.');
+            setMatchStatus('idle');
+          } else {
+            setRandomChatDisabled(false);
+            const hasSeenIntro = (currentUser as any)?.profile?.randomChatIntroSeen;
+            if (!hasSeenIntro) {
+              setShowIntroModal(true);
+            } else {
+              handleStartMatch();
+            }
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setCheckingAvailability(false);
+            handleStartMatch();
+          }
+        });
     }
+    return () => {
+      isMounted = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id]);
 
@@ -468,10 +499,13 @@ export default function KnotChatRandomPage() {
 
     try {
       if (imageToSend) {
-        // Enforce VIP check and upload through secure backend API
+        const effectiveClerkId = currentUser?.clerkUserId || currentUser?.id || '';
         const uploadRes = await fetch('/api/chat/upload-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+          },
           body: JSON.stringify({
             matchId: activeMid,
             content: textToSend,
@@ -489,9 +523,13 @@ export default function KnotChatRandomPage() {
         }
       } else {
         // Send message via backend API with IDOR and participant verification
+        const effectiveClerkId = currentUser?.clerkUserId || currentUser?.id || '';
         const msgRes = await fetch('/api/chat/messages', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+          },
           body: JSON.stringify({
             chatSessionId: activeMid,
             content: textToSend,
@@ -668,13 +706,50 @@ export default function KnotChatRandomPage() {
               </div>
             )}
 
-            <button
-              onClick={() => handleStartMatch()}
-              className="w-full py-4 rounded-3xl bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-black text-sm uppercase tracking-wider shadow-2xl shadow-pink-500/30 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
-            >
-              <Sparkles className="w-5 h-5" />
-              <span>START RANDOM CHAT</span>
-            </button>
+            {randomChatDisabled ? (
+              <div className="w-full space-y-3">
+                <div className="p-4 rounded-3xl bg-rose-500/10 border border-rose-500/30 text-center space-y-1.5">
+                  <div className="text-sm font-black text-rose-300 uppercase tracking-wider flex items-center justify-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                    <span>Random Chat Unavailable</span>
+                  </div>
+                  <p className="text-xs text-rose-200/90 font-medium">
+                    Random Chat is currently unavailable. Please try again later.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setCheckingAvailability(true);
+                    try {
+                      const res = await fetch('/api/settings/random-chat');
+                      const data = await res.json();
+                      if (data.enabled) {
+                        setRandomChatDisabled(false);
+                        setSearchError(null);
+                        handleStartMatch();
+                      } else {
+                        setRandomChatDisabled(true);
+                        setSearchError('Random Chat is currently unavailable. Please try again later.');
+                      }
+                    } catch (e) {}
+                    setCheckingAvailability(false);
+                  }}
+                  disabled={checkingAvailability}
+                  className="w-full py-3.5 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs uppercase tracking-wider border border-white/10 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {checkingAvailability ? 'Checking Availability...' : 'Check Availability Again'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleStartMatch()}
+                className="w-full py-4 rounded-3xl bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-black text-sm uppercase tracking-wider shadow-2xl shadow-pink-500/30 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+              >
+                <Sparkles className="w-5 h-5" />
+                <span>START RANDOM CHAT</span>
+              </button>
+            )}
 
             <div className="flex items-center space-x-4 text-[11px] text-slate-400">
               <span className="flex items-center gap-1">

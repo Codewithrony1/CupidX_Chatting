@@ -159,6 +159,24 @@ export async function POST(
       console.warn('Firestore sync warning during payment approval (non-critical):', fsErr);
     }
 
+    // 3. Sync to Clerk User publicMetadata
+    try {
+      const targetClerkId = targetUser.clerkUserId || paymentRequest.clerkUserId || targetUser.id;
+      if (targetClerkId) {
+        const { clerkClient } = await import('@clerk/nextjs/server');
+        const client = await clerkClient();
+        await client.users.updateUserMetadata(targetClerkId, {
+          publicMetadata: {
+            is_vip: true,
+            membershipTier: 'VIP',
+            vip_expires_at: newExpiresAt.toISOString(),
+          },
+        });
+      }
+    } catch (clerkSyncErr) {
+      console.warn('Clerk metadata sync warning during payment approval:', clerkSyncErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Payment approved and VIP activated successfully',

@@ -49,7 +49,24 @@ export async function POST(req: Request) {
           },
         });
       }
-    } else {
+    }
+
+    // 2. Check if Random Chat is enabled globally before allowing new entrants
+    const chatSetting = await prisma.appSetting.findUnique({
+      where: { key: 'randomChatEnabled' },
+    });
+    const randomChatEnabled = chatSetting ? chatSetting.value !== 'false' : true;
+    if (!randomChatEnabled) {
+      return NextResponse.json(
+        {
+          error: 'Random Chat is currently unavailable. Please try again later.',
+          disabled: true,
+        },
+        { status: 503 }
+      );
+    }
+
+    if (skipCurrentMatch) {
       // User explicitly skipped / requested next match: terminate prior active sessions
       const oldSessions = await prisma.chatSession.findMany({
         where: {

@@ -26,6 +26,7 @@ import {
   Check,
   Radio,
   Loader2,
+  AlertCircle,
 } from 'lucide-react';
 
 interface SearchUser {
@@ -78,6 +79,19 @@ export default function DashboardPage() {
   const [preferredGender, setPreferredGender] = useState(user?.profile?.preferredGender || 'auto');
   const [language, setLanguage] = useState(user?.profile?.language || 'english');
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [randomChatEnabled, setRandomChatEnabled] = useState(true);
+
+  // Fetch Random Chat global service status
+  useEffect(() => {
+    fetch('/api/settings/random-chat')
+      .then((res) => res.json())
+      .then((data) => {
+        if (typeof data.enabled === 'boolean') {
+          setRandomChatEnabled(data.enabled);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Mood Bottom Sheet State
   const [showMoodSheet, setShowMoodSheet] = useState(false);
@@ -326,8 +340,10 @@ export default function DashboardPage() {
             <div className="relative z-10 p-7 flex flex-col items-center text-center space-y-5">
               {/* Live badge */}
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-pink-500/20 backdrop-blur-sm">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse" />
-                <span className="text-[11px] font-bold text-emerald-300 tracking-wide uppercase">Live Now — Chat Instantly</span>
+                <span className={`w-2 h-2 rounded-full ${randomChatEnabled ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse' : 'bg-rose-400'}`} />
+                <span className={`text-[11px] font-bold tracking-wide uppercase ${randomChatEnabled ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {randomChatEnabled ? 'Live Now — Chat Instantly' : 'Service Paused — Offline'}
+                </span>
               </div>
 
               {/* Icon */}
@@ -383,15 +399,27 @@ export default function DashboardPage() {
                 })}
               </div>
 
-              {/* Big START button */}
-              <Link
-                href="/chat/random"
-                className="w-full py-4 rounded-2xl font-black text-lg tracking-wide bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white shadow-2xl shadow-pink-600/50 active:scale-95 transition-all flex items-center justify-center gap-3 border border-pink-400/40 cursor-pointer"
-              >
-                <Radio className="w-5 h-5 animate-pulse" />
-                <span>START CHATTING</span>
-                <ArrowRight className="w-5 h-5" />
-              </Link>
+              {/* Big START button or Service Offline Banner */}
+              {randomChatEnabled ? (
+                <Link
+                  href="/chat/random"
+                  className="w-full py-4 rounded-2xl font-black text-lg tracking-wide bg-gradient-to-r from-pink-600 via-rose-500 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white shadow-2xl shadow-pink-600/50 active:scale-95 transition-all flex items-center justify-center gap-3 border border-pink-400/40 cursor-pointer"
+                >
+                  <Radio className="w-5 h-5 animate-pulse" />
+                  <span>START CHATTING</span>
+                  <ArrowRight className="w-5 h-5" />
+                </Link>
+              ) : (
+                <div className="w-full py-4 px-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-center space-y-1">
+                  <div className="text-sm font-black text-rose-300 uppercase tracking-wider flex items-center justify-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                    <span>Random Chat Currently Unavailable</span>
+                  </div>
+                  <p className="text-xs text-rose-200/80 font-medium">
+                    Random Chat is currently unavailable. Please try again later.
+                  </p>
+                </div>
+              )}
 
               {/* Stats row */}
               <div className="flex items-center gap-4 text-[11px] text-pink-300/50 font-medium pt-1">
