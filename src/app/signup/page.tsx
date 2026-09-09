@@ -23,10 +23,11 @@ export default function SignupPage() {
     setSubmitting(true);
     try {
       await signUpWithGoogle();
+      // Keep loader active while browser navigates to Google accounts
+      setTimeout(() => setSubmitting(false), 5000);
     } catch (err: any) {
       console.error('[SIGNUP] Google auth error:', err);
       setError(err?.message || 'Google sign-up was cancelled or failed.');
-    } finally {
       setSubmitting(false);
     }
   };

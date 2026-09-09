@@ -278,25 +278,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ─── 3. Google 1-Click Sign-in via Clerk ────────────────────────────────────
   const loginWithGoogle = async () => {
-    if (!clerk) return;
     console.log('[AUTH] Clerk Google login initiated');
-    try {
-      const client = (clerk as any).client;
-      if (client?.signIn) {
+    const origin = typeof window !== 'undefined' && window.location.origin 
+      ? window.location.origin 
+      : 'https://www.cupidxchat.in';
+
+    const targetRedirectUrl = `${origin}/sso-callback`;
+    const targetDashboardUrl = `${origin}/dashboard`;
+
+    const client = (clerk as any)?.client;
+
+    // 1. Primary: Use client.signIn.authenticateWithRedirect with continueSignUp enabled
+    if (client?.signIn?.authenticateWithRedirect) {
+      try {
         await client.signIn.authenticateWithRedirect({
           strategy: 'oauth_google',
-          redirectUrl: '/sso-callback',
-          redirectUrlComplete: '/dashboard',
+          redirectUrl: targetRedirectUrl,
+          redirectUrlComplete: targetDashboardUrl,
+          continueSignUp: true,
         });
         return;
+      } catch (signInErr: any) {
+        console.warn('[AUTH] client.signIn.authenticateWithRedirect notice:', signInErr);
       }
-      clerk.openSignIn({
-        fallbackRedirectUrl: '/dashboard',
-        signUpFallbackRedirectUrl: '/onboarding',
-      });
-    } catch (err: any) {
-      console.warn('[AUTH] Direct Google OAuth redirect notice:', err);
-      clerk.openSignIn({
+    }
+
+    // 2. Secondary: If signIn wasn't ready or threw, try client.signUp.authenticateWithRedirect with continueSignIn
+    if (client?.signUp?.authenticateWithRedirect) {
+      try {
+        await client.signUp.authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: targetRedirectUrl,
+          redirectUrlComplete: targetDashboardUrl,
+          continueSignIn: true,
+        });
+        return;
+      } catch (signUpErr: any) {
+        console.warn('[AUTH] client.signUp.authenticateWithRedirect notice:', signUpErr);
+      }
+    }
+
+    // 3. Fallback: Open Clerk Sign-In modal
+    if (clerk?.openSignIn) {
+      try {
+        clerk.openSignIn({
+          fallbackRedirectUrl: '/dashboard',
+          signUpFallbackRedirectUrl: '/onboarding',
+        });
+        return;
+      } catch (modalErr) {
+        console.warn('[AUTH] openSignIn modal notice:', modalErr);
+      }
+    }
+
+    // 4. Fallback: clerk.redirectToSignIn
+    if (clerk && typeof (clerk as any).redirectToSignIn === 'function') {
+      await (clerk as any).redirectToSignIn({
         fallbackRedirectUrl: '/dashboard',
         signUpFallbackRedirectUrl: '/onboarding',
       });
@@ -304,24 +341,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUpWithGoogle = async () => {
-    if (!clerk) return;
     console.log('[AUTH] Clerk Google signup initiated');
-    try {
-      const client = (clerk as any).client;
-      if (client?.signUp) {
+    const origin = typeof window !== 'undefined' && window.location.origin 
+      ? window.location.origin 
+      : 'https://www.cupidxchat.in';
+
+    const targetRedirectUrl = `${origin}/sso-callback`;
+    const targetOnboardingUrl = `${origin}/onboarding`;
+
+    const client = (clerk as any)?.client;
+
+    // 1. Primary: Use client.signUp.authenticateWithRedirect with continueSignIn enabled
+    if (client?.signUp?.authenticateWithRedirect) {
+      try {
         await client.signUp.authenticateWithRedirect({
           strategy: 'oauth_google',
-          redirectUrl: '/sso-callback',
-          redirectUrlComplete: '/onboarding',
+          redirectUrl: targetRedirectUrl,
+          redirectUrlComplete: targetOnboardingUrl,
+          continueSignIn: true,
         });
         return;
+      } catch (signUpErr: any) {
+        console.warn('[AUTH] client.signUp.authenticateWithRedirect notice:', signUpErr);
       }
-      clerk.openSignUp({
-        fallbackRedirectUrl: '/onboarding',
-      });
-    } catch (err: any) {
-      console.warn('[AUTH] Direct Google OAuth signup notice:', err);
-      clerk.openSignUp({
+    }
+
+    // 2. Secondary: Try client.signIn.authenticateWithRedirect with continueSignUp enabled
+    if (client?.signIn?.authenticateWithRedirect) {
+      try {
+        await client.signIn.authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: targetRedirectUrl,
+          redirectUrlComplete: targetOnboardingUrl,
+          continueSignUp: true,
+        });
+        return;
+      } catch (signInErr: any) {
+        console.warn('[AUTH] client.signIn.authenticateWithRedirect notice:', signInErr);
+      }
+    }
+
+    // 3. Fallback: Open Clerk Sign-Up modal
+    if (clerk?.openSignUp) {
+      try {
+        clerk.openSignUp({
+          fallbackRedirectUrl: '/onboarding',
+        });
+        return;
+      } catch (modalErr) {
+        console.warn('[AUTH] openSignUp modal notice:', modalErr);
+      }
+    }
+
+    // 4. Fallback: clerk.redirectToSignUp
+    if (clerk && typeof (clerk as any).redirectToSignUp === 'function') {
+      await (clerk as any).redirectToSignUp({
         fallbackRedirectUrl: '/onboarding',
       });
     }
@@ -351,8 +425,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (result.status === 'complete') {
-        await clerk.setActive({ session: result.createdSessionId });
-        router.replace('/dashboard');
+        await clerk.setActive({ 
+          session: result.createdSessionId,
+          redirectUrl: '/dashboard',
+        });
       } else {
         console.warn('[AUTH] Incomplete sign-in status:', result.status);
         clerk.openSignIn({
@@ -397,8 +473,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (result.status === 'complete') {
-        await clerk.setActive({ session: result.createdSessionId });
-        router.replace('/onboarding');
+        await clerk.setActive({ 
+          session: result.createdSessionId,
+          redirectUrl: '/onboarding',
+        });
       } else {
         console.warn('[AUTH] Sign-up requires additional verification:', result.status);
         clerk.openSignUp({

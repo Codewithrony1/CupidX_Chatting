@@ -21,10 +21,11 @@ export default function Login() {
     setSubmitting(true);
     try {
       await loginWithGoogle();
+      // Keep loader active while browser navigates to Google accounts
+      setTimeout(() => setSubmitting(false), 5000);
     } catch (err: any) {
       console.error('[LOGIN] Google auth error:', err);
       setError(err?.message || 'Google sign-in was cancelled or failed.');
-    } finally {
       setSubmitting(false);
     }
   };

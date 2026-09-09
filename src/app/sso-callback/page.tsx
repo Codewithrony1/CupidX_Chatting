@@ -10,7 +10,13 @@ export default function SSOCallbackPage() {
     <div className="min-h-[100dvh] bg-[#0d0014] text-white flex items-center justify-center relative overflow-hidden">
       <FloatingHearts />
       <div className="text-center space-y-3 z-10">
-        <AuthenticateWithRedirectCallback />
+        <AuthenticateWithRedirectCallback
+          signInForceRedirectUrl="/dashboard"
+          signUpForceRedirectUrl="/onboarding"
+          signInFallbackRedirectUrl="/dashboard"
+          signUpFallbackRedirectUrl="/onboarding"
+          continueSignUpUrl="/onboarding"
+        />
         <p className="text-xs font-bold text-pink-300">Completing sign in to CupidX...</p>
       </div>
     </div>
