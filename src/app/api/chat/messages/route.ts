@@ -234,16 +234,19 @@ export async function GET(req: Request) {
       }
     }
 
-    const messages = await prisma.message.findMany({
+    const rawMessages = await prisma.message.findMany({
       where: messageWhere,
-      orderBy: { createdAt: 'asc' },
-      take: 100,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
       include: {
         sender: {
           select: { username: true, displayName: true, fullName: true },
         },
       },
     });
+
+    // Reverse to return chronologically ascending order (oldest to newest)
+    const messages = rawMessages.reverse();
 
     return NextResponse.json({
       success: true,

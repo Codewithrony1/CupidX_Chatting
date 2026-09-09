@@ -139,6 +139,12 @@ export default function KnotChatRandomPage() {
   const currentUidRef = useRef<string | null>(null);
   const activeMatchIdRef = useRef<string | null>(null);
 
+  // Synchronizer and execution control refs
+  const isSyncingRef = useRef(false);
+  const syncSeqRef = useRef(0);
+  const consecutiveSyncErrorsRef = useRef(0);
+  const autoStartExecutedRef = useRef(false);
+
   const isVIP =
     currentUser?.membershipTier === 'VIP' ||
     (currentUser?.subscription?.isActive === true && currentUser?.subscription?.plan === 'VIP');
@@ -200,8 +206,23 @@ export default function KnotChatRandomPage() {
     return () => {
       stopAllTimers();
       stopAllListeners();
-      if (currentUidRef.current) {
-        leaveQueue(currentUidRef.current).catch(() => {});
+      const currentMid = activeMatchIdRef.current;
+      const effectiveClerkId = currentUidRef.current;
+      if (currentMid) {
+        try {
+          if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+            navigator.sendBeacon(`/api/chat/${currentMid}/end`);
+          } else {
+            fetch(`/api/chat/${currentMid}/end`, {
+              method: 'POST',
+              headers: effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {},
+              keepalive: true,
+            }).catch(() => {});
+          }
+        } catch (e) {}
+      }
+      if (effectiveClerkId) {
+        leaveQueue(effectiveClerkId).catch(() => {});
       }
     };
   }, []);
@@ -224,23 +245,53 @@ export default function KnotChatRandomPage() {
   // ─── Active Chat Realtime Synchronizer ────────────────────────────────────
   const syncActiveChat = useCallback(async (mid: string) => {
     if (!mid || activeMatchIdRef.current !== mid) return;
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
+
+    syncSeqRef.current += 1;
+    const requestSeq = syncSeqRef.current;
 
     try {
-      const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(mid)}`);
-
-      // If session ended, deleted, or unauthorized
-      if (!res.ok || res.status === 404) {
-        const data = await res.json().catch(() => ({}));
-        if (data.sessionStatus === 'ENDED' || res.status === 404) {
-          stopAllTimers();
-          stopAllListeners();
-          activeMatchIdRef.current = null;
-          setMatchStatus('ended');
-          return;
-        }
+      const effectiveClerkId = currentUidRef.current || '';
+      const headers: Record<string, string> = {};
+      if (effectiveClerkId) {
+        headers['x-clerk-user-id'] = effectiveClerkId;
       }
 
+      const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(mid)}`, {
+        headers,
+      });
+
+      // Discard stale out-of-order responses or if active match changed
+      if (requestSeq !== syncSeqRef.current || activeMatchIdRef.current !== mid) {
+        return;
+      }
+
+      // Handle 404 or non-OK response
+      if (!res.ok) {
+        if (res.status === 404) {
+          const data = await res.json().catch(() => ({}));
+          if (data.sessionStatus === 'ENDED' || res.status === 404) {
+            stopAllTimers();
+            stopAllListeners();
+            activeMatchIdRef.current = null;
+            setMatchStatus('ended');
+            return;
+          }
+        }
+        consecutiveSyncErrorsRef.current += 1;
+        if (consecutiveSyncErrorsRef.current >= 4) {
+          setReconnecting(true);
+        }
+        return;
+      }
+
+      // Read response body ONCE
       const data = await res.json();
+      consecutiveSyncErrorsRef.current = 0;
+      setReconnecting(false);
+
+      // Check if session has ended on server
       if (data.sessionStatus === 'ENDED') {
         stopAllTimers();
         stopAllListeners();
@@ -249,32 +300,25 @@ export default function KnotChatRandomPage() {
         return;
       }
 
-      if (data.partner && !partner) {
-        setPartner({
-          id: data.partner.id,
-          displayName: data.partner.displayName || 'Stranger',
-          fullName: data.partner.displayName || 'Stranger',
-          avatarUrl: data.partner.avatarUrl || null,
-          avatarEmoji: data.partner.avatarEmoji || '😊',
-          gender: data.partner.gender || 'unspecified',
-          isVIP: Boolean(data.partner.isVIP),
+      // Update partner info if missing
+      if (data.partner) {
+        setPartner((prev) => {
+          if (prev && prev.id === data.partner.id) return prev;
+          return {
+            id: data.partner.id,
+            displayName: data.partner.displayName || 'Stranger',
+            fullName: data.partner.displayName || 'Stranger',
+            avatarUrl: data.partner.avatarUrl || null,
+            avatarEmoji: data.partner.avatarEmoji || '😊',
+            gender: data.partner.gender || 'unspecified',
+            isVIP: Boolean(data.partner.isVIP),
+          };
         });
       }
 
+      // Server-authoritative message merge with zero message-drop guarantee
       if (Array.isArray(data.messages)) {
         setMessages((prev) => {
-          // Keep locally in-flight SENDING messages that haven't been confirmed yet
-          const pendingSending = prev.filter(
-            (local) =>
-              local.status === 'SENDING' &&
-              !data.messages.some(
-                (srv: any) =>
-                  (srv.clientMessageId && srv.clientMessageId === local.clientMessageId) ||
-                  srv.id === local.id
-              )
-          );
-
-          // Map server authoritative messages
           const serverMapped: RandomMessage[] = data.messages.map((m: any) => ({
             id: m.id,
             clientMessageId: m.clientMessageId || null,
@@ -286,34 +330,51 @@ export default function KnotChatRandomPage() {
             status: 'SENT' as const,
           }));
 
-          // Merge server messages + pending in-flight messages
-          const combined = [...serverMapped, ...pendingSending];
+          const serverIds = new Set(serverMapped.map((m) => m.id));
+          const serverClientIds = new Set(
+            serverMapped.filter((m) => m.clientMessageId).map((m) => m.clientMessageId)
+          );
+
+          // Retain local messages that haven't yet been confirmed by this specific server response
+          // Keep both SENDING and locally confirmed SENT messages that the server query hasn't returned yet
+          const unconfirmedLocal = prev.filter(
+            (local) =>
+              !serverIds.has(local.id) &&
+              (!local.clientMessageId || !serverClientIds.has(local.clientMessageId))
+          );
+
+          const combined = [...serverMapped, ...unconfirmedLocal];
           combined.sort(
             (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
           );
 
-          // Deduplicate by message signature to prevent re-render thrashing
-          const prevSig = prev.map((m) => `${m.id}:${m.status}`).join(',');
-          const nextSig = combined.map((m) => `${m.id}:${m.status}`).join(',');
+          const prevSig = prev.map((m) => `${m.id}:${m.status}:${m.content}`).join('|');
+          const nextSig = combined.map((m) => `${m.id}:${m.status}:${m.content}`).join('|');
           if (prevSig === nextSig) return prev;
 
           return combined;
         });
       }
     } catch (err) {
-      console.warn('[CHAT] Active chat sync notice:', err);
+      consecutiveSyncErrorsRef.current += 1;
+      if (consecutiveSyncErrorsRef.current >= 4) {
+        setReconnecting(true);
+      }
+    } finally {
+      isSyncingRef.current = false;
     }
-  }, [partner]);
+  }, []);
 
   // ─── Attach active match ──────────────────────────────────────────────────
   const attachActiveMatch = useCallback((mid: string, partnerData?: any) => {
-    if (activeMatchIdRef.current === mid) return;
+    if (!mid || activeMatchIdRef.current === mid) return;
     activeMatchIdRef.current = mid;
     setMatchId(mid);
     if (partnerData) {
       setPartner(partnerData);
     }
     setMatchStatus('connected');
+    setReconnecting(false);
 
     stopAllTimers();
     if (queueListenerRef.current) {
@@ -321,66 +382,48 @@ export default function KnotChatRandomPage() {
       queueListenerRef.current = null;
     }
 
-    const myUid = currentUser?.id || '';
+    const myUid = currentUidRef.current || '';
 
-    // 1. High-frequency, server-authoritative message & match sync (every 650ms)
+    // 1. High-frequency server-authoritative sync (every 500ms for rapid Omegle-style message delivery)
     syncActiveChat(mid);
     chatSyncIntervalRef.current = setInterval(() => {
       syncActiveChat(mid);
-    }, 650);
+    }, 500);
 
-    // 2. Firestore match status fallback (if active)
+    // 2. Firestore match status fallback (if active, without throwing unhandled exceptions)
     try {
       matchListenerRef.current?.();
-      matchListenerRef.current = listenToMatch(mid, (matchDoc: MatchDoc) => {
-        if (matchDoc.status === 'ended') {
-          stopAllTimers();
-          stopAllListeners();
-          activeMatchIdRef.current = null;
-          setMatchStatus('ended');
-          return;
-        }
-        if (!partnerData && myUid) {
-          setPartner(buildPartner(matchDoc, myUid));
-        }
-        setMatchStatus('connected');
-      });
+      matchListenerRef.current = listenToMatch(
+        mid,
+        (matchDoc: MatchDoc) => {
+          if (matchDoc.status === 'ended') {
+            stopAllTimers();
+            stopAllListeners();
+            activeMatchIdRef.current = null;
+            setMatchStatus('ended');
+            return;
+          }
+          if (!partnerData && myUid) {
+            setPartner(buildPartner(matchDoc, myUid));
+          }
+          setMatchStatus('connected');
+        },
+        () => {} // Silent error handler
+      );
     } catch (e) {}
 
-    // 3. Firestore messages push listener fallback (if active)
+    // 3. Firestore push trigger (triggers canonical syncActiveChat instead of clashing state IDs)
     try {
       messagesListenerRef.current?.();
       messagesListenerRef.current = listenToMessages(
         mid,
-        (firestoreMsgs: FirestoreMessage[]) => {
-          if (!firestoreMsgs || firestoreMsgs.length === 0) return;
-          setMessages((prev) => {
-            const pendingSending = prev.filter(
-              (local) =>
-                local.status === 'SENDING' &&
-                !firestoreMsgs.some(
-                  (fm) => fm.id === local.id || (local.clientMessageId && local.clientMessageId === fm.id)
-                )
-            );
-            const mapped: RandomMessage[] = firestoreMsgs.map((m) => ({
-              id: m.id,
-              senderId: m.senderUid,
-              senderUsername: m.senderUsername || 'Stranger',
-              content: m.content,
-              imageUrl: m.imageUrl,
-              createdAt: resolveTimestamp(m.createdAt),
-              status: 'SENT' as const,
-            }));
-            const merged = [...mapped, ...pendingSending];
-            merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-            return merged;
-          });
-          setReconnecting(false);
+        () => {
+          syncActiveChat(mid);
         },
-        () => setReconnecting(true)
+        () => {} // Silent error handler
       );
     } catch (e) {}
-  }, [currentUser?.id, syncActiveChat]);
+  }, [syncActiveChat]);
 
   // ─── START MATCHMAKING (Server-Controlled) ─────────────────────────────────
   const handleStartMatch = useCallback(
@@ -397,13 +440,16 @@ export default function KnotChatRandomPage() {
       stopAllListeners();
 
       try {
-        const currentUserId = currentUser?.id;
+        const currentUserId = currentUidRef.current || currentUser?.id;
         if (!currentUserId) return;
 
-        // Call server-controlled matchmaking API
+        // Call server-controlled matchmaking API with fallback header
         const res = await fetch('/api/matchmaking/join', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-clerk-user-id': currentUserId,
+          },
           body: JSON.stringify({
             skipCurrentMatch: skipCurrent,
             excludePartnerId: excludePartnerId || null,
@@ -433,22 +479,31 @@ export default function KnotChatRandomPage() {
         const sessionStartedAt = Date.now();
 
         // 1. Push: Listen to own queue doc in Firestore for instant notification
-        queueListenerRef.current = listenToMyQueueEntry(currentUserId, sessionStartedAt, async (mid) => {
-          if (activeMatchIdRef.current) return;
-          try {
-            const statusRes = await fetch('/api/matchmaking/status');
-            if (statusRes.ok) {
-              const statusData = await statusRes.json();
-              if (statusData.matched && statusData.chatSessionId) {
-                attachActiveMatch(statusData.chatSessionId, statusData.partner);
+        try {
+          queueListenerRef.current = listenToMyQueueEntry(
+            currentUserId,
+            sessionStartedAt,
+            async () => {
+              if (activeMatchIdRef.current) return;
+              try {
+                const statusRes = await fetch('/api/matchmaking/status', {
+                  headers: { 'x-clerk-user-id': currentUserId },
+                });
+                if (statusRes.ok) {
+                  const statusData = await statusRes.json();
+                  if (statusData.matched && statusData.chatSessionId) {
+                    attachActiveMatch(statusData.chatSessionId, statusData.partner);
+                  }
+                }
+              } catch (e) {
+                console.warn('Push match status error:', e);
               }
-            }
-          } catch (e) {
-            console.warn('Push match status error:', e);
-          }
-        });
+            },
+            () => {} // Silent error handler
+          );
+        } catch (e) {}
 
-        // 2. Infallible Polling: Poll /api/matchmaking/status every 1200ms
+        // 2. Server-Authoritative Polling: Poll /api/matchmaking/status every 1000ms
         matchingIntervalRef.current = setInterval(async () => {
           if (activeMatchIdRef.current) {
             if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
@@ -456,7 +511,9 @@ export default function KnotChatRandomPage() {
           }
 
           try {
-            const statusRes = await fetch('/api/matchmaking/status');
+            const statusRes = await fetch('/api/matchmaking/status', {
+              headers: { 'x-clerk-user-id': currentUserId },
+            });
             if (statusRes.ok) {
               const statusData = await statusRes.json();
               if (statusData.matched && statusData.chatSessionId) {
@@ -467,7 +524,7 @@ export default function KnotChatRandomPage() {
           } catch (e) {
             console.warn('Status poll error:', e);
           }
-        }, 1200);
+        }, 1000);
       } catch (err: any) {
         console.error('Matchmaking error:', err);
         setSearchError(err?.message || 'Could not connect to matchmaking queue.');
@@ -480,7 +537,8 @@ export default function KnotChatRandomPage() {
   // ─── Check availability & auto-start on mount when user is ready ──────────
   useEffect(() => {
     let isMounted = true;
-    if (currentUser?.id) {
+    if (currentUser?.id && !autoStartExecutedRef.current) {
+      autoStartExecutedRef.current = true;
       fetch('/api/settings/random-chat')
         .then((res) => res.json())
         .then((data) => {
@@ -521,11 +579,20 @@ export default function KnotChatRandomPage() {
     setMatchStatus('idle');
 
     try {
-      const res = await fetch('/api/matchmaking/cancel', { method: 'POST' });
+      const effectiveClerkId = currentUidRef.current || '';
+      const res = await fetch('/api/matchmaking/cancel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+        },
+      });
       const data = await res.json();
       if (data.matched && data.chatSessionId) {
         // Match won the race condition right before cancellation
-        const statusRes = await fetch('/api/matchmaking/status');
+        const statusRes = await fetch('/api/matchmaking/status', {
+          headers: effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {},
+        });
         if (statusRes.ok) {
           const statusData = await statusRes.json();
           if (statusData.matched && statusData.chatSessionId) {
@@ -556,7 +623,14 @@ export default function KnotChatRandomPage() {
     setMessages([]);
 
     if (currentMid) {
-      fetch(`/api/chat/${currentMid}/next`, { method: 'POST' }).catch(() => {});
+      const effectiveClerkId = currentUidRef.current || '';
+      fetch(`/api/chat/${currentMid}/next`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+        },
+      }).catch(() => {});
     }
 
     handleStartMatch(true, currentPartnerId);
@@ -571,7 +645,14 @@ export default function KnotChatRandomPage() {
     activeMatchIdRef.current = null;
 
     if (currentMid) {
-      fetch(`/api/chat/${currentMid}/end`, { method: 'POST' }).catch(() => {});
+      const effectiveClerkId = currentUidRef.current || '';
+      fetch(`/api/chat/${currentMid}/end`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+        },
+      }).catch(() => {});
     }
 
     setMatchStatus('ended');
@@ -598,11 +679,11 @@ export default function KnotChatRandomPage() {
       return;
     }
 
-    const senderUid = currentUser?.id || 'me';
+    const senderUid = currentUidRef.current || currentUser?.id || 'me';
     const senderDisplayName = currentUser?.displayName || currentUser?.fullName || 'Stranger';
     const imageToSend = selectedImageFile;
 
-    const tempId = `temp_${Date.now()}`;
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const tempMessage: RandomMessage = {
       id: tempId,
       clientMessageId: tempId,
@@ -623,9 +704,10 @@ export default function KnotChatRandomPage() {
     if (socket && socketConnected) socket.emit('random_typing_status', { isTyping: false });
     isCurrentlyTypingRef.current = false;
 
+    const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+
     try {
       if (imageToSend) {
-        const effectiveClerkId = currentUser?.clerkUserId || currentUser?.id || '';
         const uploadRes = await fetch('/api/chat/upload-image', {
           method: 'POST',
           headers: {
@@ -639,11 +721,10 @@ export default function KnotChatRandomPage() {
           }),
         });
 
-        const uploadData = await uploadRes.json();
+        const uploadData = await uploadRes.json().catch(() => ({}));
         if (!uploadRes.ok) {
           if (uploadRes.status === 403 || uploadData.isVipRequired) {
             setShowVipModal(true);
-            throw new Error(uploadData.error || 'Photo sharing is a VIP feature. Upgrade to VIP to send photos in random chats.');
           }
           throw new Error(uploadData.error || 'Failed to upload photo.');
         }
@@ -664,7 +745,6 @@ export default function KnotChatRandomPage() {
         syncActiveChat(activeMid);
       } else {
         // Send message via backend API with IDOR and participant verification
-        const effectiveClerkId = currentUser?.clerkUserId || currentUser?.id || '';
         const msgRes = await fetch('/api/chat/messages', {
           method: 'POST',
           headers: {
@@ -679,7 +759,7 @@ export default function KnotChatRandomPage() {
         });
 
         if (msgRes.ok) {
-          const msgData = await msgRes.json();
+          const msgData = await msgRes.json().catch(() => ({}));
           const serverMsg = msgData.message;
           setMessages((prev) =>
             prev.map((m) =>
@@ -695,7 +775,16 @@ export default function KnotChatRandomPage() {
           );
           syncActiveChat(activeMid);
         } else {
-          // Fallback direct send
+          const errData = await msgRes.json().catch(() => ({}));
+          if (errData.error === 'Chat session has already ended') {
+            stopAllTimers();
+            stopAllListeners();
+            activeMatchIdRef.current = null;
+            setMatchStatus('ended');
+            return;
+          }
+
+          // Fallback direct send via Firestore if available
           try {
             await sendFirestoreMessage(
               activeMid,
@@ -708,13 +797,12 @@ export default function KnotChatRandomPage() {
               prev.map((m) => (m.id === tempId ? { ...m, status: 'SENT' as const } : m))
             );
           } catch (e) {
-            throw new Error('Failed to deliver message');
+            throw new Error(errData.error || 'Failed to deliver message');
           }
         }
       }
     } catch (err: any) {
-      console.error('Send message error:', err);
-      alert(err?.message || 'Failed to send message.');
+      console.warn('Send message notice:', err?.message || err);
       setMessages((prev) =>
         prev.map((m) => (m.id === tempId ? { ...m, status: 'FAILED' as const } : m))
       );
