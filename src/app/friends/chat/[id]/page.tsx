@@ -86,12 +86,22 @@ export default function PrivateChatPage() {
     scrollToBottom('smooth');
   }, [messages.length]);
 
+  const getAuthHeaders = useCallback(() => {
+    const headers: Record<string, string> = {};
+    if (user?.clerkUserId || user?.id) {
+      headers['x-clerk-user-id'] = user.clerkUserId || user.id;
+    }
+    return headers;
+  }, [user]);
+
   // ─── Real-time Message Sync Loop (650ms cadence) ──────────────────────────
   const syncMessages = useCallback(async () => {
     if (!conversationId) return;
 
     try {
-      const res = await fetch(`/api/social/conversations/${conversationId}/messages`);
+      const res = await fetch(`/api/social/conversations/${conversationId}/messages`, {
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) {
         if (res.status === 403 || res.status === 404) {
           router.push('/friends');
@@ -145,7 +155,7 @@ export default function PrivateChatPage() {
     } finally {
       setLoading(false);
     }
-  }, [conversationId, router]);
+  }, [conversationId, router, getAuthHeaders]);
 
   useEffect(() => {
     syncMessages();
@@ -189,7 +199,7 @@ export default function PrivateChatPage() {
       if (imageToSend) {
         const uploadRes = await fetch(`/api/social/conversations/${conversationId}/upload-image`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             imageData: imageToSend,
             content: textToSend,
@@ -217,7 +227,7 @@ export default function PrivateChatPage() {
       } else {
         const res = await fetch(`/api/social/conversations/${conversationId}/messages`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             content: textToSend,
             clientMessageId: tempId,
@@ -302,7 +312,7 @@ export default function PrivateChatPage() {
 
       const res = await fetch('/api/social/call/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           conversationId,
           callType,
@@ -327,7 +337,7 @@ export default function PrivateChatPage() {
     try {
       await fetch('/api/chat/block', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ blockedUserId: partner.id }),
       });
       alert(`@${partner.username} has been blocked.`);
@@ -345,7 +355,7 @@ export default function PrivateChatPage() {
     try {
       await fetch('/api/chat/report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           reportedUserId: partner.id,
           reason: reportReason.trim(),

@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireVipUser, getCanonicalPair, checkBlockBetween } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, checkBlockBetween } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 
 export async function POST(req: Request) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     if (!checkRateLimit(`friend_req_${user!.id}`, 10, 60000)) {

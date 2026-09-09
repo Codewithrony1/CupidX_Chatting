@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireVipUser, getCanonicalPair } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair } from '@/lib/vipAuth';
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     const { id: requestId } = await params;

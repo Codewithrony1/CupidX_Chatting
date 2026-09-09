@@ -127,35 +127,44 @@ export default function FriendsHubPage() {
   // Action status
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  const effectiveUsername = claimedUsername || user?.vipUsername || user?.username || 'member';
   const effectiveVipUsername = claimedUsername || user?.vipUsername || null;
+
+  const getAuthHeaders = useCallback(() => {
+    const headers: Record<string, string> = {};
+    if (user?.clerkUserId || user?.id) {
+      headers['x-clerk-user-id'] = user.clerkUserId || user.id;
+    }
+    return headers;
+  }, [user]);
 
   // ─── Fetch All Social Data ────────────────────────────────────────────────
   const fetchFriends = useCallback(async () => {
-    if (!isVIP) return;
+    if (!user) return;
     try {
-      const res = await fetch('/api/social/friends');
+      const res = await fetch('/api/social/friends', { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setFriends(data.friends || []);
       }
     } catch (e) {}
-  }, [isVIP]);
+  }, [user, getAuthHeaders]);
 
   const fetchConversations = useCallback(async () => {
-    if (!isVIP) return;
+    if (!user) return;
     try {
-      const res = await fetch('/api/social/conversations');
+      const res = await fetch('/api/social/conversations', { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setConversations(data.conversations || []);
       }
     } catch (e) {}
-  }, [isVIP]);
+  }, [user, getAuthHeaders]);
 
   const fetchRequests = useCallback(async () => {
-    if (!isVIP) return;
+    if (!user) return;
     try {
-      const res = await fetch('/api/social/friends/requests');
+      const res = await fetch('/api/social/friends/requests', { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setIncomingRequests(data.incoming || []);
@@ -163,21 +172,21 @@ export default function FriendsHubPage() {
         setPendingCount(data.pendingCount || 0);
       }
     } catch (e) {}
-  }, [isVIP]);
+  }, [user, getAuthHeaders]);
 
   useEffect(() => {
-    if (isVIP) {
+    if (user) {
       fetchFriends();
       fetchConversations();
       fetchRequests();
 
-      // Poll requests and active status periodically
+      // Poll requests periodically
       const interval = setInterval(() => {
         fetchRequests();
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [isVIP, fetchFriends, fetchConversations, fetchRequests]);
+  }, [user, fetchFriends, fetchConversations, fetchRequests]);
 
   // ─── Username Availability Check ──────────────────────────────────────────
   const handleClaimInputChange = (val: string) => {
@@ -239,7 +248,9 @@ export default function FriendsHubPage() {
     setSearching(true);
     searchDebounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/social/users/search?q=${encodeURIComponent(val)}`);
+        const res = await fetch(`/api/social/users/search?q=${encodeURIComponent(val)}`, {
+          headers: getAuthHeaders(),
+        });
         if (res.ok) {
           const data = await res.json();
           setSearchResults(data.users || []);
@@ -256,7 +267,7 @@ export default function FriendsHubPage() {
     try {
       const res = await fetch('/api/social/friends/request', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ targetUserId }),
       });
       const data = await res.json();
@@ -279,7 +290,10 @@ export default function FriendsHubPage() {
   const handleAcceptRequest = async (requestId: string) => {
     setActionLoading(requestId);
     try {
-      const res = await fetch(`/api/social/friends/requests/${requestId}/accept`, { method: 'POST' });
+      const res = await fetch(`/api/social/friends/requests/${requestId}/accept`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       if (res.ok) {
         fetchRequests();
@@ -298,7 +312,10 @@ export default function FriendsHubPage() {
   const handleRejectRequest = async (requestId: string) => {
     setActionLoading(requestId);
     try {
-      const res = await fetch(`/api/social/friends/requests/${requestId}/reject`, { method: 'POST' });
+      const res = await fetch(`/api/social/friends/requests/${requestId}/reject`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         fetchRequests();
       }
@@ -310,7 +327,10 @@ export default function FriendsHubPage() {
   const handleCancelRequest = async (requestId: string) => {
     setActionLoading(requestId);
     try {
-      const res = await fetch(`/api/social/friends/requests/${requestId}/cancel`, { method: 'POST' });
+      const res = await fetch(`/api/social/friends/requests/${requestId}/cancel`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         fetchRequests();
       }
@@ -324,7 +344,7 @@ export default function FriendsHubPage() {
     try {
       const res = await fetch('/api/social/friends/remove', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ friendId }),
       });
       if (res.ok) {
@@ -358,7 +378,7 @@ export default function FriendsHubPage() {
 
       const res = await fetch('/api/social/call/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           conversationId,
           callType,
@@ -386,81 +406,31 @@ export default function FriendsHubPage() {
         {/* Global WebRTC Call Modal Overlay */}
         <CallModal onCallEnded={() => { fetchConversations(); }} />
 
-        {/* ================================================================= */}
-        {/* 1. FREE USER GATE CARD                                            */}
-        {/* ================================================================= */}
+        {/* VIP Upsell Banner for Free Users (Non-blocking) */}
         {!isVIP && !loading && (
-          <div className="rounded-3xl bg-gradient-to-b from-[#19002b] to-[#0d0014] border border-pink-500/30 p-8 text-center space-y-6 shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-72 h-72 bg-pink-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
-
-            <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-yellow-500 to-amber-600 p-0.5 mx-auto shadow-xl shadow-yellow-500/20">
-              <div className="w-full h-full rounded-3xl bg-slate-950 flex items-center justify-center">
-                <Crown className="w-8 h-8 text-yellow-400 fill-current" />
+          <div className="rounded-2xl bg-gradient-to-r from-yellow-500/10 via-pink-500/10 to-purple-500/10 border border-yellow-500/30 p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center shrink-0">
+                <Crown className="w-5 h-5 text-yellow-400 fill-current" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-black text-white">Upgrade to CupidX VIP</span>
+                  <span className="px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold text-[9px] uppercase">Gold Perks</span>
+                </div>
+                <p className="text-[11px] text-slate-300">Claim your custom @username, gold VIP badge, and unlock VIP privileges.</p>
               </div>
             </div>
-
-            <div className="space-y-2 max-w-lg mx-auto">
-              <span className="px-3 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 font-extrabold text-[10px] uppercase tracking-wider">
-                Exclusive VIP Suite
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-black text-white">
-                CupidX Social & VIP Friends
-              </h2>
-              <p className="text-sm text-slate-300 leading-relaxed">
-                Connect permanently with strangers you like. Create your custom @username, send friend requests, chat privately, share photos, and place 1-on-1 HD voice & video calls.
-              </p>
-            </div>
-
-            {/* Feature Highlights Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto text-left text-xs text-slate-200">
-              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start space-x-3">
-                <span className="text-lg">👑</span>
-                <div>
-                  <h5 className="font-bold text-white">Custom @Username</h5>
-                  <p className="text-slate-400 text-[11px]">Claim your permanent handle & public identity.</p>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start space-x-3">
-                <span className="text-lg">🤝</span>
-                <div>
-                  <h5 className="font-bold text-white">Friends & Discovery</h5>
-                  <p className="text-slate-400 text-[11px]">Search handles, send requests, and build your circle.</p>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start space-x-3">
-                <span className="text-lg">💬</span>
-                <div>
-                  <h5 className="font-bold text-white">Persistent Private Chat</h5>
-                  <p className="text-slate-400 text-[11px]">End-to-end private 1-on-1 messaging that never auto-deletes.</p>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start space-x-3">
-                <span className="text-lg">📹</span>
-                <div>
-                  <h5 className="font-bold text-white">HD Voice & Video Calls</h5>
-                  <p className="text-slate-400 text-[11px]">Call accepted friends anytime with crystal clear WebRTC.</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <Link
-                href="/vip"
-                className="inline-flex items-center space-x-2 px-8 py-4 rounded-2xl bg-gradient-to-r from-yellow-500 via-pink-500 to-purple-600 hover:from-yellow-400 hover:to-purple-500 text-white font-black text-xs uppercase tracking-wider shadow-xl shadow-pink-500/25 active:scale-95 transition-all cursor-pointer"
-              >
-                <Crown className="w-4 h-4 fill-current" />
-                <span>Upgrade to CupidX VIP</span>
-              </Link>
-            </div>
+            <Link
+              href="/vip"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider shadow-md shrink-0 active:scale-95 transition-all"
+            >
+              Get VIP
+            </Link>
           </div>
         )}
 
-        {/* ================================================================= */}
-        {/* 2. VIP USER: USERNAME SETUP FLOW (IF NOT CLAIMED YET)             */}
-        {/* ================================================================= */}
+        {/* 2. VIP USER: USERNAME SETUP FLOW (IF NOT CLAIMED YET) */}
         {isVIP && !effectiveVipUsername && (
           <div className="rounded-3xl bg-gradient-to-b from-[#1f0036] to-[#0f0019] border border-pink-500/40 p-6 sm:p-8 space-y-6 shadow-2xl">
             <div className="flex items-center space-x-3">
@@ -523,10 +493,22 @@ export default function FriendsHubPage() {
           </div>
         )}
 
-        {/* ================================================================= */}
-        {/* 3. VIP SOCIAL MAIN DASHBOARD (WHEN USERNAME IS ACTIVE)            */}
-        {/* ================================================================= */}
-        {isVIP && effectiveVipUsername && (
+        {/* Not Logged In Fallback */}
+        {!user && !loading && (
+          <div className="p-8 text-center rounded-3xl bg-white/5 border border-white/10 space-y-4">
+            <h3 className="text-lg font-bold text-white">Please log in</h3>
+            <p className="text-xs text-slate-400">Sign in to search members, add friends, and chat privately.</p>
+            <Link
+              href="/login"
+              className="inline-block px-6 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold shadow-md shadow-pink-500/20"
+            >
+              Log In
+            </Link>
+          </div>
+        )}
+
+        {/* 3. SOCIAL MAIN DASHBOARD (FOR ALL AUTHENTICATED USERS) */}
+        {user && !loading && (
           <div className="space-y-6">
             {/* Header Identity Card */}
             <div className="rounded-3xl bg-white/5 border border-white/10 p-5 flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-md">
@@ -544,12 +526,14 @@ export default function FriendsHubPage() {
                 <div>
                   <div className="flex items-center space-x-2">
                     <h3 className="text-lg font-black text-white">{user?.displayName || user?.fullName}</h3>
-                    <span className="px-2 py-0.5 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-[10px] font-extrabold uppercase flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" />
-                      <span>VIP</span>
-                    </span>
+                    {isVIP && (
+                      <span className="px-2 py-0.5 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-400 text-[10px] font-extrabold uppercase flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        <span>VIP</span>
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs font-mono font-bold text-pink-400">@{effectiveVipUsername}</p>
+                  <p className="text-xs font-mono font-bold text-pink-400">@{effectiveUsername}</p>
                 </div>
               </div>
 

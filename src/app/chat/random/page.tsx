@@ -271,13 +271,18 @@ export default function KnotChatRandomPage() {
       if (!res.ok) {
         if (res.status === 404) {
           const data = await res.json().catch(() => ({}));
-          if (data.sessionStatus === 'ENDED' || res.status === 404) {
+          consecutiveSyncErrorsRef.current += 1;
+          // Only terminate if server explicitly confirmed sessionStatus is ENDED,
+          // or if 3 consecutive 404s occur (guards against single container cold-start misses)
+          if (data.sessionStatus === 'ENDED' || consecutiveSyncErrorsRef.current >= 3) {
+            console.log('[RANDOM_CHAT] Terminating active match - server confirmed ENDED or 3 consecutive 404s:', mid);
             stopAllTimers();
             stopAllListeners();
             activeMatchIdRef.current = null;
             setMatchStatus('ended');
             return;
           }
+          return;
         }
         if (res.status === 403) {
           console.warn('[RANDOM_CHAT_SYNC] 403 Forbidden - verify participant authorization for session:', mid);
@@ -378,6 +383,7 @@ export default function KnotChatRandomPage() {
     }
     setMatchStatus('connected');
     setReconnecting(false);
+    console.log('[RANDOM_CHAT] STATE: CONNECTED | EVENT: MATCH_ATTACHED | MATCH ID:', mid, '| PARTNER:', partnerData?.displayName || 'Stranger');
 
     stopAllTimers();
     if (queueListenerRef.current) {
@@ -445,6 +451,7 @@ export default function KnotChatRandomPage() {
       try {
         const currentUserId = currentUidRef.current || currentUser?.id;
         if (!currentUserId) return;
+        console.log('[RANDOM_CHAT] STATE: SEARCHING | EVENT: START_SEARCH | USER:', currentUserId, '| SKIP CURRENT:', skipCurrent);
 
         // Call server-controlled matchmaking API with fallback header
         const res = await fetch('/api/matchmaking/join', {

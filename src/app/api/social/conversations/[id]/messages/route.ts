@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireVipUser, checkBlockBetween } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, checkBlockBetween } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 
 export async function GET(
@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     const { id: conversationId } = await params;
@@ -50,7 +50,20 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden: You are not a member of this conversation.' }, { status: 403 });
     }
 
+    // Verify active friendship exists
+    const [u1, u2] = getCanonicalPair(conversation.user1Id, conversation.user2Id);
+    const friendship = await prisma.friendship.findUnique({
+      where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+    });
+    if (!friendship) {
+      return NextResponse.json({ error: 'You must be friends to access this conversation.' }, { status: 403 });
+    }
+
     const partner = conversation.user1Id === user!.id ? conversation.user2 : conversation.user1;
+    const isBlocked = await checkBlockBetween(user!.id, partner.id);
+    if (isBlocked) {
+      return NextResponse.json({ error: 'Unable to communicate with this member.' }, { status: 403 });
+    }
 
     // Incremental filter
     const whereClause: any = { conversationId };
@@ -114,7 +127,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     const { id: conversationId } = await params;
@@ -141,6 +154,15 @@ export async function POST(
 
     if (conversation.user1Id !== user!.id && conversation.user2Id !== user!.id) {
       return NextResponse.json({ error: 'Forbidden: You cannot send messages to this conversation.' }, { status: 403 });
+    }
+
+    // Verify active friendship exists
+    const [u1, u2] = getCanonicalPair(conversation.user1Id, conversation.user2Id);
+    const friendship = await prisma.friendship.findUnique({
+      where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+    });
+    if (!friendship) {
+      return NextResponse.json({ error: 'You must be friends to send messages in this conversation.' }, { status: 403 });
     }
 
     const partnerId = conversation.user1Id === user!.id ? conversation.user2Id : conversation.user1Id;

@@ -39,9 +39,39 @@ export async function POST(req: Request) {
     }
 
     // 3. Strict IDOR Check: Verify ChatSession exists and user is a participant
-    const session = await prisma.chatSession.findUnique({
+    let session = await prisma.chatSession.findUnique({
       where: { id: chatSessionId },
     });
+
+    if (!session) {
+      // Cross-container serverless fallback: check Firestore for active match
+      try {
+        const { getAdminDb } = await import('@/lib/firebaseAdmin');
+        const adminDb = getAdminDb();
+        if (adminDb) {
+          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
+          if (snap.exists) {
+            const matchDoc = snap.data();
+            if (matchDoc && matchDoc.status === 'active') {
+              const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
+              const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
+              session = await prisma.chatSession.upsert({
+                where: { id: chatSessionId },
+                update: { status: 'ACTIVE' },
+                create: {
+                  id: chatSessionId,
+                  userAId: uAId,
+                  userBId: uBId,
+                  status: 'ACTIVE',
+                },
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[MESSAGES_POST] Firestore fallback check error:', e);
+      }
+    }
 
     if (!session) {
       return NextResponse.json({ error: 'Chat session not found' }, { status: 404 });
@@ -207,13 +237,47 @@ export async function GET(req: Request) {
     }
 
     // Strict Authorization Check
-    const session = await prisma.chatSession.findUnique({
+    let session = await prisma.chatSession.findUnique({
       where: { id: chatSessionId },
       include: {
         userA: { include: { profile: true } },
         userB: { include: { profile: true } },
       },
     });
+
+    if (!session) {
+      // Cross-container serverless fallback: check Firestore for active match
+      try {
+        const { getAdminDb } = await import('@/lib/firebaseAdmin');
+        const adminDb = getAdminDb();
+        if (adminDb) {
+          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
+          if (snap.exists) {
+            const matchDoc = snap.data();
+            if (matchDoc && matchDoc.status === 'active') {
+              const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
+              const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
+              session = await prisma.chatSession.upsert({
+                where: { id: chatSessionId },
+                update: { status: 'ACTIVE' },
+                create: {
+                  id: chatSessionId,
+                  userAId: uAId,
+                  userBId: uBId,
+                  status: 'ACTIVE',
+                },
+                include: {
+                  userA: { include: { profile: true } },
+                  userB: { include: { profile: true } },
+                },
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[MESSAGES_GET] Firestore fallback check error:', e);
+      }
+    }
 
     if (!session) {
       return NextResponse.json({ error: 'Chat session not found', sessionStatus: 'ENDED' }, { status: 404 });

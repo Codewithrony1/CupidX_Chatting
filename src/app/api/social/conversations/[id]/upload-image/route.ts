@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireVipUser } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, checkBlockBetween } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 import crypto from 'crypto';
 import fs from 'fs/promises';
@@ -13,7 +13,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     const { id: conversationId } = await params;
@@ -33,6 +33,21 @@ export async function POST(
 
     if (conversation.user1Id !== user!.id && conversation.user2Id !== user!.id) {
       return NextResponse.json({ error: 'Forbidden: You are not a member of this conversation.' }, { status: 403 });
+    }
+
+    // Verify active friendship exists
+    const [u1, u2] = getCanonicalPair(conversation.user1Id, conversation.user2Id);
+    const friendship = await prisma.friendship.findUnique({
+      where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+    });
+    if (!friendship) {
+      return NextResponse.json({ error: 'You must be friends to upload photos in this conversation.' }, { status: 403 });
+    }
+
+    const partnerId = conversation.user1Id === user!.id ? conversation.user2Id : conversation.user1Id;
+    const isBlocked = await checkBlockBetween(user!.id, partnerId);
+    if (isBlocked) {
+      return NextResponse.json({ error: 'Unable to send message to this member.' }, { status: 403 });
     }
 
     const contentType = req.headers.get('content-type') || '';

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireVipUser } from '@/lib/vipAuth';
+import { requireAuthUser } from '@/lib/vipAuth';
 
 function formatDuration(seconds: number): string {
   if (seconds <= 0) return '0s';
@@ -15,7 +15,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     const { id: callId } = await params;

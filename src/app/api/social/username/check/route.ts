@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireVipUser, validateUsernameFormat } from '@/lib/vipAuth';
+import { requireAuthUser, validateUsernameFormat } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 
 export async function GET(req: Request) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     if (!checkRateLimit(`user_check_${user!.id}`, 45, 60000)) {

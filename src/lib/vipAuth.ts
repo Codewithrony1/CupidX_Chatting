@@ -97,6 +97,25 @@ export async function requireVipUser(req?: Request) {
   return { user, response: null };
 }
 
+export async function requireAuthUser(req?: Request) {
+  const user = await getCurrentUser(req);
+  if (!user) {
+    return {
+      user: null,
+      response: NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 }),
+    };
+  }
+
+  if (user.isSuspended) {
+    return {
+      user: null,
+      response: NextResponse.json({ error: 'Account suspended.' }, { status: 403 }),
+    };
+  }
+
+  return { user, response: null };
+}
+
 export async function checkBlockBetween(userIdA: string, userIdB: string): Promise<boolean> {
   const block = await prisma.block.findFirst({
     where: {

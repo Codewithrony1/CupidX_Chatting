@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireVipUser } from '@/lib/vipAuth';
+import { requireAuthUser } from '@/lib/vipAuth';
 
 export async function GET(req: Request) {
   try {
-    const { user, response } = await requireVipUser(req);
+    const { user, response } = await requireAuthUser(req);
     if (response) return response;
 
     const [incoming, outgoing] = await Promise.all([
