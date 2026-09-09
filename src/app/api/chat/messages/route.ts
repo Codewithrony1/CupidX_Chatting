@@ -240,7 +240,7 @@ export async function GET(req: Request) {
       take: 100,
       include: {
         sender: {
-          select: { username: true },
+          select: { username: true, displayName: true, fullName: true },
         },
       },
     });
@@ -262,7 +262,7 @@ export async function GET(req: Request) {
         clientMessageId: m.clientMessageId,
         chatSessionId: m.chatSessionId,
         senderId: m.senderId,
-        senderUsername: m.sender.username,
+        senderUsername: m.sender.displayName || m.sender.fullName || m.sender.username || 'Stranger',
         content: m.content,
         imageUrl: m.imageUrl,
         createdAt: m.createdAt.toISOString(),

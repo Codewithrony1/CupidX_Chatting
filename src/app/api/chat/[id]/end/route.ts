@@ -26,14 +26,36 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    if (session.status === 'ENDED') {
+      return NextResponse.json({ message: 'Session already ended' }, { status: 200 });
+    }
+
     await prisma.$transaction([
+      prisma.chatSession.update({
+        where: { id: chatSessionId },
+        data: {
+          status: 'ENDED',
+          endedAt: new Date(),
+        },
+      }),
+      prisma.matchmakingQueue.updateMany({
+        where: { OR: [{ userId: session.userAId }, { userId: session.userBId }] },
+        data: { status: 'CANCELLED', chatSessionId: null, partnerUserId: null },
+      }),
       prisma.message.deleteMany({
         where: { chatSessionId },
       }),
-      prisma.chatSession.delete({
-        where: { id: chatSessionId },
-      }),
     ]);
+
+    // Prune stale ended chat sessions older than 45 seconds
+    try {
+      await prisma.chatSession.deleteMany({
+        where: {
+          status: 'ENDED',
+          endedAt: { lt: new Date(Date.now() - 45 * 1000) },
+        },
+      });
+    } catch (e) {}
 
     // Also sync to Firestore so partner client receives 'ended' status immediately
     try {

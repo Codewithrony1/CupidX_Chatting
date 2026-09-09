@@ -133,13 +133,20 @@ export default function KnotChatRandomPage() {
   const messagesListenerRef = useRef<(() => void) | null>(null);
   const matchingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const chatSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isScanningRef = useRef(false);
+  const isSkippingRef = useRef(false);
   const currentUidRef = useRef<string | null>(null);
   const activeMatchIdRef = useRef<string | null>(null);
 
   const isVIP =
     currentUser?.membershipTier === 'VIP' ||
     (currentUser?.subscription?.isActive === true && currentUser?.subscription?.plan === 'VIP');
+
+  // Sync current user ID into ref
+  useEffect(() => {
+    currentUidRef.current = currentUser?.id || null;
+  }, [currentUser?.id]);
 
   // ─── Auto scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -173,6 +180,10 @@ export default function KnotChatRandomPage() {
       clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = null;
     }
+    if (chatSyncIntervalRef.current) {
+      clearInterval(chatSyncIntervalRef.current);
+      chatSyncIntervalRef.current = null;
+    }
   };
 
   const stopAllListeners = () => {
@@ -196,7 +207,6 @@ export default function KnotChatRandomPage() {
   }, []);
 
   // ─── Build partner object ─────────────────────────────────────────────────
-  // ─── Build partner object ─────────────────────────────────────────────────
   function buildPartner(matchDoc: MatchDoc, myUid: string): RandomPartner {
     const isUser1 = matchDoc.user1Uid === myUid || (matchDoc as any).user1ClerkId === myUid;
     return {
@@ -210,6 +220,90 @@ export default function KnotChatRandomPage() {
       isVIP: isUser1 ? matchDoc.user2IsVIP : matchDoc.user1IsVIP,
     };
   }
+
+  // ─── Active Chat Realtime Synchronizer ────────────────────────────────────
+  const syncActiveChat = useCallback(async (mid: string) => {
+    if (!mid || activeMatchIdRef.current !== mid) return;
+
+    try {
+      const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(mid)}`);
+
+      // If session ended, deleted, or unauthorized
+      if (!res.ok || res.status === 404) {
+        const data = await res.json().catch(() => ({}));
+        if (data.sessionStatus === 'ENDED' || res.status === 404) {
+          stopAllTimers();
+          stopAllListeners();
+          activeMatchIdRef.current = null;
+          setMatchStatus('ended');
+          return;
+        }
+      }
+
+      const data = await res.json();
+      if (data.sessionStatus === 'ENDED') {
+        stopAllTimers();
+        stopAllListeners();
+        activeMatchIdRef.current = null;
+        setMatchStatus('ended');
+        return;
+      }
+
+      if (data.partner && !partner) {
+        setPartner({
+          id: data.partner.id,
+          displayName: data.partner.displayName || 'Stranger',
+          fullName: data.partner.displayName || 'Stranger',
+          avatarUrl: data.partner.avatarUrl || null,
+          avatarEmoji: data.partner.avatarEmoji || '😊',
+          gender: data.partner.gender || 'unspecified',
+          isVIP: Boolean(data.partner.isVIP),
+        });
+      }
+
+      if (Array.isArray(data.messages)) {
+        setMessages((prev) => {
+          // Keep locally in-flight SENDING messages that haven't been confirmed yet
+          const pendingSending = prev.filter(
+            (local) =>
+              local.status === 'SENDING' &&
+              !data.messages.some(
+                (srv: any) =>
+                  (srv.clientMessageId && srv.clientMessageId === local.clientMessageId) ||
+                  srv.id === local.id
+              )
+          );
+
+          // Map server authoritative messages
+          const serverMapped: RandomMessage[] = data.messages.map((m: any) => ({
+            id: m.id,
+            clientMessageId: m.clientMessageId || null,
+            senderId: m.senderId,
+            senderUsername: m.senderUsername || 'Stranger',
+            content: m.content || '',
+            imageUrl: m.imageUrl || null,
+            createdAt: m.createdAt,
+            status: 'SENT' as const,
+          }));
+
+          // Merge server messages + pending in-flight messages
+          const combined = [...serverMapped, ...pendingSending];
+          combined.sort(
+            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+
+          // Deduplicate by message signature to prevent re-render thrashing
+          const prevSig = prev.map((m) => `${m.id}:${m.status}`).join(',');
+          const nextSig = combined.map((m) => `${m.id}:${m.status}`).join(',');
+          if (prevSig === nextSig) return prev;
+
+          return combined;
+        });
+      }
+    } catch (err) {
+      console.warn('[CHAT] Active chat sync notice:', err);
+    }
+  }, [partner]);
 
   // ─── Attach active match ──────────────────────────────────────────────────
   const attachActiveMatch = useCallback((mid: string, partnerData?: any) => {
@@ -229,40 +323,64 @@ export default function KnotChatRandomPage() {
 
     const myUid = currentUser?.id || '';
 
-    // 1. Listen to match status & partner details from Firestore
-    matchListenerRef.current?.();
-    matchListenerRef.current = listenToMatch(mid, (matchDoc: MatchDoc) => {
-      if (matchDoc.status === 'ended') {
-        setMatchStatus('ended');
-        activeMatchIdRef.current = null;
-        return;
-      }
-      if (!partnerData && myUid) {
-        setPartner(buildPartner(matchDoc, myUid));
-      }
-      setMatchStatus('connected');
-    });
+    // 1. High-frequency, server-authoritative message & match sync (every 650ms)
+    syncActiveChat(mid);
+    chatSyncIntervalRef.current = setInterval(() => {
+      syncActiveChat(mid);
+    }, 650);
 
-    // 2. Listen to real-time messages
-    messagesListenerRef.current?.();
-    messagesListenerRef.current = listenToMessages(
-      mid,
-      (firestoreMsgs: FirestoreMessage[]) => {
-        const mapped: RandomMessage[] = firestoreMsgs.map((m) => ({
-          id: m.id,
-          senderId: m.senderUid,
-          senderUsername: m.senderUsername || 'Stranger',
-          content: m.content,
-          imageUrl: m.imageUrl,
-          createdAt: resolveTimestamp(m.createdAt),
-          status: 'SENT' as const,
-        }));
-        setMessages(mapped);
-        setReconnecting(false);
-      },
-      () => setReconnecting(true)
-    );
-  }, [currentUser?.id]);
+    // 2. Firestore match status fallback (if active)
+    try {
+      matchListenerRef.current?.();
+      matchListenerRef.current = listenToMatch(mid, (matchDoc: MatchDoc) => {
+        if (matchDoc.status === 'ended') {
+          stopAllTimers();
+          stopAllListeners();
+          activeMatchIdRef.current = null;
+          setMatchStatus('ended');
+          return;
+        }
+        if (!partnerData && myUid) {
+          setPartner(buildPartner(matchDoc, myUid));
+        }
+        setMatchStatus('connected');
+      });
+    } catch (e) {}
+
+    // 3. Firestore messages push listener fallback (if active)
+    try {
+      messagesListenerRef.current?.();
+      messagesListenerRef.current = listenToMessages(
+        mid,
+        (firestoreMsgs: FirestoreMessage[]) => {
+          if (!firestoreMsgs || firestoreMsgs.length === 0) return;
+          setMessages((prev) => {
+            const pendingSending = prev.filter(
+              (local) =>
+                local.status === 'SENDING' &&
+                !firestoreMsgs.some(
+                  (fm) => fm.id === local.id || (local.clientMessageId && local.clientMessageId === fm.id)
+                )
+            );
+            const mapped: RandomMessage[] = firestoreMsgs.map((m) => ({
+              id: m.id,
+              senderId: m.senderUid,
+              senderUsername: m.senderUsername || 'Stranger',
+              content: m.content,
+              imageUrl: m.imageUrl,
+              createdAt: resolveTimestamp(m.createdAt),
+              status: 'SENT' as const,
+            }));
+            const merged = [...mapped, ...pendingSending];
+            merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            return merged;
+          });
+          setReconnecting(false);
+        },
+        () => setReconnecting(true)
+      );
+    } catch (e) {}
+  }, [currentUser?.id, syncActiveChat]);
 
   // ─── START MATCHMAKING (Server-Controlled) ─────────────────────────────────
   const handleStartMatch = useCallback(
@@ -422,12 +540,20 @@ export default function KnotChatRandomPage() {
 
   // ─── NEXT PARTNER ─────────────────────────────────────────────────────────
   const handleNextPartner = async () => {
+    if (isSkippingRef.current) return;
+    isSkippingRef.current = true;
+    setTimeout(() => {
+      isSkippingRef.current = false;
+    }, 800);
+
     const currentMid = activeMatchIdRef.current || matchId;
     const currentPartnerId = partner?.id;
 
     stopAllTimers();
     stopAllListeners();
     activeMatchIdRef.current = null;
+    setPartner(null);
+    setMessages([]);
 
     if (currentMid) {
       fetch(`/api/chat/${currentMid}/next`, { method: 'POST' }).catch(() => {});
@@ -521,6 +647,21 @@ export default function KnotChatRandomPage() {
           }
           throw new Error(uploadData.error || 'Failed to upload photo.');
         }
+
+        // Update optimistic image message to confirmed
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId
+              ? {
+                  ...m,
+                  id: uploadData.messageId || tempId,
+                  imageUrl: uploadData.imageUrl || m.imageUrl,
+                  status: 'SENT' as const,
+                }
+              : m
+          )
+        );
+        syncActiveChat(activeMid);
       } else {
         // Send message via backend API with IDOR and participant verification
         const effectiveClerkId = currentUser?.clerkUserId || currentUser?.id || '';
@@ -537,18 +678,40 @@ export default function KnotChatRandomPage() {
           }),
         });
 
-        if (!msgRes.ok) {
-          // Fallback direct send
-          await sendFirestoreMessage(
-            activeMid,
-            senderUid,
-            senderDisplayName,
-            textToSend,
-            null
+        if (msgRes.ok) {
+          const msgData = await msgRes.json();
+          const serverMsg = msgData.message;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempId
+                ? {
+                    ...m,
+                    id: serverMsg?.id || tempId,
+                    createdAt: serverMsg?.createdAt || m.createdAt,
+                    status: 'SENT' as const,
+                  }
+                : m
+            )
           );
+          syncActiveChat(activeMid);
+        } else {
+          // Fallback direct send
+          try {
+            await sendFirestoreMessage(
+              activeMid,
+              senderUid,
+              senderDisplayName,
+              textToSend,
+              null
+            );
+            setMessages((prev) =>
+              prev.map((m) => (m.id === tempId ? { ...m, status: 'SENT' as const } : m))
+            );
+          } catch (e) {
+            throw new Error('Failed to deliver message');
+          }
         }
       }
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
     } catch (err: any) {
       console.error('Send message error:', err);
       alert(err?.message || 'Failed to send message.');
