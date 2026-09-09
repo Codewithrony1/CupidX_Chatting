@@ -1,39 +1,40 @@
-import { PrismaClient } from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
+const Database = require('better-sqlite3');
+const path = require('path');
+const fs = require('fs');
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
+function ensureDatabaseSchema(targetDbPath) {
+  if (!targetDbPath || !fs.existsSync(targetDbPath)) {
+    return;
+  }
 
-const ensureDatabaseSchema = (targetDbPath: string) => {
-  if (!targetDbPath || !fs.existsSync(targetDbPath)) return;
-  let db: InstanceType<typeof Database> | null = null;
+  let db;
   try {
     db = new Database(targetDbPath);
 
     // 1. Inspect and ensure User table columns
     const userTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='User'").get();
     if (userTable) {
-      const userCols = (db.pragma('table_info("User")') as Array<{ name: string }>).map((c) => c.name);
+      const userCols = db.pragma('table_info("User")').map((c) => c.name);
+      
       if (!userCols.includes('profileCompleted')) {
+        console.log(`[SCHEMA SYNC] Adding User.profileCompleted to ${targetDbPath}`);
         db.exec('ALTER TABLE "User" ADD COLUMN profileCompleted BOOLEAN NOT NULL DEFAULT 0;');
       }
       if (!userCols.includes('profileLocked')) {
+        console.log(`[SCHEMA SYNC] Adding User.profileLocked to ${targetDbPath}`);
         db.exec('ALTER TABLE "User" ADD COLUMN profileLocked BOOLEAN NOT NULL DEFAULT 0;');
       }
       if (!userCols.includes('genderDobLocked')) {
+        console.log(`[SCHEMA SYNC] Adding User.genderDobLocked to ${targetDbPath}`);
         db.exec('ALTER TABLE "User" ADD COLUMN genderDobLocked BOOLEAN NOT NULL DEFAULT 0;');
       }
       if (!userCols.includes('clerkUserId')) {
+        console.log(`[SCHEMA SYNC] Adding User.clerkUserId to ${targetDbPath}`);
         db.exec('ALTER TABLE "User" ADD COLUMN clerkUserId TEXT;');
         db.exec('CREATE UNIQUE INDEX IF NOT EXISTS "User_clerkUserId_key" ON "User"("clerkUserId");');
       }
 
-      // Preserve existing users: if DOB + Gender is valid, ensure marked completed
+      // Existing user preservation: if user already has DOB + Gender set, mark profileCompleted
       db.exec(`
         UPDATE "User"
         SET profileCompleted = 1, profileLocked = 1
@@ -47,11 +48,14 @@ const ensureDatabaseSchema = (targetDbPath: string) => {
     // 2. Inspect and ensure Profile table columns
     const profileTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='Profile'").get();
     if (profileTable) {
-      const profileCols = (db.pragma('table_info("Profile")') as Array<{ name: string }>).map((c) => c.name);
+      const profileCols = db.pragma('table_info("Profile")').map((c) => c.name);
+
       if (!profileCols.includes('profileCompleted')) {
+        console.log(`[SCHEMA SYNC] Adding Profile.profileCompleted to ${targetDbPath}`);
         db.exec('ALTER TABLE "Profile" ADD COLUMN profileCompleted BOOLEAN NOT NULL DEFAULT 0;');
       }
       if (!profileCols.includes('profileLocked')) {
+        console.log(`[SCHEMA SYNC] Adding Profile.profileLocked to ${targetDbPath}`);
         db.exec('ALTER TABLE "Profile" ADD COLUMN profileLocked BOOLEAN NOT NULL DEFAULT 0;');
       }
 
@@ -68,6 +72,7 @@ const ensureDatabaseSchema = (targetDbPath: string) => {
     // 3. Inspect and ensure AppSetting table
     const appSettingTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='AppSetting'").get();
     if (!appSettingTable) {
+      console.log(`[SCHEMA SYNC] Creating AppSetting table in ${targetDbPath}`);
       db.exec(`
         CREATE TABLE IF NOT EXISTS "AppSetting" (
           "id" TEXT NOT NULL PRIMARY KEY,
@@ -79,54 +84,21 @@ const ensureDatabaseSchema = (targetDbPath: string) => {
       `);
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn('[PRISMA SCHEMA SYNC WARNING]:', msg);
+    console.warn(`[SCHEMA SYNC WARNING] ${targetDbPath}:`, err.message);
   } finally {
     if (db) {
       try {
         db.close();
-      } catch {
-        // ignore close error
-      }
+      } catch (e) {}
     }
   }
-};
-
-const getDatabasePath = () => {
-  const defaultPath = path.join(process.cwd(), 'prisma', 'dev.db');
-  
-  // On Vercel / AWS Lambda Serverless platform, /var/task is read-only.
-  // os.tmpdir() returns /tmp in serverless execution environments.
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    const tmpPath = path.join(os.tmpdir(), 'dev.db');
-    try {
-      if (!fs.existsSync(tmpPath) && fs.existsSync(defaultPath)) {
-        fs.copyFileSync(defaultPath, tmpPath);
-      }
-    } catch (e) {
-      console.warn('Failed to copy SQLite database to temp dir, falling back to default path:', e);
-      ensureDatabaseSchema(defaultPath);
-      return defaultPath;
-    }
-    ensureDatabaseSchema(tmpPath);
-    return tmpPath;
-  }
-
-  ensureDatabaseSchema(defaultPath);
-  return defaultPath;
-};
-
-const createPrismaClient = () => {
-  const dbPath = getDatabasePath();
-  const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-  return new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-  });
-};
-
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma;
 }
+
+if (require.main === module) {
+  const defaultPath = path.join(__dirname, 'dev.db');
+  console.log(`Ensuring schema on ${defaultPath}...`);
+  ensureDatabaseSchema(defaultPath);
+  console.log('Schema check completed.');
+}
+
+module.exports = { ensureDatabaseSchema };

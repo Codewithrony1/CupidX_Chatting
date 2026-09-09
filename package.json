@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "admin": "cross-env ADMIN_MODE=true next dev -p 3001",
-    "build": "prisma generate && next build",
+    "build": "node prisma/ensure-schema.js && prisma generate && next build",
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",
@@ -38,6 +38,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/canvas-confetti": "^1.9.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
