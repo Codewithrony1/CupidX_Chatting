@@ -27,6 +27,8 @@ export async function GET(req: Request) {
           id: user.id,
           clerkUserId: user.clerkUserId,
           username: user.username,
+          vipUsername: user.vipUsername || null,
+          vipUsernameClaimedAt: user.vipUsernameClaimedAt || null,
           fullName: user.fullName,
           displayName: user.displayName || user.fullName,
           email: user.email,

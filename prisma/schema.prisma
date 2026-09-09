@@ -26,6 +26,8 @@ model User {
   is_vip          Boolean       @default(false)
   vip_started_at  DateTime?
   vip_expires_at  DateTime?
+  vipUsername          String?       @unique
+  vipUsernameClaimedAt DateTime?
   isSuspended     Boolean       @default(false)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -44,6 +46,20 @@ model User {
 
   chatSessionsA    ChatSession[] @relation("ChatSessionUserA")
   chatSessionsB    ChatSession[] @relation("ChatSessionUserB")
+
+  sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
+
+  friendships1 Friendship[] @relation("FriendshipUser1")
+  friendships2 Friendship[] @relation("FriendshipUser2")
+
+  conversations1 Conversation[] @relation("ConversationUser1")
+  conversations2 Conversation[] @relation("ConversationUser2")
+
+  privateMessagesSent PrivateMessage[] @relation("PrivateMessageSender")
+
+  callsMade     CallSession[] @relation("CallsMade")
+  callsReceived CallSession[] @relation("CallsReceived")
 
   blockedUsers Block[] @relation("Blocker")
   blockedBy    Block[] @relation("Blocked")
@@ -323,5 +339,100 @@ model PaymentRequest {
   @@index([userId])
   @@index([clerkUserId])
 }
+
+model FriendRequest {
+  id         String   @id @default(uuid())
+  senderId   String
+  receiverId String
+  status     String   @default("PENDING") // PENDING, ACCEPTED, REJECTED, CANCELLED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  sender   User @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, status])
+  @@index([senderId, status])
+}
+
+model Friendship {
+  id        String   @id @default(uuid())
+  user1Id   String   // canonical u1 < u2
+  user2Id   String
+  createdAt DateTime @default(now())
+
+  user1 User @relation("FriendshipUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 User @relation("FriendshipUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+}
+
+model Conversation {
+  id            String   @id @default(uuid())
+  user1Id       String   // canonical u1 < u2
+  user2Id       String
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user1 User @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 User @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  messages PrivateMessage[]
+  calls    CallSession[]
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+  @@index([lastMessageAt])
+}
+
+model PrivateMessage {
+  id              String   @id @default(uuid())
+  conversationId  String
+  senderId        String
+  type            String   @default("TEXT") // TEXT, IMAGE, SYSTEM, CALL_EVENT
+  content         String   @default("")
+  imageUrl        String?
+  status          String   @default("SENT") // SENT, READ, FAILED
+  clientMessageId String?
+  createdAt       DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("PrivateMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([clientMessageId])
+}
+
+model CallSession {
+  id             String    @id @default(uuid())
+  conversationId String
+  callerId       String
+  receiverId     String
+  callType       String    @default("VOICE") // VOICE or VIDEO
+  status         String    @default("CALLING") // CALLING, RINGING, ACCEPTED, CONNECTING, CONNECTED, DECLINED, MISSED, ENDED, FAILED
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+  durationSec    Int       @default(0)
+  offerSdp       String?
+  answerSdp      String?
+  iceCandidates  String?   // JSON stringified array of candidates
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  caller       User         @relation("CallsMade", fields: [callerId], references: [id], onDelete: Cascade)
+  receiver     User         @relation("CallsReceived", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([receiverId, status])
+  @@index([callerId, status])
+  @@index([conversationId])
+}
+
 
 

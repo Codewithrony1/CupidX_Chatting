@@ -54,6 +54,8 @@ interface UserItem {
   id: string;
   clerkUserId?: string | null;
   username: string;
+  vipUsername?: string | null;
+  vipUsernameClaimedAt?: string | null;
   fullName: string;
   displayName: string;
   email: string;
@@ -1139,7 +1141,14 @@ export default function AdminPage() {
                   {users.map((u) => (
                     <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
                       <td className="px-5 py-3.5">
-                        <span className="font-bold text-white block">@{u.username}</span>
+                        <span className="font-bold text-white block flex items-center gap-1.5">
+                          @{u.vipUsername || u.username}
+                          {u.vipUsername && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30">
+                              VIP HANDLE
+                            </span>
+                          )}
+                        </span>
                         <span className="text-[10px] text-slate-400">{u.fullName}</span>
                       </td>
                       <td className="px-5 py-3.5 font-mono text-pink-300">{u.email}</td>

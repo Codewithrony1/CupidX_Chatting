@@ -154,6 +154,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clerkUserId: cUser.id,
         username: backendUser?.username || baseProfile.username,
         usernameLower: (backendUser?.username || baseProfile.username).toLowerCase(),
+        vipUsername: backendUser?.vipUsername || (baseProfile as any).vipUsername || null,
+        vipUsernameClaimedAt: backendUser?.vipUsernameClaimedAt || (baseProfile as any).vipUsernameClaimedAt || null,
         fullName: backendUser?.fullName || baseProfile.fullName,
         displayName: backendUser?.displayName || baseProfile.displayName,
         email: backendUser?.email || baseProfile.email,

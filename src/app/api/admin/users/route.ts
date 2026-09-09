@@ -30,6 +30,8 @@ export async function GET(req: Request) {
         id: u.id,
         firebaseUid: u.firebaseUid,
         username: u.username || 'user',
+        vipUsername: u.vipUsername || null,
+        vipUsernameClaimedAt: u.vipUsernameClaimedAt || null,
         fullName: u.fullName || u.username,
         email: u.email || null,
         membershipTier: isVip ? 'VIP' : 'FREE',

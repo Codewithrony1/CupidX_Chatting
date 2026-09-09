@@ -20,6 +20,8 @@ export interface UserProfile {
   membershipTier: 'FREE' | 'VIP' | string;
   is_vip: boolean;
   isVIP?: boolean;
+  vipUsername?: string | null;
+  vipUsernameClaimedAt?: string | null;
   vip_expires_at?: string | null;
   vip_started_at?: string | null;
   online: boolean;

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { detectUserCountry } from '@/lib/countryFlag';
-import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings, MapPin, Crown } from 'lucide-react';
+import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings, MapPin, Crown, Users } from 'lucide-react';
 import UserAvatar from '@/components/UserAvatar';
 
 export default function Sidebar({
@@ -117,6 +117,18 @@ export default function Sidebar({
           >
             <MessageSquare className="w-4 h-4" />
             <span>Random Chat</span>
+          </Link>
+
+          <Link
+            href="/friends"
+            className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+              pathname.startsWith('/friends')
+                ? 'bg-purple-600/20 text-purple-300 border border-purple-500/20'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Friends</span>
           </Link>
 
           <Link

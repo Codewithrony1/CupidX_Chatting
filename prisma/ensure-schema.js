@@ -34,6 +34,16 @@ function ensureDatabaseSchema(targetDbPath) {
         db.exec('CREATE UNIQUE INDEX IF NOT EXISTS "User_clerkUserId_key" ON "User"("clerkUserId");');
       }
 
+      if (!userCols.includes('vipUsername')) {
+        console.log(`[SCHEMA SYNC] Adding User.vipUsername to ${targetDbPath}`);
+        db.exec('ALTER TABLE "User" ADD COLUMN vipUsername TEXT;');
+        db.exec('CREATE UNIQUE INDEX IF NOT EXISTS "User_vipUsername_key" ON "User"("vipUsername");');
+      }
+      if (!userCols.includes('vipUsernameClaimedAt')) {
+        console.log(`[SCHEMA SYNC] Adding User.vipUsernameClaimedAt to ${targetDbPath}`);
+        db.exec('ALTER TABLE "User" ADD COLUMN vipUsernameClaimedAt DATETIME;');
+      }
+
       // Existing user preservation: if user already has DOB + Gender set, mark profileCompleted
       db.exec(`
         UPDATE "User"
@@ -81,6 +91,121 @@ function ensureDatabaseSchema(targetDbPath) {
           "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE UNIQUE INDEX IF NOT EXISTS "AppSetting_key_key" ON "AppSetting"("key");
+      `);
+    }
+
+    // 4. Inspect and ensure FriendRequest table
+    const friendRequestTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='FriendRequest'").get();
+    if (!friendRequestTable) {
+      console.log(`[SCHEMA SYNC] Creating FriendRequest table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "FriendRequest" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "senderId" TEXT NOT NULL,
+          "receiverId" TEXT NOT NULL,
+          "status" TEXT NOT NULL DEFAULT 'PENDING',
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "FriendRequest_senderId_fkey" FOREIGN KEY ("senderId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT "FriendRequest_receiverId_fkey" FOREIGN KEY ("receiverId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "FriendRequest_senderId_receiverId_key" ON "FriendRequest"("senderId", "receiverId");
+        CREATE INDEX IF NOT EXISTS "FriendRequest_receiverId_status_idx" ON "FriendRequest"("receiverId", "status");
+        CREATE INDEX IF NOT EXISTS "FriendRequest_senderId_status_idx" ON "FriendRequest"("senderId", "status");
+      `);
+    }
+
+    // 5. Inspect and ensure Friendship table
+    const friendshipTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='Friendship'").get();
+    if (!friendshipTable) {
+      console.log(`[SCHEMA SYNC] Creating Friendship table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "Friendship" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "user1Id" TEXT NOT NULL,
+          "user2Id" TEXT NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "Friendship_user1Id_fkey" FOREIGN KEY ("user1Id") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT "Friendship_user2Id_fkey" FOREIGN KEY ("user2Id") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "Friendship_user1Id_user2Id_key" ON "Friendship"("user1Id", "user2Id");
+        CREATE INDEX IF NOT EXISTS "Friendship_user1Id_idx" ON "Friendship"("user1Id");
+        CREATE INDEX IF NOT EXISTS "Friendship_user2Id_idx" ON "Friendship"("user2Id");
+      `);
+    }
+
+    // 6. Inspect and ensure Conversation table
+    const conversationTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='Conversation'").get();
+    if (!conversationTable) {
+      console.log(`[SCHEMA SYNC] Creating Conversation table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "Conversation" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "user1Id" TEXT NOT NULL,
+          "user2Id" TEXT NOT NULL,
+          "lastMessageAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "Conversation_user1Id_fkey" FOREIGN KEY ("user1Id") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT "Conversation_user2Id_fkey" FOREIGN KEY ("user2Id") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "Conversation_user1Id_user2Id_key" ON "Conversation"("user1Id", "user2Id");
+        CREATE INDEX IF NOT EXISTS "Conversation_user1Id_idx" ON "Conversation"("user1Id");
+        CREATE INDEX IF NOT EXISTS "Conversation_user2Id_idx" ON "Conversation"("user2Id");
+        CREATE INDEX IF NOT EXISTS "Conversation_lastMessageAt_idx" ON "Conversation"("lastMessageAt");
+      `);
+    }
+
+    // 7. Inspect and ensure PrivateMessage table
+    const privateMessageTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='PrivateMessage'").get();
+    if (!privateMessageTable) {
+      console.log(`[SCHEMA SYNC] Creating PrivateMessage table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "PrivateMessage" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "conversationId" TEXT NOT NULL,
+          "senderId" TEXT NOT NULL,
+          "type" TEXT NOT NULL DEFAULT 'TEXT',
+          "content" TEXT NOT NULL DEFAULT '',
+          "imageUrl" TEXT,
+          "status" TEXT NOT NULL DEFAULT 'SENT',
+          "clientMessageId" TEXT,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "PrivateMessage_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT "PrivateMessage_senderId_fkey" FOREIGN KEY ("senderId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS "PrivateMessage_conversationId_createdAt_idx" ON "PrivateMessage"("conversationId", "createdAt");
+        CREATE INDEX IF NOT EXISTS "PrivateMessage_clientMessageId_idx" ON "PrivateMessage"("clientMessageId");
+      `);
+    }
+
+    // 8. Inspect and ensure CallSession table
+    const callSessionTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='CallSession'").get();
+    if (!callSessionTable) {
+      console.log(`[SCHEMA SYNC] Creating CallSession table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "CallSession" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "conversationId" TEXT NOT NULL,
+          "callerId" TEXT NOT NULL,
+          "receiverId" TEXT NOT NULL,
+          "callType" TEXT NOT NULL DEFAULT 'VOICE',
+          "status" TEXT NOT NULL DEFAULT 'CALLING',
+          "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "endedAt" DATETIME,
+          "durationSec" INTEGER NOT NULL DEFAULT 0,
+          "offerSdp" TEXT,
+          "answerSdp" TEXT,
+          "iceCandidates" TEXT,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "CallSession_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT "CallSession_callerId_fkey" FOREIGN KEY ("callerId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT "CallSession_receiverId_fkey" FOREIGN KEY ("receiverId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS "CallSession_receiverId_status_idx" ON "CallSession"("receiverId", "status");
+        CREATE INDEX IF NOT EXISTS "CallSession_callerId_status_idx" ON "CallSession"("callerId", "status");
+        CREATE INDEX IF NOT EXISTS "CallSession_conversationId_idx" ON "CallSession"("conversationId");
       `);
     }
   } catch (err) {

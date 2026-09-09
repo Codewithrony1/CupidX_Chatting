@@ -17,6 +17,7 @@ import {
   Shield,
   LogOut,
   Flame,
+  Users,
 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 import Sidebar from '@/components/Sidebar';
@@ -67,6 +68,7 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
   const isTabActive = (path: string) => {
     if (path === '/dashboard' && pathname === '/dashboard') return true;
     if (path === '/chat' && pathname.startsWith('/chat')) return true;
+    if (path === '/friends' && pathname.startsWith('/friends')) return true;
     if (path === '/vip' && pathname === '/vip') return true;
     if (path === '/profile' && pathname === '/profile') return true;
     if (path === '/settings' && pathname === '/settings') return true;
@@ -178,6 +180,19 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
             >
               <MessageSquare className="w-4 h-4" />
               <span>Random Chat</span>
+            </Link>
+
+            <Link
+              href="/friends"
+              onClick={() => setDrawerOpen(false)}
+              className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
+                pathname.startsWith('/friends')
+                  ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
+                  : 'text-pink-100/80 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>VIP Friends</span>
             </Link>
 
             <Link
@@ -327,6 +342,17 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-pink-500 animate-ping" />
               </div>
               <span className="text-[10px]">Chat</span>
+            </Link>
+
+            {/* Friends Tab */}
+            <Link
+              href="/friends"
+              className={`flex flex-col items-center space-y-1 transition-all ${
+                isTabActive('/friends') ? 'text-pink-400 scale-105 font-bold' : 'text-pink-200/60 hover:text-white'
+              }`}
+            >
+              <Users className="w-5 h-5" />
+              <span className="text-[10px]">Friends</span>
             </Link>
 
             {/* VIP Tab */}
