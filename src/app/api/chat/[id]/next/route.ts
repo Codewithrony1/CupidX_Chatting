@@ -23,7 +23,8 @@ export async function POST(
       return NextResponse.json({ message: 'Session already ended or deleted' }, { status: 200 });
     }
 
-    if (session.userAId !== user.id && session.userBId !== user.id) {
+    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
       return NextResponse.json({ error: 'Forbidden: You are not a participant' }, { status: 403 });
     }
 
@@ -43,10 +44,6 @@ export async function POST(
       prisma.matchmakingQueue.updateMany({
         where: { OR: [{ userId: session.userAId }, { userId: session.userBId }] },
         data: { status: 'CANCELLED', chatSessionId: null, partnerUserId: null },
-      }),
-      // Ephemeral chat deletion: clean up temporary messages
-      prisma.message.deleteMany({
-        where: { chatSessionId },
       }),
     ]);
 

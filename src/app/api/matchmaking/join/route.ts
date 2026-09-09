@@ -20,34 +20,61 @@ export async function POST(req: Request) {
     const language = body.language || userProfile?.language || 'english';
 
     // 1. Check if user already belongs to an active match (Requirement 6: ONE USER = ONE ACTIVE MATCH)
+    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+
     if (!skipCurrentMatch) {
       const existingSession = await prisma.chatSession.findFirst({
         where: {
           status: 'ACTIVE',
-          OR: [{ userAId: user.id }, { userBId: user.id }],
+          OR: [{ userAId: { in: userIds } }, { userBId: { in: userIds } }],
         },
         include: {
           userA: { include: { profile: true } },
           userB: { include: { profile: true } },
+          messages: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
       });
 
       if (existingSession) {
-        const partner = existingSession.userAId === user.id ? existingSession.userB : existingSession.userA;
-        return NextResponse.json({
-          matched: true,
-          chatSessionId: existingSession.id,
-          partner: {
-            id: partner.id,
-            displayName: partner.displayName || partner.fullName || 'Stranger',
-            avatarUrl: partner.profile?.avatarUrl || null,
-            avatarEmoji: partner.profile?.avatarEmoji || '😊',
-            gender: partner.profile?.gender || partner.gender || 'unspecified',
-            mood: partner.profile?.mood || '',
-            bio: partner.profile?.bio || '',
-            isVIP: partner.membershipTier === 'VIP' || partner.is_vip,
-          },
+        const isUserA = userIds.includes(existingSession.userAId);
+        const partner = isUserA ? existingSession.userB : existingSession.userA;
+
+        // Verify session freshness: created or has message within last 60 seconds
+        const lastActivity = existingSession.messages[0]?.createdAt || existingSession.startedAt;
+        const isFresh = Date.now() - new Date(lastActivity).getTime() < 60 * 1000;
+
+        // Verify partner is still actively MATCHED to this session
+        const partnerQueue = await prisma.matchmakingQueue.findUnique({
+          where: { userId: partner.id },
         });
+        const partnerStillMatched =
+          partnerQueue?.status === 'MATCHED' && partnerQueue?.chatSessionId === existingSession.id;
+
+        if (isFresh && partnerStillMatched) {
+          return NextResponse.json({
+            matched: true,
+            chatSessionId: existingSession.id,
+            partner: {
+              id: partner.id,
+              displayName: partner.displayName || partner.fullName || 'Stranger',
+              avatarUrl: partner.profile?.avatarUrl || null,
+              avatarEmoji: partner.profile?.avatarEmoji || '😊',
+              gender: partner.profile?.gender || partner.gender || 'unspecified',
+              mood: partner.profile?.mood || '',
+              bio: partner.profile?.bio || '',
+              isVIP: partner.membershipTier === 'VIP' || partner.is_vip,
+            },
+          });
+        } else {
+          // Stale / abandoned session: mark it ENDED and clean up
+          await prisma.chatSession.update({
+            where: { id: existingSession.id },
+            data: { status: 'ENDED', endedAt: new Date() },
+          });
+        }
       }
     }
 
@@ -71,7 +98,7 @@ export async function POST(req: Request) {
       const oldSessions = await prisma.chatSession.findMany({
         where: {
           status: 'ACTIVE',
-          OR: [{ userAId: user.id }, { userBId: user.id }],
+          OR: [{ userAId: { in: userIds } }, { userBId: { in: userIds } }],
         },
       });
 
@@ -91,9 +118,9 @@ export async function POST(req: Request) {
       await prisma.chatSession.updateMany({
         where: {
           status: 'ACTIVE',
-          OR: [{ userAId: user.id }, { userBId: user.id }],
+          OR: [{ userAId: { in: userIds } }, { userBId: { in: userIds } }],
         },
-        data: { status: 'ENDED' },
+        data: { status: 'ENDED', endedAt: new Date() },
       });
     }
 

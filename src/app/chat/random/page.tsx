@@ -151,8 +151,8 @@ export default function KnotChatRandomPage() {
 
   // Sync current user ID into ref
   useEffect(() => {
-    currentUidRef.current = currentUser?.id || null;
-  }, [currentUser?.id]);
+    currentUidRef.current = currentUser?.clerkUserId || currentUser?.id || null;
+  }, [currentUser?.id, currentUser?.clerkUserId]);
 
   // ─── Auto scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -278,6 +278,9 @@ export default function KnotChatRandomPage() {
             setMatchStatus('ended');
             return;
           }
+        }
+        if (res.status === 403) {
+          console.warn('[RANDOM_CHAT_SYNC] 403 Forbidden - verify participant authorization for session:', mid);
         }
         consecutiveSyncErrorsRef.current += 1;
         if (consecutiveSyncErrorsRef.current >= 4) {
@@ -679,7 +682,7 @@ export default function KnotChatRandomPage() {
       return;
     }
 
-    const senderUid = currentUidRef.current || currentUser?.id || 'me';
+    const senderUid = currentUser?.id || currentUidRef.current || 'me';
     const senderDisplayName = currentUser?.displayName || currentUser?.fullName || 'Stranger';
     const imageToSend = selectedImageFile;
 
@@ -1156,7 +1159,9 @@ export default function KnotChatRandomPage() {
                 const isMine =
                   msg.senderId === currentUidRef.current ||
                   msg.senderId === currentUser?.id ||
-                  msg.senderUsername === currentUser?.username;
+                  (Boolean(currentUser?.clerkUserId) && msg.senderId === currentUser?.clerkUserId) ||
+                  (Boolean((currentUser as any)?.firebaseUid) && msg.senderId === (currentUser as any)?.firebaseUid) ||
+                  (Boolean(currentUser?.username) && msg.senderUsername === currentUser?.username);
 
                 return (
                   <motion.div

@@ -47,7 +47,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Chat session not found' }, { status: 404 });
     }
 
-    if (session.userAId !== user.id && session.userBId !== user.id) {
+    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
       return NextResponse.json({ error: 'Forbidden: You are not a participant in this chat' }, { status: 403 });
     }
 
@@ -218,11 +219,13 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Chat session not found', sessionStatus: 'ENDED' }, { status: 404 });
     }
 
-    if (session.userAId !== user.id && session.userBId !== user.id) {
+    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
       return NextResponse.json({ error: 'Forbidden: Access denied' }, { status: 403 });
     }
 
-    const partner = session.userAId === user.id ? session.userB : session.userA;
+    const isUserA = userIds.includes(session.userAId);
+    const partner = isUserA ? session.userB : session.userA;
     const isPartnerVIP = partner.membershipTier === 'VIP' || partner.is_vip;
 
     // Filter messages
