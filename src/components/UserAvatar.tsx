@@ -20,7 +20,7 @@ interface UserAvatarProps {
   className?: string;
 }
 
-export default function UserAvatar({ user, size = 'md', className = '' }: UserAvatarProps) {
+function UserAvatarComponent({ user, size = 'md', className = '' }: UserAvatarProps) {
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
   const isImageAvatar = isVIP && user?.profile?.avatarType === 'IMAGE' && user?.profile?.avatarUrl;
   const avatarEmoji = user?.profile?.avatarEmoji || '😊';
@@ -50,3 +50,6 @@ export default function UserAvatar({ user, size = 'md', className = '' }: UserAv
     </div>
   );
 }
+
+const UserAvatar = React.memo(UserAvatarComponent);
+export default UserAvatar;

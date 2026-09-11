@@ -12,7 +12,7 @@ interface HeartItem {
   color: string;
 }
 
-export default function FloatingHearts() {
+function FloatingHeartsComponent() {
   const [hearts, setHearts] = useState<HeartItem[]>([]);
 
   useEffect(() => {
@@ -52,3 +52,6 @@ export default function FloatingHearts() {
     </div>
   );
 }
+
+const FloatingHearts = React.memo(FloatingHeartsComponent);
+export default FloatingHearts;
