@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useUser, useClerk, useAuth as useClerkAuth } from '@clerk/nextjs';
 import {
@@ -202,12 +202,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     if (clerkUser) {
       currentInitUidRef.current = null;
       await initializeUserSession(clerkUser);
     }
-  };
+  }, [clerkUser]);
 
   // ─── 1. Handle Clerk User State Changes ─────────────────────────────────────
   useEffect(() => {
@@ -289,7 +289,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded, loading, isSignedIn, clerkUser, user, pathname, router]);
 
   // ─── 3. Google 1-Click Sign-in via Clerk ────────────────────────────────────
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = useCallback(async () => {
     console.log('[AUTH] Clerk Google login initiated');
     const origin = typeof window !== 'undefined' && window.location.origin 
       ? window.location.origin 
@@ -350,9 +350,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUpFallbackRedirectUrl: '/onboarding',
       });
     }
-  };
+  }, [clerk]);
 
-  const signUpWithGoogle = async () => {
+  const signUpWithGoogle = useCallback(async () => {
     console.log('[AUTH] Clerk Google signup initiated');
     const origin = typeof window !== 'undefined' && window.location.origin 
       ? window.location.origin 
@@ -411,10 +411,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         fallbackRedirectUrl: '/onboarding',
       });
     }
-  };
+  }, [clerk]);
 
   // ─── 4. Email / Password Login via Clerk ────────────────────────────────────
-  const loginWithEmail = async (emailOrUsername: string, pass: string) => {
+  const loginWithEmail = useCallback(async (emailOrUsername: string, pass: string) => {
     if (!clerk) {
       throw new Error('Sign-in service is initializing. Please try again.');
     }
@@ -456,10 +456,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Invalid email or password.';
       throw new Error(msg);
     }
-  };
+  }, [clerk]);
 
   // ─── 5. Email / Password Signup via Clerk ───────────────────────────────────
-  const signUpWithEmail = async (emailOrUsername: string, pass: string, name?: string) => {
+  const signUpWithEmail = useCallback(async (emailOrUsername: string, pass: string, name?: string) => {
     if (!clerk) {
       throw new Error('Sign-up service is initializing. Please try again.');
     }
@@ -504,10 +504,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Could not complete registration.';
       throw new Error(msg);
     }
-  };
+  }, [clerk]);
 
   // ─── 6. Logout via Clerk ───────────────────────────────────────────────────
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       if (clerkUser?.id) {
         setFirestoreUserPresence(clerkUser.id, false).catch(() => {});
@@ -528,25 +528,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('[AUTH] Logout error:', e);
       router.replace('/login');
     }
-  };
+  }, [clerkUser?.id, clerk, router]);
 
   const isAuthenticated = Boolean(isSignedIn && clerkUser);
 
+  const contextValue = useMemo<AuthContextType>(
+    () => ({
+      user,
+      clerkUser,
+      loading: !isLoaded || loading,
+      isAuthenticated,
+      loginWithGoogle,
+      signUpWithGoogle,
+      loginWithEmail,
+      signUpWithEmail,
+      logout,
+      refreshUser,
+    }),
+    [
+      user,
+      clerkUser,
+      isLoaded,
+      loading,
+      isAuthenticated,
+      loginWithGoogle,
+      signUpWithGoogle,
+      loginWithEmail,
+      signUpWithEmail,
+      logout,
+      refreshUser,
+    ]
+  );
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        clerkUser,
-        loading: !isLoaded || loading,
-        isAuthenticated,
-        loginWithGoogle,
-        signUpWithGoogle,
-        loginWithEmail,
-        signUpWithEmail,
-        logout,
-        refreshUser,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

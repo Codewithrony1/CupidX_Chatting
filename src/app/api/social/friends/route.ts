@@ -88,6 +88,10 @@ export async function GET(req: Request) {
       })
       .filter((item) => !blockedUserIds.has(item.friend.id));
 
+    if (friends.length === 0) {
+      return NextResponse.json({ friends: [] });
+    }
+
     // Get conversation IDs for these friends
     const pairs = friends.map((f) => f.canonicalPair);
     const conversations = await prisma.conversation.findMany({

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -52,6 +52,72 @@ interface TargetUserProfile {
   gender: string;
   interests: string;
 }
+
+interface DirectChatMessageItemProps {
+  msg: ChatMessage;
+  isMe: boolean;
+  onDeleteMessage: (id: string) => void;
+}
+
+const DirectChatMessageItem = React.memo(function DirectChatMessageItem({
+  msg,
+  isMe,
+  onDeleteMessage,
+}: DirectChatMessageItemProps) {
+  const formattedTime = useMemo(() => {
+    try {
+      return new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  }, [msg.createdAt]);
+
+  return (
+    <div
+      className={`flex group max-w-[85%] md:max-w-[70%] flex-col ${
+        isMe ? 'self-end items-end' : 'self-start items-start'
+      }`}
+    >
+      <div
+        className={`relative p-3.5 rounded-2xl text-sm leading-relaxed overflow-hidden ${
+          isMe
+            ? 'bg-gradient-to-tr from-purple-600 to-pink-500 text-white rounded-br-none shadow-md shadow-purple-950/20'
+            : 'bg-white/5 border border-white/5 text-slate-100 rounded-bl-none'
+        } ${msg.isDeleted ? 'italic text-slate-500 opacity-60' : ''}`}
+      >
+        {msg.imageUrl && !msg.isDeleted && (
+          <img
+            src={msg.imageUrl}
+            alt="Shared attachment"
+            className="rounded-xl max-h-60 object-cover mb-2 border border-black/20 w-full"
+            loading="lazy"
+          />
+        )}
+        <p>{msg.content}</p>
+
+        {/* Message hover delete trigger */}
+        {isMe && !msg.isDeleted && (
+          <button
+            onClick={() => onDeleteMessage(msg.id)}
+            className="absolute top-1 right-1 p-1 rounded bg-black/40 text-pink-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+            title="Delete message"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center space-x-1.5 mt-1 text-[9px] text-slate-500 px-1">
+        <span>{formattedTime}</span>
+        {isMe && (
+          <span>
+            • {msg.isRead ? <span className="text-purple-400 font-bold">Read</span> : 'Sent'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
 
 export default function ChatWindow() {
   const params = useParams();
@@ -305,7 +371,7 @@ export default function ChatWindow() {
   };
 
   // Message Delete (Soft Delete) trigger
-  const handleDeleteMessage = (messageId: string) => {
+  const handleDeleteMessage = useCallback((messageId: string) => {
     if (!socket) return;
     if (confirm('Are you sure you want to delete this message?')) {
       socket.emit('delete_message', { messageId }, (res: any) => {
@@ -314,7 +380,7 @@ export default function ChatWindow() {
         }
       });
     }
-  };
+  }, [socket]);
 
   // Block Action trigger
   const handleBlockUser = async () => {
@@ -498,56 +564,14 @@ export default function ChatWindow() {
             </div>
           </div>
         ) : (
-          messages.map((msg) => {
-            const isMe = msg.senderId === user?.id;
-            return (
-              <div
-                key={msg.id}
-                className={`flex group max-w-[85%] md:max-w-[70%] flex-col ${
-                  isMe ? 'self-end items-end' : 'self-start items-start'
-                }`}
-              >
-                <div
-                  className={`relative p-3.5 rounded-2xl text-sm leading-relaxed overflow-hidden ${
-                    isMe
-                      ? 'bg-gradient-to-tr from-purple-600 to-pink-500 text-white rounded-br-none shadow-md shadow-purple-950/20'
-                      : 'bg-white/5 border border-white/5 text-slate-100 rounded-bl-none'
-                  } ${msg.isDeleted ? 'italic text-slate-500 opacity-60' : ''}`}
-                >
-                  {msg.imageUrl && !msg.isDeleted && (
-                    <img
-                      src={msg.imageUrl}
-                      alt="Shared attachment"
-                      className="rounded-xl max-h-60 object-cover mb-2 border border-black/20 w-full"
-                    />
-                  )}
-                  <p>{msg.content}</p>
-
-                  {/* Message hover delete trigger */}
-                  {isMe && !msg.isDeleted && (
-                    <button
-                      onClick={() => handleDeleteMessage(msg.id)}
-                      className="absolute top-1 right-1 p-1 rounded bg-black/40 text-pink-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      title="Delete message"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center space-x-1.5 mt-1 text-[9px] text-slate-500 px-1">
-                  <span>
-                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  {isMe && (
-                    <span>
-                      • {msg.isRead ? <span className="text-purple-400 font-bold">Read</span> : 'Sent'}
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          messages.map((msg) => (
+            <DirectChatMessageItem
+              key={msg.id}
+              msg={msg}
+              isMe={msg.senderId === user?.id}
+              onDeleteMessage={handleDeleteMessage}
+            />
+          ))
         )}
 
         {/* Live typing Indicator */}

@@ -68,6 +68,28 @@ const blockedUsersCache = new Map();
 const blocksCacheTimestamps = new Map();
 const BLOCKS_CACHE_TTL_MS = 30 * 1000;
 
+// Active friendship cache (TTL 60 seconds) to avoid database hits on every private message
+const friendshipCache = new Map();
+const FRIENDSHIP_CACHE_TTL_MS = 60 * 1000;
+
+async function checkCachedFriendship(u1, u2) {
+  const key = `${u1}:${u2}`;
+  const cached = friendshipCache.get(key);
+  if (cached && Date.now() - cached.timestamp < FRIENDSHIP_CACHE_TTL_MS) {
+    return cached.isFriend;
+  }
+  try {
+    const friendship = await prisma.friendship.findUnique({
+      where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+    });
+    const isFriend = Boolean(friendship);
+    friendshipCache.set(key, { isFriend, timestamp: Date.now() });
+    return isFriend;
+  } catch {
+    return false;
+  }
+}
+
 async function getCachedBlockedUsers(uid) {
   const lastTime = blocksCacheTimestamps.get(uid);
   if (lastTime && Date.now() - lastTime < BLOCKS_CACHE_TTL_MS) {
@@ -849,12 +871,10 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      // Verify active friendship
+      // Verify active friendship (using cached verification for sub-millisecond dispatch)
       const [u1, u2] = userId < receiverId ? [userId, receiverId] : [receiverId, userId];
-      const friendship = await prisma.friendship.findUnique({
-        where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
-      });
-      if (!friendship) {
+      const isFriend = await checkCachedFriendship(u1, u2);
+      if (!isFriend) {
         if (typeof callback === 'function') callback({ error: 'You must be friends to exchange messages.' });
         return;
       }

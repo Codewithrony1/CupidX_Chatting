@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -61,6 +61,140 @@ interface RandomMessage {
   createdAt: string;
   status?: 'SENDING' | 'SENT' | 'FAILED';
 }
+
+// ─── Memoized Message Bubble Item (Zero Re-render on Typing) ─────────────────
+
+const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
+  msg,
+  isMine,
+  onImageClick,
+}: {
+  msg: RandomMessage;
+  isMine: boolean;
+  onImageClick: (url: string) => void;
+}) {
+  const formattedTime = useMemo(() => {
+    try {
+      return new Date(msg.createdAt).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  }, [msg.createdAt]);
+
+  return (
+    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+      <div
+        className={`max-w-[80%] sm:max-w-[65%] rounded-3xl p-3.5 shadow-lg relative break-words ${
+          isMine
+            ? 'bg-gradient-to-br from-pink-600 via-rose-500 to-purple-600 text-white rounded-tr-sm shadow-pink-500/10'
+            : 'bg-slate-900/90 border border-slate-800 text-slate-100 rounded-tl-sm'
+        }`}
+      >
+        {msg.imageUrl && (
+          <div
+            onClick={() => onImageClick(msg.imageUrl!)}
+            className="mb-2 rounded-2xl overflow-hidden cursor-pointer group bg-black/40 border border-white/10 relative"
+          >
+            <img
+              src={msg.imageUrl}
+              alt="Chat Attachment"
+              className="max-h-60 w-full object-cover group-hover:scale-105 transition-transform"
+              loading="lazy"
+            />
+            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+              <Eye className="w-5 h-5 text-white" />
+            </div>
+          </div>
+        )}
+
+        {msg.content && <p className="text-xs leading-relaxed">{msg.content}</p>}
+
+        <div className="flex items-center justify-end space-x-1 mt-1 text-[9px] opacity-70">
+          <span>{formattedTime}</span>
+          {isMine &&
+            (msg.status === 'FAILED' ? (
+              <span className="text-rose-300">!</span>
+            ) : (
+              <CheckCheck className="w-3 h-3 text-white" />
+            ))}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ─── Memoized Message List Container (Zero Re-render on Typing) ──────────────
+
+interface RandomChatMessageListProps {
+  messages: RandomMessage[];
+  partner: RandomPartner | null;
+  currentUserId: string | null;
+  currentUsername?: string | null;
+  partnerTyping: boolean;
+  onImageClick: (url: string) => void;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}
+
+const RandomChatMessageList = React.memo(function RandomChatMessageList({
+  messages,
+  partner,
+  currentUserId,
+  currentUsername,
+  partnerTyping,
+  onImageClick,
+  scrollRef,
+  containerRef,
+}: RandomChatMessageListProps) {
+  return (
+    <div ref={containerRef as any} className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="text-center my-2">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] text-slate-400">
+          <ShieldCheck className="w-3.5 h-3.5 text-pink-400" />
+          <span>Connected with {partner?.displayName || partner?.fullName || 'Stranger'} • Be polite &amp; respectful</span>
+        </span>
+      </div>
+
+      {messages.length === 0 && (
+        <div className="text-center py-12 text-slate-500 text-xs space-y-1">
+          <p className="font-bold text-slate-400">You are connected!</p>
+          <p>Say hello to start the conversation 👋</p>
+        </div>
+      )}
+
+      {messages.map((msg, index) => {
+        const isMine =
+          Boolean(currentUserId && msg.senderId === currentUserId) ||
+          Boolean(currentUsername && msg.senderUsername === currentUsername);
+
+        return (
+          <RandomChatMessageItem
+            key={msg.id || msg.clientMessageId || index}
+            msg={msg}
+            isMine={isMine}
+            onImageClick={onImageClick}
+          />
+        );
+      })}
+
+      {partnerTyping && (
+        <div className="flex items-center space-x-2 text-xs text-slate-400 italic">
+          <div className="px-3 py-2 rounded-2xl bg-slate-900 border border-slate-800 flex items-center space-x-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce" />
+            <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:0.2s]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:0.4s]" />
+          </div>
+          <span className="text-[10px]">Partner is typing...</span>
+        </div>
+      )}
+
+      <div ref={scrollRef as any} />
+    </div>
+  );
+});
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -129,10 +263,39 @@ export default function KnotChatRandomPage() {
     currentUidRef.current = currentUser?.clerkUserId || currentUser?.id || null;
   }, [currentUser?.id, currentUser?.clerkUserId]);
 
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
+  const handleImageClick = useCallback((url: string) => {
+    setSelectedFullImage(url);
+  }, []);
+
+  const scrollToBottom = useCallback((smooth = true) => {
+    if (typeof window === 'undefined') return;
+    requestAnimationFrame(() => {
+      const container = chatScrollContainerRef.current;
+      if (container) {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: smooth ? 'smooth' : 'auto',
+        });
+      } else {
+        messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+      }
+    });
+  }, []);
+
   // ─── Auto scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, matchStatus]);
+    if (matchStatus !== 'connected') return;
+    const container = chatScrollContainerRef.current;
+    if (!container) {
+      scrollToBottom(false);
+      return;
+    }
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 250;
+    if (isNearBottom) {
+      scrollToBottom(true);
+    }
+  }, [messages.length, matchStatus, scrollToBottom]);
 
   // ─── Auth redirect guard ───────────────────────────────────────────────────
   useEffect(() => {
@@ -682,9 +845,9 @@ export default function KnotChatRandomPage() {
   // ─── Realtime HTTP Message & Session Sync (when socket is disconnected) ────
   useEffect(() => {
     if (matchStatus !== 'connected' || !matchId) return;
+    if (socketConnected) return;
 
     const interval = setInterval(async () => {
-      if (socket && socket.connected) return;
       const currentMid = activeMatchIdRef.current || matchId;
       if (!currentMid) return;
 
@@ -731,10 +894,10 @@ export default function KnotChatRandomPage() {
           }
         }
       } catch (e) {}
-    }, 1200);
+    }, 1500);
 
     return () => clearInterval(interval);
-  }, [matchStatus, matchId, socket, currentUser?.id, currentUser?.clerkUserId]);
+  }, [matchStatus, matchId, socketConnected, currentUser?.id, currentUser?.clerkUserId]);
 
   // ─── TYPING INDICATOR (Pure local input, throttled socket emit, zero reconnect) ──
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1065,93 +1228,16 @@ export default function KnotChatRandomPage() {
             </header>
 
             {/* MESSAGES */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <div className="text-center my-2">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] text-slate-400">
-                  <ShieldCheck className="w-3.5 h-3.5 text-pink-400" />
-                  <span>Connected with {partner?.displayName || partner?.fullName || 'Stranger'} • Be polite &amp; respectful</span>
-                </span>
-              </div>
-
-              {messages.length === 0 && (
-                <div className="text-center py-12 text-slate-500 text-xs space-y-1">
-                  <p className="font-bold text-slate-400">You are connected!</p>
-                  <p>Say hello to start the conversation 👋</p>
-                </div>
-              )}
-
-              {messages.map((msg, index) => {
-                const isMine =
-                  msg.senderId === currentUidRef.current ||
-                  msg.senderId === currentUser?.id ||
-                  (Boolean(currentUser?.clerkUserId) && msg.senderId === currentUser?.clerkUserId) ||
-                  (Boolean((currentUser as any)?.firebaseUid) && msg.senderId === (currentUser as any)?.firebaseUid) ||
-                  (Boolean(currentUser?.username) && msg.senderUsername === currentUser?.username);
-
-                return (
-                  <motion.div
-                    key={msg.id || index}
-                    initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
-                  >
-                    <div
-                      className={`max-w-[80%] sm:max-w-[65%] rounded-3xl p-3.5 shadow-lg relative break-words ${
-                        isMine
-                          ? 'bg-gradient-to-br from-pink-600 via-rose-500 to-purple-600 text-white rounded-tr-sm shadow-pink-500/10'
-                          : 'bg-slate-900/90 border border-slate-800 text-slate-100 rounded-tl-sm'
-                      }`}
-                    >
-                      {msg.imageUrl && (
-                        <div
-                          onClick={() => setSelectedFullImage(msg.imageUrl!)}
-                          className="mb-2 rounded-2xl overflow-hidden cursor-pointer group bg-black/40 border border-white/10 relative"
-                        >
-                          <img
-                            src={msg.imageUrl}
-                            alt="Chat Attachment"
-                            className="max-h-60 w-full object-cover group-hover:scale-105 transition-transform"
-                          />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                            <Eye className="w-5 h-5 text-white" />
-                          </div>
-                        </div>
-                      )}
-
-                      {msg.content && <p className="text-xs leading-relaxed">{msg.content}</p>}
-
-                      <div className="flex items-center justify-end space-x-1 mt-1 text-[9px] opacity-70">
-                        <span>
-                          {new Date(msg.createdAt).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                        {isMine &&
-                          (msg.status === 'FAILED' ? (
-                            <span className="text-rose-300">!</span>
-                          ) : (
-                            <CheckCheck className="w-3 h-3 text-white" />
-                          ))}
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-
-              {partnerTyping && (
-                <div className="flex items-center space-x-2 text-xs text-slate-400 italic">
-                  <div className="px-3 py-2 rounded-2xl bg-slate-900 border border-slate-800 flex items-center space-x-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:0.2s]" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:0.4s]" />
-                  </div>
-                  <span className="text-[10px]">Partner is typing...</span>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
+            <RandomChatMessageList
+              messages={messages}
+              partner={partner}
+              currentUserId={currentUidRef.current || currentUser?.id || null}
+              currentUsername={currentUser?.username}
+              partnerTyping={partnerTyping}
+              onImageClick={handleImageClick}
+              scrollRef={messagesEndRef}
+              containerRef={chatScrollContainerRef}
+            />
 
             {/* IMAGE PREVIEW */}
             {imagePreview && (

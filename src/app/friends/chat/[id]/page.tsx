@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
@@ -46,6 +46,89 @@ interface SocialMessage {
   createdAt: string;
 }
 
+interface PrivateChatMessageItemProps {
+  msg: SocialMessage;
+  isMine: boolean;
+  onZoomImage: (url: string) => void;
+}
+
+const PrivateChatMessageItem = React.memo(function PrivateChatMessageItem({
+  msg,
+  isMine,
+  onZoomImage,
+}: PrivateChatMessageItemProps) {
+  const formattedTime = useMemo(() => {
+    try {
+      return new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  }, [msg.createdAt]);
+
+  // Call event status pill
+  if (msg.type === 'CALL_EVENT') {
+    return (
+      <div className="flex justify-center my-2">
+        <span className="px-3.5 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+          {msg.content}
+        </span>
+      </div>
+    );
+  }
+
+  // System notification pill
+  if (msg.type === 'SYSTEM') {
+    return (
+      <div className="flex justify-center my-2">
+        <span className="px-3.5 py-1 rounded-full bg-pink-500/10 border border-pink-500/20 text-[11px] font-bold text-pink-300 text-center max-w-xs">
+          {msg.content}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+      <div
+        className={`max-w-[80%] sm:max-w-md rounded-2xl p-3 space-y-1.5 shadow-md ${
+          isMine
+            ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-br-none'
+            : 'bg-white/10 text-slate-100 rounded-bl-none border border-white/10'
+        }`}
+      >
+        {/* Image message */}
+        {msg.imageUrl && (
+          <div
+            onClick={() => onZoomImage(msg.imageUrl!)}
+            className="rounded-xl overflow-hidden cursor-zoom-in max-h-64 bg-black/40 border border-white/10"
+          >
+            <img src={msg.imageUrl} alt="Attached" className="w-full h-full object-cover" loading="lazy" />
+          </div>
+        )}
+
+        {/* Text content */}
+        {msg.content && <p className="text-xs whitespace-pre-wrap leading-relaxed">{msg.content}</p>}
+
+        {/* Message footer: timestamp + status */}
+        <div className="flex items-center justify-end space-x-1 text-[10px] opacity-75">
+          <span>{formattedTime}</span>
+          {isMine && (
+            <span>
+              {msg.status === 'SENDING' ? (
+                '⏳'
+              ) : msg.status === 'FAILED' ? (
+                <AlertCircle className="w-3 h-3 text-rose-300 inline" />
+              ) : (
+                <Check className="w-3 h-3 text-emerald-300 inline" />
+              )}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function PrivateChatPage() {
   const params = useParams();
   const router = useRouter();
@@ -70,6 +153,10 @@ export default function PrivateChatPage() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleZoomImage = useCallback((url: string) => {
+    setZoomedImage(url);
+  }, []);
 
   // Options & Moderation
   const [showOptions, setShowOptions] = useState(false);
@@ -166,7 +253,7 @@ export default function PrivateChatPage() {
 
   useEffect(() => {
     syncMessages();
-    syncIntervalRef.current = setInterval(syncMessages, 650);
+    syncIntervalRef.current = setInterval(syncMessages, 2000);
 
     return () => {
       if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
@@ -484,74 +571,14 @@ export default function PrivateChatPage() {
           </div>
         )}
 
-        {messages.map((msg) => {
-          const isMine = msg.senderId === user?.id;
-
-          // Call event status pill
-          if (msg.type === 'CALL_EVENT') {
-            return (
-              <div key={msg.id} className="flex justify-center my-2">
-                <span className="px-3.5 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
-                  {msg.content}
-                </span>
-              </div>
-            );
-          }
-
-          // System notification pill
-          if (msg.type === 'SYSTEM') {
-            return (
-              <div key={msg.id} className="flex justify-center my-2">
-                <span className="px-3.5 py-1 rounded-full bg-pink-500/10 border border-pink-500/20 text-[11px] font-bold text-pink-300 text-center max-w-xs">
-                  {msg.content}
-                </span>
-              </div>
-            );
-          }
-
-          return (
-            <div key={msg.id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-              <div
-                className={`max-w-[80%] sm:max-w-md rounded-2xl p-3 space-y-1.5 shadow-md ${
-                  isMine
-                    ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-br-none'
-                    : 'bg-white/10 text-slate-100 rounded-bl-none border border-white/10'
-                }`}
-              >
-                {/* Image message */}
-                {msg.imageUrl && (
-                  <div
-                    onClick={() => setZoomedImage(msg.imageUrl || null)}
-                    className="rounded-xl overflow-hidden cursor-zoom-in max-h-64 bg-black/40 border border-white/10"
-                  >
-                    <img src={msg.imageUrl} alt="Attached" className="w-full h-full object-cover" />
-                  </div>
-                )}
-
-                {/* Text content */}
-                {msg.content && <p className="text-xs whitespace-pre-wrap leading-relaxed">{msg.content}</p>}
-
-                {/* Message footer: timestamp + status */}
-                <div className="flex items-center justify-end space-x-1 text-[10px] opacity-75">
-                  <span>
-                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  {isMine && (
-                    <span>
-                      {msg.status === 'SENDING' ? (
-                        '⏳'
-                      ) : msg.status === 'FAILED' ? (
-                        <AlertCircle className="w-3 h-3 text-rose-300 inline" />
-                      ) : (
-                        <Check className="w-3 h-3 text-emerald-300 inline" />
-                      )}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {messages.map((msg) => (
+          <PrivateChatMessageItem
+            key={msg.id}
+            msg={msg}
+            isMine={msg.senderId === user?.id}
+            onZoomImage={handleZoomImage}
+          />
+        ))}
         <div ref={messagesEndRef} />
       </main>
 

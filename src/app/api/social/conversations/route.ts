@@ -12,6 +12,7 @@ export async function GET(req: Request) {
         OR: [{ user1Id: user!.id }, { user2Id: user!.id }],
       },
       orderBy: { lastMessageAt: 'desc' },
+      take: 50,
       include: {
         user1: {
           select: {

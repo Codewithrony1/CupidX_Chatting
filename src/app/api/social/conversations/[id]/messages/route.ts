@@ -50,17 +50,21 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden: You are not a member of this conversation.' }, { status: 403 });
     }
 
-    // Verify active friendship exists
+    // Verify active friendship exists & check block status concurrently
     const [u1, u2] = getCanonicalPair(conversation.user1Id, conversation.user2Id);
-    const friendship = await prisma.friendship.findUnique({
-      where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
-    });
+    const partner = conversation.user1Id === user!.id ? conversation.user2 : conversation.user1;
+
+    const [friendship, isBlocked] = await Promise.all([
+      prisma.friendship.findUnique({
+        where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+      }),
+      checkBlockBetween(user!.id, partner.id),
+    ]);
+
     if (!friendship) {
       return NextResponse.json({ error: 'You must be friends to access this conversation.' }, { status: 403 });
     }
 
-    const partner = conversation.user1Id === user!.id ? conversation.user2 : conversation.user1;
-    const isBlocked = await checkBlockBetween(user!.id, partner.id);
     if (isBlocked) {
       return NextResponse.json({ error: 'Unable to communicate with this member.' }, { status: 403 });
     }
