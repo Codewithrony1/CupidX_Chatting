@@ -343,10 +343,19 @@ io.on('connection', async (socket) => {
   });
 
   // 4. Random Typing Status
-  socket.on('random_typing_status', ({ isTyping }) => {
-    const partnerSocketId = activeRandomChats.get(socket.id);
-    if (partnerSocketId) {
-      io.to(partnerSocketId).emit('partner_typing_status', { isTyping });
+  socket.on('random_typing_status', ({ isTyping, partnerId, roomId }) => {
+    try {
+      let targetSocketId = activeRandomChats.get(socket.id);
+      if (!targetSocketId && partnerId) {
+        targetSocketId = userSockets.get(partnerId);
+      }
+      if (targetSocketId) {
+        io.to(targetSocketId).emit('partner_typing_status', { isTyping: Boolean(isTyping) });
+      } else if (roomId) {
+        socket.to(roomId).emit('partner_typing_status', { isTyping: Boolean(isTyping) });
+      }
+    } catch (e) {
+      console.warn('random_typing_status emit notice:', e);
     }
   });
 

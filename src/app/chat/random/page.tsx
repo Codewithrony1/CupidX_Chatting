@@ -146,6 +146,7 @@ export default function KnotChatRandomPage() {
   const syncSeqRef = useRef(0);
   const consecutiveSyncErrorsRef = useRef(0);
   const autoStartExecutedRef = useRef(false);
+  const cachedTokenRef = useRef<{ token: string | null; expiresAt: number }>({ token: null, expiresAt: 0 });
 
   const isVIP =
     currentUser?.membershipTier === 'VIP' ||
@@ -159,7 +160,7 @@ export default function KnotChatRandomPage() {
   // ─── Auto scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, partnerTyping, matchStatus]);
+  }, [messages, matchStatus]);
 
   // ─── Auth redirect guard ───────────────────────────────────────────────────
   useEffect(() => {
@@ -275,7 +276,13 @@ export default function KnotChatRandomPage() {
 
     try {
       const effectiveClerkId = currentUidRef.current || '';
-      const token = await getToken().catch(() => null);
+      let token = cachedTokenRef.current.token;
+      if (!token || Date.now() > cachedTokenRef.current.expiresAt) {
+        token = await getToken().catch(() => null);
+        if (token) {
+          cachedTokenRef.current = { token, expiresAt: Date.now() + 60000 };
+        }
+      }
       const headers: Record<string, string> = {};
       if (effectiveClerkId) {
         headers['x-clerk-user-id'] = effectiveClerkId;
@@ -314,7 +321,7 @@ export default function KnotChatRandomPage() {
             setMatchStatus('ended');
             return;
           }
-          if (consecutiveSyncErrorsRef.current >= 6) {
+          if (consecutiveSyncErrorsRef.current >= 15) {
             setReconnecting(true);
           }
           return;
@@ -323,7 +330,7 @@ export default function KnotChatRandomPage() {
           console.warn('[RANDOM_CHAT_SYNC] 403 Forbidden - verify participant authorization for session:', mid);
         }
         consecutiveSyncErrorsRef.current += 1;
-        if (consecutiveSyncErrorsRef.current >= 6) {
+        if (consecutiveSyncErrorsRef.current >= 15) {
           setReconnecting(true);
         }
         return;
@@ -414,7 +421,7 @@ export default function KnotChatRandomPage() {
         timestamp: new Date().toISOString(),
       });
       consecutiveSyncErrorsRef.current += 1;
-      if (consecutiveSyncErrorsRef.current >= 4) {
+      if (consecutiveSyncErrorsRef.current >= 15) {
         setReconnecting(true);
       }
     } finally {
@@ -793,7 +800,11 @@ export default function KnotChatRandomPage() {
     setImagePreview(null);
     setSendingMsg(true);
 
-    if (socket && socketConnected) socket.emit('random_typing_status', { isTyping: false });
+    try {
+      if (socket && socketConnected && socket.connected) {
+        socket.emit('random_typing_status', { isTyping: false, partnerId: partner?.id, roomId: activeMid });
+      }
+    } catch (e) {}
     isCurrentlyTypingRef.current = false;
 
     const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
@@ -915,16 +926,25 @@ export default function KnotChatRandomPage() {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputText(e.target.value);
 
-    if (socket && socketConnected && matchStatus === 'connected') {
-      if (!isCurrentlyTypingRef.current) {
-        isCurrentlyTypingRef.current = true;
-        socket.emit('random_typing_status', { isTyping: true });
+    try {
+      if (socket && socketConnected && socket.connected && matchStatus === 'connected') {
+        const activeMid = activeMatchIdRef.current || matchId;
+        if (!isCurrentlyTypingRef.current) {
+          isCurrentlyTypingRef.current = true;
+          socket.emit('random_typing_status', { isTyping: true, partnerId: partner?.id, roomId: activeMid });
+        }
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+          isCurrentlyTypingRef.current = false;
+          try {
+            if (socket && socket.connected) {
+              socket.emit('random_typing_status', { isTyping: false, partnerId: partner?.id, roomId: activeMid });
+            }
+          } catch (e) {}
+        }, 2000);
       }
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => {
-        isCurrentlyTypingRef.current = false;
-        socket.emit('random_typing_status', { isTyping: false });
-      }, 1800);
+    } catch (e) {
+      console.warn('Typing indicator emit notice:', e);
     }
   };
 

@@ -107,7 +107,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         (activeSocket as Socket).disconnect();
       }
     };
-  }, [user]);
+  }, [user?.id]);
 
   // Throttled typing indicator emit (at most once every 300ms)
   const emitThrottledTyping = useCallback(
@@ -115,9 +115,11 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
       const now = Date.now();
       if (now - lastTypingEmitRef.current >= 300) {
         lastTypingEmitRef.current = now;
-        if (socket && isConnected) {
-          socket.emit('typing', { partnerSocketId });
-        }
+        try {
+          if (socket && isConnected) {
+            socket.emit('typing', { partnerSocketId });
+          }
+        } catch (e) {}
       }
     },
     [socket, isConnected]
@@ -126,11 +128,15 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   // Buffer messages if offline so they send the instant socket reconnects
   const sendBufferedMessage = useCallback(
     (eventName: string, data: any) => {
-      if (socket && isConnected) {
-        socket.emit(eventName, data);
-      } else {
-        console.log(`Socket offline. Buffering message: ${eventName}`);
-        offlineQueueRef.current.push({ eventName, data, timestamp: Date.now() });
+      try {
+        if (socket && isConnected) {
+          socket.emit(eventName, data);
+        } else {
+          console.log(`Socket offline. Buffering message: ${eventName}`);
+          offlineQueueRef.current.push({ eventName, data, timestamp: Date.now() });
+        }
+      } catch (e) {
+        console.warn('sendBufferedMessage notice:', e);
       }
     },
     [socket, isConnected]
