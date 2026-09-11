@@ -65,10 +65,15 @@ export async function POST(req: Request) {
       });
 
       // 2. Unlock VIP Membership for User
+      const now = new Date();
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       await prisma.user.update({
         where: { id: payment.userId },
         data: {
+          is_vip: true,
           membershipTier: 'VIP',
+          vip_started_at: now,
+          vip_expires_at: expiresAt,
         },
       });
 

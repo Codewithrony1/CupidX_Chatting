@@ -63,6 +63,33 @@ const recentPartners = new Map();
 let randomMatchQueue = [];
 // User profile cache (TTL 60 seconds) to avoid database hits in tight loops
 const userCache = new Map();
+// Blocked users cache (TTL 30 seconds) to prevent blocked pairs from chatting/matching
+const blockedUsersCache = new Map();
+const blocksCacheTimestamps = new Map();
+const BLOCKS_CACHE_TTL_MS = 30 * 1000;
+
+async function getCachedBlockedUsers(uid) {
+  const lastTime = blocksCacheTimestamps.get(uid);
+  if (lastTime && Date.now() - lastTime < BLOCKS_CACHE_TTL_MS) {
+    return blockedUsersCache.get(uid) || new Set();
+  }
+  try {
+    const blocks = await prisma.block.findMany({
+      where: { OR: [{ blockerId: uid }, { blockedId: uid }] },
+      select: { blockerId: true, blockedId: true },
+    });
+    const set = new Set();
+    blocks.forEach((b) => {
+      if (b.blockerId === uid) set.add(b.blockedId);
+      if (b.blockedId === uid) set.add(b.blockerId);
+    });
+    blockedUsersCache.set(uid, set);
+    blocksCacheTimestamps.set(uid, Date.now());
+    return set;
+  } catch {
+    return blockedUsersCache.get(uid) || new Set();
+  }
+}
 
 const CACHE_TTL_MS = 60 * 1000;
 
@@ -174,9 +201,11 @@ const io = new Server(server, {
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    const isTestAllowed = process.env.NODE_ENV !== 'production';
+    const isTest = isTestAllowed && (socket.handshake.auth?.isLoadTest || socket.handshake.query?.isLoadTest);
+    const testUserId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
+
     if (!token) {
-      const isTest = socket.handshake.auth?.isLoadTest || socket.handshake.query?.isLoadTest;
-      const testUserId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
       if (isTest && testUserId) {
         socket.user = {
           userId: String(testUserId),
@@ -190,8 +219,6 @@ io.use((socket, next) => {
 
     jwt.verify(token, JWT_SECRET, (err, decoded) => {
       if (err) {
-        const isTest = socket.handshake.auth?.isLoadTest || socket.handshake.query?.isLoadTest;
-        const testUserId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
         if (isTest && testUserId) {
           socket.user = {
             userId: String(testUserId),
@@ -243,6 +270,15 @@ function calculateMatchScore(candidateA, candidateB, now) {
     return { canMatch: false, score: -1 };
   }
 
+  const blockedA = blockedUsersCache.get(candidateA.userId);
+  if (blockedA && blockedA.has(candidateB.userId)) {
+    return { canMatch: false, score: -1 };
+  }
+  const blockedB = blockedUsersCache.get(candidateB.userId);
+  if (blockedB && blockedB.has(candidateA.userId)) {
+    return { canMatch: false, score: -1 };
+  }
+
   let score = 0;
   const waitTimeA = now - candidateA.joinTime;
   const waitTimeB = now - candidateB.joinTime;
@@ -284,22 +320,29 @@ function calculateMatchScore(candidateA, candidateB, now) {
   }
 
   score += Math.max(waitTimeA, waitTimeB) / 10000;
+  // Requirement 4: Genuine randomness tie-breaker for equal scores
+  score += Math.random() * 0.4;
 
   return { canMatch: true, score };
 }
 
-// ── In-Memory Queue Matcher ──────────────────────────────────────────────────
+// ── In-Memory Queue Matcher (Atomic & Random Selection) ──────────────────────
 function processMatchQueue() {
   if (randomMatchQueue.length < 2) return;
 
   const now = Date.now();
+  console.log(`[MATCH_ATTEMPT] Queue length: ${randomMatchQueue.length}`);
+
+  // Randomize evaluation order so matching is genuinely unpredictable among eligible users
+  const candidatesShuffled = [...randomMatchQueue].sort(() => Math.random() - 0.5);
+
   let bestPair = null;
   let highestScore = -1;
 
-  for (let i = 0; i < randomMatchQueue.length; i++) {
-    const candidateA = randomMatchQueue[i];
-    for (let j = i + 1; j < randomMatchQueue.length; j++) {
-      const candidateB = randomMatchQueue[j];
+  for (let i = 0; i < candidatesShuffled.length; i++) {
+    const candidateA = candidatesShuffled[i];
+    for (let j = i + 1; j < candidatesShuffled.length; j++) {
+      const candidateB = candidatesShuffled[j];
 
       const { canMatch, score } = calculateMatchScore(candidateA, candidateB, now);
       if (canMatch && score > highestScore) {
@@ -312,11 +355,12 @@ function processMatchQueue() {
   if (bestPair) {
     const [candidateA, candidateB] = bestPair;
 
+    // Requirement 1 & 6: Remove both users from waiting queue atomically
     randomMatchQueue = randomMatchQueue.filter(
       (c) => c.userId !== candidateA.userId && c.userId !== candidateB.userId
     );
 
-    const matchId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const matchId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const roomId = `room_${matchId}`;
 
     const matchRecord = {
@@ -331,6 +375,10 @@ function processMatchQueue() {
     userActiveMatch.set(candidateA.userId, matchId);
     userActiveMatch.set(candidateB.userId, matchId);
 
+    console.log(`[MATCH_SUCCESS] Matched ${candidateA.userId} (${candidateA.username}) <-> ${candidateB.userId} (${candidateB.username})`);
+    console.log(`[SESSION_CREATED] Room: ${roomId} for Match: ${matchId}`);
+
+    // Track recent partners to avoid immediate rematch upon NEXT
     if (!recentPartners.has(candidateA.userId)) recentPartners.set(candidateA.userId, new Set());
     const rA = recentPartners.get(candidateA.userId);
     rA.add(candidateB.userId);
@@ -348,6 +396,7 @@ function processMatchQueue() {
         if (s) {
           s.join(roomId);
           s.currentRoomId = roomId;
+          console.log(`[ROOM_JOIN] User A socket ${sId} joined ${roomId}`);
         }
       });
     }
@@ -359,6 +408,7 @@ function processMatchQueue() {
         if (s) {
           s.join(roomId);
           s.currentRoomId = roomId;
+          console.log(`[ROOM_JOIN] User B socket ${sId} joined ${roomId}`);
         }
       });
     }
@@ -430,6 +480,7 @@ function teardownMatch(matchId, reason, triggeringUserId) {
       if (s) {
         s.leave(roomId);
         s.currentRoomId = null;
+        console.log(`[ROOM_LEAVE] User A socket ${sId} left ${roomId}`);
       }
     });
   }
@@ -441,6 +492,7 @@ function teardownMatch(matchId, reason, triggeringUserId) {
       if (s) {
         s.leave(roomId);
         s.currentRoomId = null;
+        console.log(`[ROOM_LEAVE] User B socket ${sId} left ${roomId}`);
       }
     });
   }
@@ -448,6 +500,8 @@ function teardownMatch(matchId, reason, triggeringUserId) {
   activeMatches.delete(matchId);
   userActiveMatch.delete(userA.userId);
   userActiveMatch.delete(userB.userId);
+
+  console.log(`[SESSION_CLEANUP] Match ${matchId} (Room: ${roomId}) ended: ${reason}. Ephemeral state cleared.`);
 }
 
 // ── Connection Event Router ──────────────────────────────────────────────────
@@ -501,6 +555,7 @@ io.on('connection', async (socket) => {
       });
 
       socket.to(match.roomId).emit('partner_reconnected', { userId });
+      console.log(`[ROOM_JOIN] Reconnected user ${userId} re-joined room ${match.roomId}`);
     }
   }
 
@@ -523,7 +578,13 @@ io.on('connection', async (socket) => {
 
     randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
 
-    const userData = await getCachedUserData(userId);
+    const [userData] = await Promise.all([
+      getCachedUserData(userId),
+      getCachedBlockedUsers(userId),
+    ]);
+
+    if (!userSockets.has(userId)) return;
+    if (userActiveMatch.has(userId)) return;
 
     const candidate = {
       socketId: socket.id,
@@ -542,7 +603,13 @@ io.on('connection', async (socket) => {
       joinTime: Date.now(),
     };
 
-    randomMatchQueue.push(candidate);
+    const existingIdx = randomMatchQueue.findIndex((c) => c.userId === userId);
+    if (existingIdx !== -1) {
+      randomMatchQueue[existingIdx] = candidate;
+    } else {
+      randomMatchQueue.push(candidate);
+    }
+    console.log(`[QUEUE_JOIN] User ${userId} (${candidate.username}) joined queue. Total in queue: ${randomMatchQueue.length}`);
     socket.emit('queue_joined', { status: 'searching', isVIP: candidate.isVIP, plan: candidate.plan });
 
     processMatchQueue();
@@ -551,6 +618,7 @@ io.on('connection', async (socket) => {
   // ── Event: Leave Random Queue ──────────────────────────────────────────────
   socket.on('leave_random_queue', () => {
     randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
+    console.log(`[QUEUE_LEAVE] User ${userId} left queue. Total in queue: ${randomMatchQueue.length}`);
     socket.emit('queue_left');
   });
 
@@ -565,6 +633,12 @@ io.on('connection', async (socket) => {
     const match = activeMatches.get(matchId);
     if (!match) {
       if (typeof callback === 'function') callback({ error: 'Chat session has expired.' });
+      return;
+    }
+
+    // Requirement 9: Strict Server-Side Room Participant Authorization
+    if (match.userA.userId !== userId && match.userB.userId !== userId) {
+      if (typeof callback === 'function') callback({ error: 'Unauthorized to post in this room.' });
       return;
     }
 
@@ -588,6 +662,7 @@ io.on('connection', async (socket) => {
     };
 
     io.to(match.roomId).emit('receive_random_message', messageObj);
+    console.log(`[MESSAGE_SENT] User ${userId} in room ${match.roomId}`);
 
     if (typeof callback === 'function') {
       callback({ success: true, message: messageObj });
@@ -612,11 +687,20 @@ io.on('connection', async (socket) => {
   socket.on('next_partner', async (preferences = {}) => {
     const currentMatchId = userActiveMatch.get(userId);
     if (currentMatchId) {
+      console.log(`[NEXT] User ${userId} skipped match ${currentMatchId}`);
       teardownMatch(currentMatchId, 'partner_skipped', userId);
     }
 
     randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
-    const userData = await getCachedUserData(userId);
+    const [userData] = await Promise.all([
+      getCachedUserData(userId),
+      getCachedBlockedUsers(userId),
+    ]);
+
+    if (!userSockets.has(userId)) return;
+    if (userActiveMatch.has(userId)) {
+      teardownMatch(userActiveMatch.get(userId), 'partner_skipped', userId);
+    }
 
     const candidate = {
       socketId: socket.id,
@@ -635,7 +719,13 @@ io.on('connection', async (socket) => {
       joinTime: Date.now(),
     };
 
-    randomMatchQueue.push(candidate);
+    const existingIdx = randomMatchQueue.findIndex((c) => c.userId === userId);
+    if (existingIdx !== -1) {
+      randomMatchQueue[existingIdx] = candidate;
+    } else {
+      randomMatchQueue.push(candidate);
+    }
+    console.log(`[QUEUE_JOIN] [NEXT] User ${userId} re-queued for next partner. Total in queue: ${randomMatchQueue.length}`);
     socket.emit('queue_joined', { status: 'searching', isVIP: candidate.isVIP, plan: candidate.plan });
 
     processMatchQueue();
@@ -645,6 +735,7 @@ io.on('connection', async (socket) => {
   socket.on('end_random_chat', () => {
     const currentMatchId = userActiveMatch.get(userId);
     if (currentMatchId) {
+      console.log(`[SESSION_CLEANUP] User ${userId} requested chat end for match ${currentMatchId}`);
       teardownMatch(currentMatchId, 'chat_ended', userId);
     }
     randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
@@ -657,6 +748,13 @@ io.on('connection', async (socket) => {
       const { receiverId, content, imageUrl, clientMessageId } = payload || {};
       if (!receiverId || (!content && !imageUrl)) {
         if (typeof callback === 'function') callback({ error: 'Receiver ID and content are required' });
+        return;
+      }
+
+      // Check block relations before delivering message
+      const blocked = await getCachedBlockedUsers(userId);
+      if (blocked.has(receiverId)) {
+        if (typeof callback === 'function') callback({ error: 'Communication with this member is unavailable.' });
         return;
       }
 
@@ -691,20 +789,13 @@ io.on('connection', async (socket) => {
 
       setImmediate(async () => {
         try {
-          let conv = await prisma.conversation.findFirst({
-            where: {
-              OR: [
-                { user1Id: userId, user2Id: receiverId },
-                { user1Id: receiverId, user2Id: userId },
-              ],
-            },
+          // Canonical ordering u1 < u2
+          const [u1, u2] = userId < receiverId ? [userId, receiverId] : [receiverId, userId];
+          const conv = await prisma.conversation.upsert({
+            where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+            update: { lastMessageAt: new Date() },
+            create: { user1Id: u1, user2Id: u2, lastMessageAt: new Date() },
           });
-
-          if (!conv) {
-            conv = await prisma.conversation.create({
-              data: { user1Id: userId, user2Id: receiverId },
-            });
-          }
 
           await prisma.privateMessage.create({
             data: {
@@ -714,11 +805,6 @@ io.on('connection', async (socket) => {
               imageUrl: msgObj.imageUrl,
               clientMessageId: msgObj.clientMessageId,
             },
-          });
-
-          await prisma.conversation.update({
-            where: { id: conv.id },
-            data: { lastMessageAt: new Date() },
           });
         } catch (dbErr) {
           console.warn('Private message DB persistence notice:', dbErr.message);
@@ -752,13 +838,48 @@ io.on('connection', async (socket) => {
         io.to(sId).emit('messages_read_receipt', { readerId: userId });
       });
     }
+
+    setImmediate(async () => {
+      try {
+        const [u1, u2] = userId < senderId ? [userId, senderId] : [senderId, userId];
+        const conv = await prisma.conversation.findUnique({
+          where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+        });
+        if (conv) {
+          await prisma.privateMessage.updateMany({
+            where: { conversationId: conv.id, senderId, status: 'SENT' },
+            data: { status: 'READ' },
+          });
+        }
+      } catch {}
+    });
   });
 
-  // ── Private Chat: Delete Message ───────────────────────────────────────────
-  socket.on('delete_message', ({ messageId }, callback) => {
+  // ── Private Chat: Delete Message (Targeted Emit + DB Delete) ───────────────
+  socket.on('delete_message', ({ messageId, receiverId }, callback) => {
     if (!messageId) return;
-    io.emit('message_deleted', { messageId, deletedBy: userId });
+
+    // Targeted notification only to the sender and recipient sockets
+    const mySockets = userSockets.get(userId);
+    if (mySockets) {
+      mySockets.forEach((sId) => io.to(sId).emit('message_deleted', { messageId, deletedBy: userId }));
+    }
+    if (receiverId) {
+      const recipientSockets = userSockets.get(receiverId);
+      if (recipientSockets) {
+        recipientSockets.forEach((sId) => io.to(sId).emit('message_deleted', { messageId, deletedBy: userId }));
+      }
+    }
+
     if (typeof callback === 'function') callback({ success: true });
+
+    setImmediate(async () => {
+      try {
+        await prisma.privateMessage.deleteMany({
+          where: { id: messageId, senderId: userId },
+        });
+      } catch {}
+    });
   });
 
   // ── Disconnect Handler with 10-Second Grace Period ─────────────────────────

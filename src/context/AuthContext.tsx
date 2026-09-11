@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useUser, useClerk } from '@clerk/nextjs';
+import { useUser, useClerk, useAuth as useClerkAuth } from '@clerk/nextjs';
 import {
   getOrCreateFirestoreUser,
   updateFirestoreUserProfile,
@@ -31,6 +31,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser();
   const clerk = useClerk();
+  const { getToken } = useClerkAuth();
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -76,10 +77,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const displayName = cUser.fullName || cUser.username || cUser.firstName || 'User';
       const photoURL = cUser.imageUrl || null;
 
+      // Obtain verified Clerk session token if available
+      const token = await getToken().catch(() => null);
+      const authHeaders: Record<string, string> = {
+        'x-clerk-user-id': cUser.id,
+      };
+      if (token) {
+        authHeaders['Authorization'] = `Bearer ${token}`;
+      }
+
       // Parallel fetch: Canonical backend DB (/api/auth/me) + Firestore document
       const [backendRes, firestoreProfile] = await Promise.all([
         fetch('/api/auth/me', {
-          headers: { 'x-clerk-user-id': cUser.id },
+          headers: authHeaders,
         })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),

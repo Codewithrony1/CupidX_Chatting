@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import fs from 'fs/promises';
-import path from 'path';
+import { saveBase64Image } from '@/lib/safeImageUpload';
 
 export async function POST(req: Request) {
   try {
@@ -26,24 +25,19 @@ export async function POST(req: Request) {
     let savedQrUrl = null;
 
     if (qrImageData && qrImageData.startsWith('data:image/')) {
-      const matches = qrImageData.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
-        const base64Data = matches[2];
-        const buffer = Buffer.from(base64Data, 'base64');
-        const filename = `payment-qr-${region}-${Date.now()}.${ext}`;
-
-        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'qr');
-        await fs.mkdir(uploadDir, { recursive: true });
-        await fs.writeFile(path.join(uploadDir, filename), buffer);
-
-        savedQrUrl = `/uploads/qr/${filename}`;
-
+      const uploadRes = await saveBase64Image(qrImageData, 'uploads/qr', `payment_qr_${region}`);
+      if (uploadRes.success && uploadRes.url) {
+        savedQrUrl = uploadRes.url;
         await prisma.appSetting.upsert({
           where: { key: settingKey },
           update: { value: savedQrUrl },
           create: { key: settingKey, value: savedQrUrl },
         });
+      } else {
+        return NextResponse.json(
+          { error: uploadRes.error || 'Failed to process QR image.' },
+          { status: uploadRes.statusCode || 400 }
+        );
       }
     }
 

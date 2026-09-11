@@ -43,17 +43,11 @@ export async function POST(
         where: { OR: [{ userId: session.userAId }, { userId: session.userBId }] },
         data: { status: 'CANCELLED', chatSessionId: null, partnerUserId: null },
       }),
+      prisma.message.deleteMany({
+        where: { chatSessionId },
+      }),
     ]);
 
-    // Prune stale ended chat sessions older than 45 seconds
-    try {
-      await prisma.chatSession.deleteMany({
-        where: {
-          status: 'ENDED',
-          endedAt: { lt: new Date(Date.now() - 45 * 1000) },
-        },
-      });
-    } catch (e) {}
 
     // Also sync to Firestore so partner client receives 'ended' status immediately
     try {

@@ -42,17 +42,7 @@ async function resolveCanonicalUserId(identifier: string, displayName = 'Strange
 
 export async function GET(req: Request) {
   try {
-    let user = await getCurrentUser(req);
-    if (!user) {
-      const headerClerkId = req.headers.get('x-clerk-user-id');
-      const { searchParams } = new URL(req.url);
-      const queryClerkId = searchParams.get('clerkUserId');
-      const fallbackClerkId = headerClerkId || queryClerkId;
-      if (fallbackClerkId) {
-        user = await getOrCreateUserFromClerk(fallbackClerkId);
-      }
-    }
-
+    const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

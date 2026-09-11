@@ -115,6 +115,7 @@ export default function KnotChatRandomPage() {
   const currentUidRef = useRef<string | null>(null);
   const activeMatchIdRef = useRef<string | null>(null);
   const autoStartExecutedRef = useRef(false);
+  const serverlessPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const isVIP =
     currentUser?.membershipTier === 'VIP' ||
@@ -154,6 +155,10 @@ export default function KnotChatRandomPage() {
       reconnected?: boolean;
     }) => {
       console.log('[RANDOM_CHAT] Match established via Socket.IO:', data.matchId);
+      if (serverlessPollIntervalRef.current) {
+        clearInterval(serverlessPollIntervalRef.current);
+        serverlessPollIntervalRef.current = null;
+      }
       activeMatchIdRef.current = data.matchId;
       setMatchId(data.matchId);
       setPartner(data.partner);
@@ -251,8 +256,9 @@ export default function KnotChatRandomPage() {
   }, [socket]);
 
   // ─── START MATCHMAKING ─────────────────────────────────────────────────────
+  // ─── START MATCHMAKING (Dual-Transport Resilient) ──────────────────────────
   const handleStartMatch = useCallback(
-    (skipCurrent = false) => {
+    async (skipCurrent = false) => {
       setMatchStatus('searching');
       setPartner(null);
       setMessages([]);
@@ -261,25 +267,106 @@ export default function KnotChatRandomPage() {
       setReconnecting(false);
       activeMatchIdRef.current = null;
 
-      const emitQueueJoin = () => {
-        if (!socket || !socket.connected) return;
-        const preferences = {
-          gender: currentUser?.profile?.gender || 'unspecified',
-          preferredGender: currentUser?.profile?.preferredGender || 'auto',
-          mood: currentUser?.profile?.mood || 'chill',
-          language: currentUser?.profile?.language || 'english',
-        };
-        socket.emit('join_random_queue', preferences);
+      if (serverlessPollIntervalRef.current) {
+        clearInterval(serverlessPollIntervalRef.current);
+        serverlessPollIntervalRef.current = null;
+      }
+
+      const preferences = {
+        gender: currentUser?.profile?.gender || 'unspecified',
+        preferredGender: currentUser?.profile?.preferredGender || 'auto',
+        mood: currentUser?.profile?.mood || 'chill',
+        language: currentUser?.profile?.language || 'english',
       };
 
+      // 1. If Socket is connected, join queue via high-speed WebSockets
       if (socket && socket.connected) {
-        emitQueueJoin();
-      } else {
-        const timer = setTimeout(emitQueueJoin, 600);
-        return () => clearTimeout(timer);
+        socket.emit('join_random_queue', preferences);
+      }
+
+      // 2. Dual-Transport: Call serverless matchmaking API in parallel
+      try {
+        const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+        const token = await getToken().catch(() => null);
+
+        const res = await fetch('/api/matchmaking/join', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+          },
+          body: JSON.stringify({
+            skipCurrentMatch: skipCurrent,
+            ...preferences,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          if (res.status === 503 || errData.disabled) {
+            setRandomChatDisabled(true);
+            setSearchError('Random Chat is currently unavailable. Please try again later.');
+            setMatchStatus('idle');
+            return;
+          }
+        } else {
+          const data = await res.json();
+          if (data.matched && data.chatSessionId) {
+            if (serverlessPollIntervalRef.current) {
+              clearInterval(serverlessPollIntervalRef.current);
+              serverlessPollIntervalRef.current = null;
+            }
+            activeMatchIdRef.current = data.chatSessionId;
+            setMatchId(data.chatSessionId);
+            setPartner(data.partner);
+            setMatchStatus('connected');
+            setReconnecting(false);
+            setMessages([]);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('API matchmaking join notice:', e);
+      }
+
+      // 3. Fallback polling on /api/matchmaking/status if socket is not connected
+      if (!socket || !socket.connected) {
+        serverlessPollIntervalRef.current = setInterval(async () => {
+          if (activeMatchIdRef.current) {
+            if (serverlessPollIntervalRef.current) {
+              clearInterval(serverlessPollIntervalRef.current);
+              serverlessPollIntervalRef.current = null;
+            }
+            return;
+          }
+          try {
+            const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+            const statusRes = await fetch('/api/matchmaking/status', {
+              headers: {
+                ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+              },
+            });
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.matched && statusData.chatSessionId) {
+                if (serverlessPollIntervalRef.current) {
+                  clearInterval(serverlessPollIntervalRef.current);
+                  serverlessPollIntervalRef.current = null;
+                }
+                activeMatchIdRef.current = statusData.chatSessionId;
+                setMatchId(statusData.chatSessionId);
+                setPartner(statusData.partner);
+                setMatchStatus('connected');
+                setReconnecting(false);
+                setMessages([]);
+              }
+            }
+          } catch (e) {}
+        }, 1200);
       }
     },
-    [socket, currentUser?.profile]
+    [socket, currentUser, getToken]
   );
 
   // ─── Check availability & auto-start on mount when user is ready ──────────
@@ -322,24 +409,52 @@ export default function KnotChatRandomPage() {
   const handleCancelSearch = () => {
     activeMatchIdRef.current = null;
     setMatchStatus('idle');
+    if (serverlessPollIntervalRef.current) {
+      clearInterval(serverlessPollIntervalRef.current);
+      serverlessPollIntervalRef.current = null;
+    }
     if (socket && socket.connected) {
       socket.emit('leave_random_queue');
     }
+    const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+    fetch('/api/matchmaking/cancel', {
+      method: 'POST',
+      headers: {
+        ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+      },
+    }).catch(() => {});
   };
 
-  // ─── NEXT PARTNER ─────────────────────────────────────────────────────────
+  // ─── NEXT PARTNER (Requirement 3: Clean up old, brand-new room, different partner) ─
   const handleNextPartner = () => {
     if (isSkippingRef.current) return;
     isSkippingRef.current = true;
     setTimeout(() => {
       isSkippingRef.current = false;
-    }, 500);
+    }, 400);
 
+    const oldMid = activeMatchIdRef.current || matchId;
     activeMatchIdRef.current = null;
     setPartner(null);
     setMessages([]);
     setPartnerTyping(false);
     setMatchStatus('searching');
+
+    if (serverlessPollIntervalRef.current) {
+      clearInterval(serverlessPollIntervalRef.current);
+      serverlessPollIntervalRef.current = null;
+    }
+
+    if (oldMid) {
+      const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+      fetch(`/api/chat/${oldMid}/next`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+        },
+      }).catch(() => {});
+    }
 
     if (socket && socket.connected) {
       socket.emit('next_partner', {
@@ -353,11 +468,27 @@ export default function KnotChatRandomPage() {
 
   const handleEndChat = () => {
     setShowOptionsMenu(false);
+    const oldMid = activeMatchIdRef.current || matchId;
     activeMatchIdRef.current = null;
     setPartnerTyping(false);
 
+    if (serverlessPollIntervalRef.current) {
+      clearInterval(serverlessPollIntervalRef.current);
+      serverlessPollIntervalRef.current = null;
+    }
+
     if (socket && socket.connected) {
       socket.emit('end_random_chat');
+    }
+    if (oldMid) {
+      const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+      fetch(`/api/chat/${oldMid}/end`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+        },
+      }).catch(() => {});
     }
     setMatchStatus('ended');
   };
@@ -464,7 +595,7 @@ export default function KnotChatRandomPage() {
           // Fallback to HTTP POST
           const token = await getToken().catch(() => null);
           const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
-          await fetch('/api/chat/messages', {
+          const postRes = await fetch('/api/chat/messages', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -477,6 +608,20 @@ export default function KnotChatRandomPage() {
               clientMessageId: tempId,
             }),
           });
+          if (postRes.ok) {
+            const postData = await postRes.json().catch(() => ({}));
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === tempId
+                  ? {
+                      ...m,
+                      id: postData.message?.id || tempId,
+                      status: 'SENT' as const,
+                    }
+                  : m
+              )
+            );
+          }
         }
       }
     } catch (err: any) {
@@ -488,6 +633,60 @@ export default function KnotChatRandomPage() {
       setSendingMsg(false);
     }
   };
+
+  // ─── Realtime HTTP Message & Session Sync (when socket is disconnected) ────
+  useEffect(() => {
+    if (matchStatus !== 'connected' || !matchId) return;
+
+    const interval = setInterval(async () => {
+      if (socket && socket.connected) return;
+      const currentMid = activeMatchIdRef.current || matchId;
+      if (!currentMid) return;
+
+      try {
+        const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+        const res = await fetch(`/api/chat/messages?chatSessionId=${currentMid}`, {
+          headers: {
+            ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.sessionStatus === 'ENDED') {
+            activeMatchIdRef.current = null;
+            setMatchStatus('ended');
+            setPartnerTyping(false);
+            return;
+          }
+          if (Array.isArray(data.messages)) {
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const existingClientIds = new Set(prev.map((m) => m.clientMessageId).filter(Boolean));
+              const newMsgs = data.messages.filter(
+                (m: any) => !existingIds.has(m.id) && (!m.clientMessageId || !existingClientIds.has(m.clientMessageId))
+              );
+              if (newMsgs.length === 0) return prev;
+              return [
+                ...prev,
+                ...newMsgs.map((m: any) => ({
+                  id: m.id,
+                  clientMessageId: m.clientMessageId,
+                  senderId: m.senderId,
+                  senderUsername: m.senderUsername || 'Stranger',
+                  content: m.content,
+                  imageUrl: m.imageUrl,
+                  createdAt: m.createdAt,
+                  status: 'SENT' as const,
+                })),
+              ];
+            });
+          }
+        }
+      } catch (e) {}
+    }, 1200);
+
+    return () => clearInterval(interval);
+  }, [matchStatus, matchId, socket, currentUser?.id, currentUser?.clerkUserId]);
 
   // ─── TYPING INDICATOR (Pure local input, throttled socket emit, zero reconnect) ──
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {

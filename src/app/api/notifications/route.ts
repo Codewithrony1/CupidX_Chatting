@@ -33,7 +33,7 @@ export async function PUT(req: Request) {
     const { notificationId } = body;
 
     if (notificationId) {
-      await prisma.notification.update({
+      await prisma.notification.updateMany({
         where: {
           id: notificationId,
           userId: user.id

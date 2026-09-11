@@ -47,14 +47,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const { displayName, dob, gender, avatarEmoji, clerkUserId } = body;
 
-    let user = await getCurrentUser(req);
-    if (!user) {
-      const fallbackClerkId = clerkUserId || req.headers.get('x-clerk-user-id');
-      if (fallbackClerkId) {
-        user = await getOrCreateUserFromClerk(fallbackClerkId);
-      }
-    }
-
+    const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }

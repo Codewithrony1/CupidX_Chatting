@@ -43,11 +43,23 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     const initSocket = async () => {
       try {
         let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-        if (!socketUrl && typeof window !== 'undefined') {
-          socketUrl = `${window.location.protocol}//${window.location.hostname}:3001`;
-        }
+        const isClientInBrowser = typeof window !== 'undefined';
+        const isLocalHost = isClientInBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
         if (!socketUrl) {
-          socketUrl = 'http://localhost:3001';
+          if (isLocalHost) {
+            socketUrl = 'http://localhost:3001';
+          }
+        }
+
+        // If on a public domain (e.g. cupidxchat.in) and socketUrl is localhost, avoid connecting to the client device's localhost
+        if (isClientInBrowser && !isLocalHost && socketUrl && (socketUrl.includes('localhost') || socketUrl.includes('127.0.0.1'))) {
+          console.log('[SocketContext] Public domain detected without remote socket server; operating in resilient dual-transport mode.');
+          return;
+        }
+
+        if (!socketUrl) {
+          return;
         }
 
         const res = await fetch('/api/auth/token');

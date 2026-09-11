@@ -179,12 +179,14 @@ export async function POST(req: Request) {
         userId: { notIn: excludeUserIds },
         updatedAt: { gte: STALE_THRESHOLD },
       },
-      orderBy: [{ joinedAt: 'asc' }],
-      take: 10,
+      take: 20,
     });
 
-    // 5. Try to atomically match with the earliest waiting candidate
-    for (const candidate of candidates) {
+    // Requirement 4: Randomly shuffle eligible candidates for unpredictable, genuine random matching
+    const candidatesToEvaluate = [...candidates].sort(() => Math.random() - 0.5);
+
+    // 5. Try to atomically match with an eligible candidate
+    for (const candidate of candidatesToEvaluate) {
       const newChatSessionId = crypto.randomUUID();
 
       try {

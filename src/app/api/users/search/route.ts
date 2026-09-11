@@ -28,14 +28,18 @@ export async function GET(req: Request) {
       where: {
         id: { not: user.id },
         isSuspended: false,
-        username: {
-          contains: cleanQuery,
-        },
+        OR: [
+          { username: { contains: cleanQuery } },
+          { vipUsername: { contains: cleanQuery } },
+          { displayName: { contains: cleanQuery } },
+          { fullName: { contains: cleanQuery } },
+        ],
       },
       take: 10,
       select: {
         id: true,
         username: true,
+        vipUsername: true,
         fullName: true,
         displayName: true,
         profile: {
@@ -49,7 +53,7 @@ export async function GET(req: Request) {
 
     const formatted = matchingUsers.map((u) => ({
       id: u.id,
-      username: u.username,
+      username: u.vipUsername || u.username,
       displayName: u.displayName || u.fullName,
       avatarUrl: u.profile?.avatarUrl || '/default-avatar.png',
       isOnline: u.profile?.isOnline || false,

@@ -4,21 +4,12 @@ import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
 import { isVipAvatar } from '@/lib/avatars';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { validateDob } from '@/lib/validation/dob';
+import { saveBase64Image } from '@/lib/safeImageUpload';
 import fs from 'fs/promises';
 import path from 'path';
 
 export async function GET(req: Request) {
-  let user = await getCurrentUser(req);
-  if (!user) {
-    const headerClerkId = req.headers.get('x-clerk-user-id');
-    const { searchParams } = new URL(req.url);
-    const queryClerkId = searchParams.get('clerkUserId');
-    const fallbackClerkId = headerClerkId || queryClerkId;
-    if (fallbackClerkId) {
-      user = await getOrCreateUserFromClerk(fallbackClerkId);
-    }
-  }
-
+  const user = await getCurrentUser(req);
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -64,15 +55,7 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
 
-    let user = await getCurrentUser(req);
-    if (!user) {
-      const headerClerkId = req.headers.get('x-clerk-user-id');
-      const fallbackClerkId = body?.clerkUserId || headerClerkId;
-      if (fallbackClerkId) {
-        user = await getOrCreateUserFromClerk(fallbackClerkId);
-      }
-    }
-
+    const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -280,18 +263,14 @@ export async function PUT(req: Request) {
     let avatarUrl = avatarUrlPreset !== undefined ? avatarUrlPreset : undefined;
 
     if (isUpdatingVIPAvatarImage && isVIP && avatarData) {
-      const matches = avatarData.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
-        const base64Data = matches[2];
-        const buffer = Buffer.from(base64Data, 'base64');
-        const filename = `${user.username}-${Date.now()}.${ext}`;
-
-        const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-        await fs.mkdir(uploadDir, { recursive: true });
-
-        await fs.writeFile(path.join(uploadDir, filename), buffer);
-        avatarUrl = `/uploads/${filename}`;
+      const uploadRes = await saveBase64Image(avatarData, 'uploads', user.username);
+      if (uploadRes.success && uploadRes.url) {
+        avatarUrl = uploadRes.url;
+      } else {
+        return NextResponse.json(
+          { error: uploadRes.error || 'Failed to process avatar image.' },
+          { status: uploadRes.statusCode || 400 }
+        );
       }
     }
 

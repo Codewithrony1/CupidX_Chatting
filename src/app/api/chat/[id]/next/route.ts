@@ -32,7 +32,7 @@ export async function POST(
       return NextResponse.json({ message: 'Session already ended' }, { status: 200 });
     }
 
-    // Atomically transition match to ENDED so partner is guaranteed to observe termination
+    // Atomically transition match to ENDED and delete ephemeral messages (Requirement 3 & 10)
     await prisma.$transaction([
       prisma.chatSession.update({
         where: { id: chatSessionId },
@@ -45,17 +45,11 @@ export async function POST(
         where: { OR: [{ userId: session.userAId }, { userId: session.userBId }] },
         data: { status: 'CANCELLED', chatSessionId: null, partnerUserId: null },
       }),
+      prisma.message.deleteMany({
+        where: { chatSessionId },
+      }),
     ]);
 
-    // Prune stale ended chat sessions older than 45 seconds to keep db clean
-    try {
-      await prisma.chatSession.deleteMany({
-        where: {
-          status: 'ENDED',
-          endedAt: { lt: new Date(Date.now() - 45 * 1000) },
-        },
-      });
-    } catch (e) {}
 
     // Also sync to Firestore so partner client receives 'ended' status immediately
     try {

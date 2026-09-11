@@ -1,11 +1,29 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function GET(req: Request) {
   try {
+    // 1. Authorize: Require valid CRON_SECRET or Admin access
+    const authHeader = req.headers.get('authorization');
+    const url = new URL(req.url);
+    const querySecret = url.searchParams.get('secret');
+    const cronSecret = process.env.CRON_SECRET || 'cupidx_cron_internal_secret_key';
+
+    const hasValidSecret =
+      (authHeader && authHeader === `Bearer ${cronSecret}`) ||
+      (querySecret && querySecret === cronSecret);
+
+    if (!hasValidSecret) {
+      const { authorized } = await verifyAdminAccess(req);
+      if (!authorized) {
+        return NextResponse.json({ error: 'Unauthorized cron access' }, { status: 401 });
+      }
+    }
+
     const now = new Date();
 
-    // 1. Find users whose VIP subscription has expired
+    // 2. Find users whose VIP subscription has expired
     const expiredUsers = await prisma.user.findMany({
       where: {
         is_vip: true,
@@ -26,7 +44,7 @@ export async function GET(req: Request) {
 
     const expiredUserIds = expiredUsers.map((u) => u.id);
 
-    // 2. Set is_vip = false, membershipTier = 'FREE'
+    // 3. Set is_vip = false, membershipTier = 'FREE'
     await prisma.user.updateMany({
       where: {
         id: { in: expiredUserIds },
@@ -37,7 +55,7 @@ export async function GET(req: Request) {
       },
     });
 
-    // 3. Deactivate Subscriptions
+    // 4. Deactivate Subscriptions
     await prisma.subscription.updateMany({
       where: {
         userId: { in: expiredUserIds },

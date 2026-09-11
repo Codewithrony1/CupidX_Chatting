@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import fs from 'fs/promises';
-import path from 'path';
+import { saveBase64Image } from '@/lib/safeImageUpload';
 
 export async function POST(req: Request) {
   try {
@@ -74,22 +73,14 @@ export async function POST(req: Request) {
     // Save screenshot proof if provided (5MB size cap check handled on client & server)
     let proofUrl: string | null = null;
     if (screenshotData && screenshotData.startsWith('data:image/')) {
-      const matches = screenshotData.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
-        const base64Data = matches[2];
-        const buffer = Buffer.from(base64Data, 'base64');
-
-        if (buffer.length > 5 * 1024 * 1024) {
-          return NextResponse.json({ error: 'Screenshot file size exceeds 5MB limit.' }, { status: 400 });
-        }
-
-        const filename = `vip-${method}-${user.username}-${Date.now()}.${ext}`;
-        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'vip-proofs');
-        await fs.mkdir(uploadDir, { recursive: true });
-
-        await fs.writeFile(path.join(uploadDir, filename), buffer);
-        proofUrl = `/uploads/vip-proofs/${filename}`;
+      const uploadRes = await saveBase64Image(screenshotData, 'uploads/vip-proofs', `vip_${method}_${user.username}`);
+      if (uploadRes.success && uploadRes.url) {
+        proofUrl = uploadRes.url;
+      } else {
+        return NextResponse.json(
+          { error: uploadRes.error || 'Failed to process screenshot proof.' },
+          { status: uploadRes.statusCode || 400 }
+        );
       }
     }
 

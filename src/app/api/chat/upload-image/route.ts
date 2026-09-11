@@ -9,14 +9,8 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user via Clerk with header fallback
-    let user = await getCurrentUser(req);
-    if (!user) {
-      const headerClerkId = req.headers.get('x-clerk-user-id');
-      if (headerClerkId) {
-        user = await getOrCreateUserFromClerk(headerClerkId);
-      }
-    }
+    // 1. Authenticate user strictly
+    const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized. Please log in first.' },

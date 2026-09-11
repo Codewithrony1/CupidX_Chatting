@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from './prisma';
-import { auth as clerkAuth, currentUser as clerkCurrentUser, clerkClient } from '@clerk/nextjs/server';
+import { auth as clerkAuth, currentUser as clerkCurrentUser, clerkClient, verifyToken as clerkVerifyToken } from '@clerk/nextjs/server';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cupidx_fallback_jwt_secret';
 
@@ -301,30 +301,22 @@ export async function getCurrentUser(req?: Request) {
   try {
     let resolvedClerkId: string | null = null;
 
-    // 1. Check Clerk session first (Next.js server auth)
+    // 1. Authoritative Clerk session check (via clerkMiddleware and App Router auth)
     try {
       const clerkData = await clerkAuth();
       if (clerkData && clerkData.userId) {
         resolvedClerkId = clerkData.userId;
       }
     } catch (clerkErr) {
-      // Ignore and proceed to headers/cookies
+      // clerkAuth may throw outside Next.js request lifecycle
     }
 
-    // 2. Check x-clerk-user-id Header (Cross-domain & client sync)
-    if (!resolvedClerkId && req) {
-      const headerClerkId = req.headers.get('x-clerk-user-id');
-      if (headerClerkId && headerClerkId.trim()) {
-        resolvedClerkId = headerClerkId.trim();
-      }
-    }
-
-    // 3. Check Authorization header (Bearer token)
+    // 2. Cryptographically verify Bearer token from Authorization header
     if (!resolvedClerkId && req) {
       const authHeader = req.headers.get('authorization');
       if (authHeader && authHeader.startsWith('Bearer ')) {
         const rawToken = authHeader.slice(7).trim();
-        // A. Check local JWT
+        // A. Check local signed JWT
         const localPayload = verifyToken(rawToken);
         if (localPayload?.userId) {
           const user = await prisma.user.findUnique({
@@ -333,31 +325,42 @@ export async function getCurrentUser(req?: Request) {
           });
           if (user && !user.isSuspended) return user;
         }
-        // B. Check Clerk JWT
-        try {
-          const decoded = jwt.decode(rawToken) as any;
-          if (decoded?.sub) {
-            resolvedClerkId = decoded.sub;
+
+        // B. Cryptographically verify Clerk JWT
+        if (process.env.CLERK_SECRET_KEY) {
+          try {
+            const verifiedPayload: any = await clerkVerifyToken(rawToken, {
+              secretKey: process.env.CLERK_SECRET_KEY,
+            });
+            if (verifiedPayload?.sub) {
+              resolvedClerkId = verifiedPayload.sub;
+            }
+          } catch (e) {
+            // Invalid or expired token
           }
-        } catch (e) {}
+        }
       }
     }
 
-    // 4. Check Clerk __session cookie
+    // 3. Cryptographically verify Clerk __session cookie
     if (!resolvedClerkId && req) {
       const cookieHeader = req.headers.get('cookie') || '';
       const sessionMatch = cookieHeader.match(/(?:^|;\s*)__session=([^;]*)/);
-      if (sessionMatch) {
+      if (sessionMatch && sessionMatch[1] && process.env.CLERK_SECRET_KEY) {
         try {
-          const decodedSession = jwt.decode(sessionMatch[1]) as any;
-          if (decodedSession?.sub) {
-            resolvedClerkId = decodedSession.sub;
+          const verifiedPayload: any = await clerkVerifyToken(sessionMatch[1], {
+            secretKey: process.env.CLERK_SECRET_KEY,
+          });
+          if (verifiedPayload?.sub) {
+            resolvedClerkId = verifiedPayload.sub;
           }
-        } catch (e) {}
+        } catch (e) {
+          // Invalid or expired cookie
+        }
       }
     }
 
-    // 5. If Clerk user ID was resolved, get or provision user
+    // 4. If Clerk user ID was cryptographically verified, resolve or provision user
     if (resolvedClerkId) {
       const user = await getOrCreateUserFromClerk(resolvedClerkId);
       if (user && !user.isSuspended) {
@@ -374,7 +377,7 @@ export async function getCurrentUser(req?: Request) {
       }
     }
 
-    // 6. Check local JWT cookie token
+    // 5. Check local signed JWT cookie token
     if (req) {
       const cookieHeader = req.headers.get('cookie') || '';
       const cookieMatch = cookieHeader.match(/(?:^|;\s*)token=([^;]*)/);

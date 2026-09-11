@@ -16,8 +16,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Username is required' }, { status: 400 });
     }
 
-    const targetUser = await prisma.user.findUnique({
-      where: { username },
+    const targetUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ username }, { vipUsername: username }],
+      },
       include: {
         profile: true,
         subscription: true,
@@ -34,7 +36,8 @@ export async function GET(req: Request) {
     return NextResponse.json({
       user: {
         id: targetUser.id,
-        username: targetUser.username,
+        username: targetUser.vipUsername || targetUser.username,
+        vipUsername: targetUser.vipUsername || null,
         displayName: targetUser.displayName || targetUser.fullName,
         isVIP,
         profile: prof
