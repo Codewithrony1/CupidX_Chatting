@@ -2,14 +2,21 @@ import { getCurrentUser } from '@/lib/auth';
 
 export async function verifyAdminAccess(req: Request) {
   const user = await getCurrentUser(req);
-  const isLocalAdminMode = process.env.ADMIN_MODE === 'true' || process.env.NODE_ENV !== 'production';
-  const isAdmin = isLocalAdminMode || user?.role === 'ADMIN';
+  if (!user || user.role !== 'ADMIN') {
+    return {
+      authorized: false,
+      user: null,
+      adminId: null,
+      adminClerkUserId: null,
+      adminFirebaseUid: null,
+    };
+  }
 
   return {
-    authorized: isAdmin,
+    authorized: true,
     user,
-    adminId: user?.id || 'admin_local',
-    adminClerkUserId: user?.clerkUserId || null,
-    adminFirebaseUid: user?.clerkUserId || user?.id || null,
+    adminId: user.id,
+    adminClerkUserId: user.clerkUserId || null,
+    adminFirebaseUid: user.clerkUserId || user.id,
   };
 }

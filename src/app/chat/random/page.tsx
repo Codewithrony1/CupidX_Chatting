@@ -6,6 +6,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { useAuth as useClerkAuth } from '@clerk/nextjs';
 import { useSocket } from '@/context/SocketContext';
 import AppShell from '@/components/AppShell';
 import nextDynamic from 'next/dynamic';
@@ -82,6 +83,7 @@ interface RandomMessage {
 export default function KnotChatRandomPage() {
   const router = useRouter();
   const { user, loading, refreshUser } = useAuth();
+  const { getToken } = useClerkAuth();
   const { socket, isConnected: socketConnected } = useSocket();
 
   // Effective authenticated user
@@ -176,6 +178,18 @@ export default function KnotChatRandomPage() {
     };
   }, [socket]);
 
+  // Structured diagnostic: [RANDOM_CHAT][SOCKET_CONNECT]
+  useEffect(() => {
+    if (socketConnected && socket) {
+      console.log('[RANDOM_CHAT][SOCKET_CONNECT]', {
+        state: 'connected',
+        socketId: socket.id,
+        userId: currentUser?.id || currentUser?.clerkUserId || currentUidRef.current,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }, [socketConnected, socket, currentUser?.id, currentUser?.clerkUserId]);
+
   // ─── Cleanup helpers ──────────────────────────────────────────────────────
   const stopAllTimers = () => {
     if (matchingIntervalRef.current) {
@@ -201,26 +215,33 @@ export default function KnotChatRandomPage() {
     messagesListenerRef.current = null;
   };
 
-  // ─── Cleanup on unmount ───────────────────────────────────────────────────
+  // ─── Cleanup on unmount & window unload ────────────────────────────────────
   useEffect(() => {
+    const handleBeforeUnload = () => {
+      const currentMid = activeMatchIdRef.current;
+      if (currentMid) {
+        console.log('[RANDOM_CHAT][DISCONNECT]', {
+          state: 'disconnected',
+          matchId: currentMid,
+          userId: currentUidRef.current,
+          reason: 'page_unload',
+          timestamp: new Date().toISOString(),
+        });
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          navigator.sendBeacon(`/api/chat/${currentMid}/end`);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
       stopAllTimers();
       stopAllListeners();
-      const currentMid = activeMatchIdRef.current;
       const effectiveClerkId = currentUidRef.current;
-      if (currentMid) {
-        try {
-          if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-            navigator.sendBeacon(`/api/chat/${currentMid}/end`);
-          } else {
-            fetch(`/api/chat/${currentMid}/end`, {
-              method: 'POST',
-              headers: effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {},
-              keepalive: true,
-            }).catch(() => {});
-          }
-        } catch (e) {}
-      }
       if (effectiveClerkId) {
         leaveQueue(effectiveClerkId).catch(() => {});
       }
@@ -229,7 +250,10 @@ export default function KnotChatRandomPage() {
 
   // ─── Build partner object ─────────────────────────────────────────────────
   function buildPartner(matchDoc: MatchDoc, myUid: string): RandomPartner {
-    const isUser1 = matchDoc.user1Uid === myUid || (matchDoc as any).user1ClerkId === myUid;
+    const isUser1 =
+      matchDoc.user1Uid === myUid ||
+      (matchDoc as any).user1ClerkId === myUid ||
+      (currentUser && currentUser.id === matchDoc.user1Uid);
     return {
       id: isUser1 ? matchDoc.user2Uid : matchDoc.user1Uid,
       username: isUser1 ? (matchDoc.user2DisplayName || 'Stranger') : (matchDoc.user1DisplayName || 'Stranger'),
@@ -253,13 +277,18 @@ export default function KnotChatRandomPage() {
 
     try {
       const effectiveClerkId = currentUidRef.current || '';
+      const token = await getToken().catch(() => null);
       const headers: Record<string, string> = {};
       if (effectiveClerkId) {
         headers['x-clerk-user-id'] = effectiveClerkId;
       }
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
       const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(mid)}`, {
         headers,
+        credentials: 'include',
       });
 
       // Discard stale out-of-order responses or if active match changed
@@ -273,9 +302,15 @@ export default function KnotChatRandomPage() {
           const data = await res.json().catch(() => ({}));
           consecutiveSyncErrorsRef.current += 1;
           // Only terminate if server explicitly confirmed sessionStatus is ENDED,
-          // or if 3 consecutive 404s occur (guards against single container cold-start misses)
-          if (data.sessionStatus === 'ENDED' || consecutiveSyncErrorsRef.current >= 3) {
-            console.log('[RANDOM_CHAT] Terminating active match - server confirmed ENDED or 3 consecutive 404s:', mid);
+          // or if 6 consecutive 404s occur (guards against single container cold-start misses)
+          if (data.sessionStatus === 'ENDED' || consecutiveSyncErrorsRef.current >= 6) {
+            console.log('[RANDOM_CHAT][DISCONNECT]', {
+              state: 'disconnected',
+              matchId: mid,
+              userId: currentUidRef.current,
+              reason: data.sessionStatus === 'ENDED' ? 'server_confirmed_ended' : 'sync_consecutive_misses_exceeded',
+              timestamp: new Date().toISOString(),
+            });
             stopAllTimers();
             stopAllListeners();
             activeMatchIdRef.current = null;
@@ -288,7 +323,7 @@ export default function KnotChatRandomPage() {
           console.warn('[RANDOM_CHAT_SYNC] 403 Forbidden - verify participant authorization for session:', mid);
         }
         consecutiveSyncErrorsRef.current += 1;
-        if (consecutiveSyncErrorsRef.current >= 4) {
+        if (consecutiveSyncErrorsRef.current >= 6) {
           setReconnecting(true);
         }
         return;
@@ -301,6 +336,13 @@ export default function KnotChatRandomPage() {
 
       // Check if session has ended on server
       if (data.sessionStatus === 'ENDED') {
+        console.log('[RANDOM_CHAT][DISCONNECT]', {
+          state: 'disconnected',
+          matchId: mid,
+          userId: currentUidRef.current,
+          reason: 'partner_or_server_ended_session',
+          timestamp: new Date().toISOString(),
+        });
         stopAllTimers();
         stopAllListeners();
         activeMatchIdRef.current = null;
@@ -363,7 +405,14 @@ export default function KnotChatRandomPage() {
           return combined;
         });
       }
-    } catch (err) {
+    } catch (err: any) {
+      console.error('[RANDOM_CHAT][ERROR]', {
+        state: 'sync_error',
+        matchId: mid,
+        userId: currentUidRef.current,
+        error: err?.message || String(err),
+        timestamp: new Date().toISOString(),
+      });
       consecutiveSyncErrorsRef.current += 1;
       if (consecutiveSyncErrorsRef.current >= 4) {
         setReconnecting(true);
@@ -383,7 +432,13 @@ export default function KnotChatRandomPage() {
     }
     setMatchStatus('connected');
     setReconnecting(false);
-    console.log('[RANDOM_CHAT] STATE: CONNECTED | EVENT: MATCH_ATTACHED | MATCH ID:', mid, '| PARTNER:', partnerData?.displayName || 'Stranger');
+    console.log('[RANDOM_CHAT][MATCH]', {
+      state: 'matched',
+      matchId: mid,
+      userId: currentUidRef.current,
+      partnerId: partnerData?.id,
+      timestamp: new Date().toISOString(),
+    });
 
     stopAllTimers();
     if (queueListenerRef.current) {
@@ -526,6 +581,10 @@ export default function KnotChatRandomPage() {
             });
             if (statusRes.ok) {
               const statusData = await statusRes.json();
+              if (activeMatchIdRef.current) {
+                if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
+                return;
+              }
               if (statusData.matched && statusData.chatSessionId) {
                 if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
                 attachActiveMatch(statusData.chatSessionId, statusData.partner);
@@ -536,7 +595,13 @@ export default function KnotChatRandomPage() {
           }
         }, 1000);
       } catch (err: any) {
-        console.error('Matchmaking error:', err);
+        console.error('[RANDOM_CHAT][ERROR]', {
+          state: 'matchmaking_error',
+          matchId: null,
+          userId: currentUidRef.current || currentUser?.id,
+          error: err?.message || String(err),
+          timestamp: new Date().toISOString(),
+        });
         setSearchError(err?.message || 'Could not connect to matchmaking queue.');
         setMatchStatus('idle');
       }
@@ -633,6 +698,13 @@ export default function KnotChatRandomPage() {
     setMessages([]);
 
     if (currentMid) {
+      console.log('[RANDOM_CHAT][DISCONNECT]', {
+        state: 'disconnected',
+        matchId: currentMid,
+        userId: currentUidRef.current,
+        reason: 'user_skipped_to_next',
+        timestamp: new Date().toISOString(),
+      });
       const effectiveClerkId = currentUidRef.current || '';
       fetch(`/api/chat/${currentMid}/next`, {
         method: 'POST',
@@ -655,6 +727,13 @@ export default function KnotChatRandomPage() {
     activeMatchIdRef.current = null;
 
     if (currentMid) {
+      console.log('[RANDOM_CHAT][DISCONNECT]', {
+        state: 'disconnected',
+        matchId: currentMid,
+        userId: currentUidRef.current,
+        reason: 'user_ended_chat',
+        timestamp: new Date().toISOString(),
+      });
       const effectiveClerkId = currentUidRef.current || '';
       fetch(`/api/chat/${currentMid}/end`, {
         method: 'POST',
@@ -715,6 +794,7 @@ export default function KnotChatRandomPage() {
     isCurrentlyTypingRef.current = false;
 
     const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+    const token = await getToken().catch(() => null);
 
     try {
       if (imageToSend) {
@@ -722,12 +802,15 @@ export default function KnotChatRandomPage() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
           },
+          credentials: 'include',
           body: JSON.stringify({
             matchId: activeMid,
             content: textToSend,
             imageData: imageToSend,
+            clerkUserId: effectiveClerkId,
           }),
         });
 
@@ -759,12 +842,15 @@ export default function KnotChatRandomPage() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
           },
+          credentials: 'include',
           body: JSON.stringify({
             chatSessionId: activeMid,
             content: textToSend,
             clientMessageId: tempId,
+            clerkUserId: effectiveClerkId,
           }),
         });
 
@@ -1299,7 +1385,10 @@ export default function KnotChatRandomPage() {
                 value={inputText}
                 onChange={handleInputChange}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) handleSendMessage();
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
                 }}
                 className="flex-1 px-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
               />

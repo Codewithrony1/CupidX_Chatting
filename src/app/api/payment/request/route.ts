@@ -182,7 +182,13 @@ export async function POST(req: Request) {
       message: 'Payment proof submitted. Your payment is now under review by administration.',
       request: paymentRequest,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return NextResponse.json(
+        { error: 'This transaction reference / UTR has already been submitted.' },
+        { status: 409 }
+      );
+    }
     console.error('Error submitting payment proof:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

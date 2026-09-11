@@ -221,8 +221,14 @@ async function processMatchQueue() {
     const socketA = io.sockets.sockets.get(candidateA.socketId);
     const socketB = io.sockets.sockets.get(candidateB.socketId);
 
-    if (socketA) socketA.join(roomId);
-    if (socketB) socketB.join(roomId);
+    if (socketA) {
+      socketA.join(roomId);
+      socketA.currentRoomId = roomId;
+    }
+    if (socketB) {
+      socketB.join(roomId);
+      socketB.currentRoomId = roomId;
+    }
 
     // Notify User A
     io.to(candidateA.socketId).emit('random_match_found', {
@@ -268,8 +274,8 @@ io.on('connection', async (socket) => {
 
   // 1. Join Random Chat Queue with smart preferences
   socket.on('join_random_queue', async (preferences = {}) => {
-    // Remove if already in queue
-    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id);
+    // Remove if already in queue (strictly ONE USER = ONE ACTIVE QUEUE ENTRY)
+    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id && c.userId !== userId);
 
     const userDb = await prisma.user.findUnique({
       where: { id: userId },
@@ -304,7 +310,7 @@ io.on('connection', async (socket) => {
 
   // 2. Leave Queue
   socket.on('leave_random_queue', () => {
-    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id);
+    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id && c.userId !== userId);
     socket.emit('queue_left');
   });
 
@@ -348,7 +354,17 @@ io.on('connection', async (socket) => {
   socket.on('next_partner', async (preferences = {}) => {
     const partnerSocketId = activeRandomChats.get(socket.id);
 
+    if (socket.currentRoomId) {
+      socket.leave(socket.currentRoomId);
+      socket.currentRoomId = null;
+    }
+
     if (partnerSocketId) {
+      const partnerSocket = io.sockets.sockets.get(partnerSocketId);
+      if (partnerSocket && partnerSocket.currentRoomId) {
+        partnerSocket.leave(partnerSocket.currentRoomId);
+        partnerSocket.currentRoomId = null;
+      }
       // Notify partner that they were skipped
       io.to(partnerSocketId).emit('partner_left', { reason: 'partner_skipped' });
       activeRandomChats.delete(partnerSocketId);
@@ -356,7 +372,7 @@ io.on('connection', async (socket) => {
     activeRandomChats.delete(socket.id);
 
     // Automatically join queue again for immediate next match
-    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id);
+    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id && c.userId !== userId);
 
     const userDb = await prisma.user.findUnique({
       where: { id: userId },
@@ -387,12 +403,23 @@ io.on('connection', async (socket) => {
   // 6. End Random Chat
   socket.on('end_random_chat', () => {
     const partnerSocketId = activeRandomChats.get(socket.id);
+
+    if (socket.currentRoomId) {
+      socket.leave(socket.currentRoomId);
+      socket.currentRoomId = null;
+    }
+
     if (partnerSocketId) {
+      const partnerSocket = io.sockets.sockets.get(partnerSocketId);
+      if (partnerSocket && partnerSocket.currentRoomId) {
+        partnerSocket.leave(partnerSocket.currentRoomId);
+        partnerSocket.currentRoomId = null;
+      }
       io.to(partnerSocketId).emit('partner_left', { reason: 'chat_ended' });
       activeRandomChats.delete(partnerSocketId);
     }
     activeRandomChats.delete(socket.id);
-    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id);
+    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id && c.userId !== userId);
     socket.emit('chat_ended_confirm');
   });
 
@@ -400,12 +427,22 @@ io.on('connection', async (socket) => {
   socket.on('disconnect', async () => {
     userSockets.delete(userId);
 
+    if (socket.currentRoomId) {
+      socket.leave(socket.currentRoomId);
+      socket.currentRoomId = null;
+    }
+
     // Remove from random queue
-    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id);
+    randomMatchQueue = randomMatchQueue.filter((c) => c.socketId !== socket.id && c.userId !== userId);
 
     // Notify active partner if disconnected during chat
     const partnerSocketId = activeRandomChats.get(socket.id);
     if (partnerSocketId) {
+      const partnerSocket = io.sockets.sockets.get(partnerSocketId);
+      if (partnerSocket && partnerSocket.currentRoomId) {
+        partnerSocket.leave(partnerSocket.currentRoomId);
+        partnerSocket.currentRoomId = null;
+      }
       io.to(partnerSocketId).emit('partner_left', { reason: 'disconnected' });
       activeRandomChats.delete(partnerSocketId);
     }

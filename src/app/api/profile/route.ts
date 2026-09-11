@@ -1,13 +1,24 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
 import { isVipAvatar } from '@/lib/avatars';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import { validateDob } from '@/lib/validation/dob';
 import fs from 'fs/promises';
 import path from 'path';
 
 export async function GET(req: Request) {
-  const user = await getCurrentUser(req);
+  let user = await getCurrentUser(req);
+  if (!user) {
+    const headerClerkId = req.headers.get('x-clerk-user-id');
+    const { searchParams } = new URL(req.url);
+    const queryClerkId = searchParams.get('clerkUserId');
+    const fallbackClerkId = headerClerkId || queryClerkId;
+    if (fallbackClerkId) {
+      user = await getOrCreateUserFromClerk(fallbackClerkId);
+    }
+  }
+
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -51,14 +62,22 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const user = await getCurrentUser(req);
+    const body = await req.json().catch(() => ({}));
+
+    let user = await getCurrentUser(req);
+    if (!user) {
+      const headerClerkId = req.headers.get('x-clerk-user-id');
+      const fallbackClerkId = body?.clerkUserId || headerClerkId;
+      if (fallbackClerkId) {
+        user = await getOrCreateUserFromClerk(fallbackClerkId);
+      }
+    }
+
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
-
-    const body = await req.json().catch(() => ({}));
     const {
       displayName,
       bio,
@@ -108,17 +127,30 @@ export async function PUT(req: Request) {
     const currentName = user.displayName || user.fullName || user.username;
 
     // A. Date of Birth: PERMANENTLY LOCKED for BOTH Free and VIP once set
-    if (inputDob && existingDob) {
-      const newDobDate = new Date(inputDob).toISOString().slice(0, 10);
-      const oldDobDate = new Date(existingDob).toISOString().slice(0, 10);
-      if (newDobDate !== oldDobDate) {
-        return NextResponse.json(
-          {
-            error: 'Date of birth is permanently locked to preserve age verification and safety standards.',
-            isLocked: true,
-          },
-          { status: 403 }
-        );
+    let validatedNewDob: { dob: Date; age: number } | null = null;
+    if (inputDob) {
+      if (existingDob) {
+        const newDobValidation = validateDob(inputDob);
+        const newDobDate = newDobValidation.dobString || new Date(inputDob).toISOString().slice(0, 10);
+        const oldDobDate = new Date(existingDob).toISOString().slice(0, 10);
+        if (newDobDate !== oldDobDate) {
+          return NextResponse.json(
+            {
+              error: 'Date of birth is permanently locked to preserve age verification and safety standards.',
+              isLocked: true,
+            },
+            { status: 403 }
+          );
+        }
+      } else {
+        const dobValidation = validateDob(inputDob);
+        if (!dobValidation.valid) {
+          return NextResponse.json(
+            { error: dobValidation.error || 'Please enter a valid date of birth.' },
+            { status: 400 }
+          );
+        }
+        validatedNewDob = { dob: dobValidation.dob!, age: dobValidation.age! };
       }
     }
 
@@ -286,10 +318,9 @@ export async function PUT(req: Request) {
         userUpdateData.gender = cleanGender;
       }
     }
-    if (parsedDob && !isNaN(parsedDob.getTime())) {
-      if (isVIP || !existingDob) {
-        userUpdateData.dob = parsedDob;
-      }
+    if (validatedNewDob && !existingDob) {
+      userUpdateData.dob = validatedNewDob.dob;
+      userUpdateData.genderDobLocked = true;
     }
 
     if (Object.keys(userUpdateData).length > 0) {
@@ -304,7 +335,8 @@ export async function PUT(req: Request) {
       bio: cleanBio !== undefined ? cleanBio : undefined,
       showBio: showBio !== undefined ? Boolean(showBio) : undefined,
       gender: cleanGender !== undefined ? (isVIP || !existingGender || existingGender === 'unspecified' ? cleanGender : undefined) : undefined,
-      dob: parsedDob && !isNaN(parsedDob.getTime()) ? (isVIP || !existingDob ? parsedDob : undefined) : undefined,
+      dob: validatedNewDob && !existingDob ? validatedNewDob.dob : undefined,
+      age: validatedNewDob && !existingDob ? validatedNewDob.age : undefined,
       preferredGender: preferredGender !== undefined ? preferredGender : undefined,
       personalityPreferences: isVIP && personalityPreferences !== undefined ? personalityPreferences : undefined,
       mood: isVIP && mood !== undefined ? mood : undefined,

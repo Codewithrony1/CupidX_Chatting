@@ -257,7 +257,7 @@ model ManualUpiPayment {
   merchantName     String    @default("Lexino Enterprises")
   amount           Float     @default(99.0)
   planName         String    @default("VIP Membership")
-  utrNumber        String?
+  utrNumber        String?   @unique
   screenshotUrl    String?
   status           String    @default("UNDER_REVIEW") // PENDING_PAYMENT, UNDER_REVIEW, PAID, REJECTED
   rejectionReason  String?
@@ -275,7 +275,7 @@ model VipRequest {
   method          String    // "qr" | "btc"
   proofUrl        String?   // Screenshot URL for QR
   txHash          String?   // Bitcoin transaction hash
-  utrNumber       String?   // UPI reference / UTR
+  utrNumber       String?   @unique // UPI reference / UTR
   amount          Float     @default(99.0)
   status          String    @default("pending") // "pending" | "approved" | "rejected"
   rejectionReason String?
@@ -323,7 +323,7 @@ model PaymentRequest {
   region          String    @default("india") // "india" | "international"
   amount          Float     @default(29.0)
   currency        String    @default("INR") // "INR" | "USD"
-  paymentId       String?   // UTR / Payment ID / Transaction ID
+  paymentId       String?   @unique // UTR / Payment ID / Transaction ID
   screenshotUrl   String?   // Secure screenshot storage path
   screenshotKey   String?   // Private storage key
   status          String    @default("UNDER_REVIEW") // "PENDING", "UNDER_REVIEW", "APPROVED", "REJECTED"

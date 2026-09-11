@@ -111,7 +111,13 @@ export async function POST(req: Request) {
       message: 'VIP Payment request submitted successfully. Usually reviewed within 24 hours.',
       request: vipRequest,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return NextResponse.json(
+        { error: 'This payment reference has already been submitted for verification.' },
+        { status: 409 }
+      );
+    }
     console.error('Error submitting VIP request:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

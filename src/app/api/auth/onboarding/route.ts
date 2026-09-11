@@ -40,38 +40,7 @@ export async function GET(req: Request) {
 }
 
 import { getAdminDb } from '@/lib/firebaseAdmin';
-
-function parseFlexibleDob(input: string | Date | undefined | null): Date | null {
-  if (!input) return null;
-  if (input instanceof Date) return isNaN(input.getTime()) ? null : input;
-
-  const str = String(input).trim();
-  // 1. Try standard ISO format (YYYY-MM-DD)
-  let d = new Date(str);
-  if (!isNaN(d.getTime())) return d;
-
-  // 2. Try DD-MM-YYYY or DD/MM/YYYY
-  const matchDmy = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-  if (matchDmy) {
-    const day = parseInt(matchDmy[1], 10);
-    const month = parseInt(matchDmy[2], 10) - 1;
-    const year = parseInt(matchDmy[3], 10);
-    d = new Date(year, month, day);
-    if (!isNaN(d.getTime())) return d;
-  }
-
-  // 3. Try YYYY/MM/DD
-  const matchYmd = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
-  if (matchYmd) {
-    const year = parseInt(matchYmd[1], 10);
-    const month = parseInt(matchYmd[2], 10) - 1;
-    const day = parseInt(matchYmd[3], 10);
-    d = new Date(year, month, day);
-    if (!isNaN(d.getTime())) return d;
-  }
-
-  return null;
-}
+import { validateDob } from '@/lib/validation/dob';
 
 export async function POST(req: Request) {
   try {
@@ -98,33 +67,17 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!dob) {
-      return NextResponse.json({ error: 'Date of birth is required.' }, { status: 400 });
-    }
-
-    const parsedDob = parseFlexibleDob(dob);
-    if (!parsedDob || isNaN(parsedDob.getTime())) {
-      return NextResponse.json({ error: 'Please enter a valid date of birth.' }, { status: 400 });
-    }
-
-    const today = new Date();
-    if (parsedDob > today) {
-      return NextResponse.json({ error: 'Date of birth cannot be in the future.' }, { status: 400 });
-    }
-
-    // Strict server-side age calculation (minimum 18 years old)
-    let calculatedAge = today.getFullYear() - parsedDob.getFullYear();
-    const m = today.getMonth() - parsedDob.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < parsedDob.getDate())) {
-      calculatedAge--;
-    }
-
-    if (calculatedAge < 18) {
+    // Authoritative Server-side DOB & 18+ Age Validation
+    const dobValidation = validateDob(dob);
+    if (!dobValidation.valid) {
       return NextResponse.json(
-        { error: 'You must be at least 18 years old to join CupidX.' },
+        { error: dobValidation.error || 'Please enter a valid date of birth.' },
         { status: 400 }
       );
     }
+
+    const parsedDob = dobValidation.dob!;
+    const calculatedAge = dobValidation.age!;
 
     const validGenders = ['male', 'female', 'other', 'prefer_not_to_say'];
     const cleanGender = gender && validGenders.includes(gender.toString().trim().toLowerCase())

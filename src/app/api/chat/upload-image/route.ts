@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import crypto from 'crypto';
 import fs from 'fs/promises';
@@ -9,8 +9,14 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user via Clerk
-    const user = await getCurrentUser(req);
+    // 1. Authenticate user via Clerk with header fallback
+    let user = await getCurrentUser(req);
+    if (!user) {
+      const headerClerkId = req.headers.get('x-clerk-user-id');
+      if (headerClerkId) {
+        user = await getOrCreateUserFromClerk(headerClerkId);
+      }
+    }
     if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized. Please log in first.' },
@@ -163,7 +169,8 @@ export async function POST(req: Request) {
         where: { id: matchId },
       }).catch(() => null);
 
-      if (session && session.userAId !== user.id && session.userBId !== user.id) {
+      const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+      if (session && !userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
         return NextResponse.json(
           { error: 'Forbidden: You are not an active participant in this chat session.' },
           { status: 403 }

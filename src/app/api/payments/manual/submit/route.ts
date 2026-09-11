@@ -91,7 +91,13 @@ export async function POST(req: Request) {
       message: 'UTR submitted successfully. Your payment is now under review.',
       payment: updatedPayment,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return NextResponse.json(
+        { error: 'This UTR / Reference number has already been submitted for verification.' },
+        { status: 409 }
+      );
+    }
     console.error('Error submitting UTR for manual UPI payment:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

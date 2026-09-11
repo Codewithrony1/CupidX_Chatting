@@ -5,8 +5,9 @@ export const dynamic = 'force-dynamic';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { useUser } from '@clerk/nextjs';
+import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
 import { calculateAge } from '@/lib/firestoreUser';
+import { validateDob, MIN_DOB_STRING, getTodayDateString } from '@/lib/validation/dob';
 import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
@@ -14,6 +15,7 @@ export default function OnboardingPage() {
   const router = useRouter();
   const { user, clerkUser, loading: authLoading, refreshUser } = useAuth();
   const { user: directClerkUser } = useUser();
+  const { getToken } = useClerkAuth();
 
   const [displayName, setDisplayName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -80,27 +82,10 @@ export default function OnboardingPage() {
       return;
     }
 
-    if (!dateOfBirth) {
-      setErrorMsg('Please enter your date of birth.');
-      return;
-    }
-
-    // Validate DOB
-    const birthDate = new Date(dateOfBirth);
-    if (isNaN(birthDate.getTime())) {
-      setErrorMsg('Please enter a valid date of birth.');
-      return;
-    }
-
-    const today = new Date();
-    if (birthDate > today) {
-      setErrorMsg('Date of birth cannot be in the future.');
-      return;
-    }
-
-    const age = calculateAge(dateOfBirth);
-    if (age < 18) {
-      setErrorMsg('You must be at least 18 years old to use CupidX.');
+    // Authoritative Client-side DOB & 18+ Age Validation
+    const dobValidation = validateDob(dateOfBirth);
+    if (!dobValidation.valid) {
+      setErrorMsg(dobValidation.error || 'Please enter a valid date of birth.');
       return;
     }
 
@@ -114,14 +99,17 @@ export default function OnboardingPage() {
 
     try {
       const effectiveClerkId = directClerkUser?.id || clerkUser?.id || user?.clerkUserId || user?.id || user?.uid;
+      const token = await getToken().catch(() => null);
 
       // Direct authoritative API call to complete onboarding and permanently lock identity
       const res = await fetch('/api/auth/onboarding', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
         },
+        credentials: 'include',
         body: JSON.stringify({
           clerkUserId: effectiveClerkId,
           displayName: displayName.trim(),
@@ -206,16 +194,22 @@ export default function OnboardingPage() {
                     Age: {dynamicAge} yrs
                   </span>
                 )}
+                {dynamicAge !== null && dynamicAge > 0 && dynamicAge < 18 && (
+                  <span className="text-[11px] font-extrabold text-rose-400 bg-rose-500/15 px-2 py-0.5 rounded-full border border-rose-500/30">
+                    Age: {dynamicAge} yrs (Under 18)
+                  </span>
+                )}
               </div>
               <input
                 type="date"
                 required
-                max={new Date().toISOString().split('T')[0]}
+                min={MIN_DOB_STRING}
+                max={getTodayDateString()}
                 value={dateOfBirth}
                 onChange={(e) => setDateOfBirth(e.target.value)}
                 className="w-full px-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white focus:outline-none focus:ring-1 focus:ring-pink-500 font-semibold cursor-pointer"
               />
-              <p className="text-[10px] text-pink-200/50">Must be at least 18 years old. DOB cannot be changed for Free members.</p>
+              <p className="text-[10px] text-pink-200/50">Must be at least 18 years old (January 1, 1950 through Today). DOB is permanently locked once saved.</p>
             </div>
 
             {/* 3. Gender */}

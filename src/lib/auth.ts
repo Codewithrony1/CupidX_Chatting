@@ -66,13 +66,17 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
       let cloudAvatarEmoji: string = '😊';
       let isCloudVip = false;
 
-      // A. Check Firestore Admin doc
+      // A. Check Firestore Admin doc with strict timeout
       try {
         const { getAdminDb } = await import('./firebaseAdmin');
         const adminDb = getAdminDb();
         if (adminDb) {
-          const snap = await adminDb.collection('users').doc(cleanId).get();
-          if (snap.exists) {
+          const snap: any = await Promise.race([
+            adminDb.collection('users').doc(cleanId).get(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1500)),
+          ]).catch(() => null);
+
+          if (snap && snap.exists) {
             const d = snap.data();
             if (d?.profileCompleted || d?.genderDobLocked || (d?.dateOfBirth && d?.gender && d?.gender !== 'unspecified')) {
               isCompletedInCloud = true;
@@ -192,8 +196,12 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
     const { getAdminDb } = await import('./firebaseAdmin');
     const adminDb = getAdminDb();
     if (adminDb) {
-      const snap = await adminDb.collection('users').doc(cleanId).get();
-      if (snap.exists) {
+      const snap: any = await Promise.race([
+        adminDb.collection('users').doc(cleanId).get(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1500)),
+      ]).catch(() => null);
+
+      if (snap && snap.exists) {
         const d = snap.data();
         if (d?.profileCompleted || d?.genderDobLocked || (d?.dateOfBirth && d?.gender && d?.gender !== 'unspecified')) {
           isCloudCompleted = true;
@@ -234,7 +242,8 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
       .replace(/[^a-z0-9_]/g, '') || `user_${cleanId.slice(-5)}`;
 
   const randomSuffix = Math.random().toString(36).substring(2, 6);
-  const cleanUsername = `${baseUsername.slice(0, 15)}_${randomSuffix}`;
+  const timeSuffix = Date.now().toString().slice(-4);
+  const cleanUsername = `${baseUsername.slice(0, 12)}_${randomSuffix}${timeSuffix}`;
 
   try {
     user = await prisma.user.create({

@@ -46,14 +46,7 @@ export async function POST(req: Request) {
         const lastActivity = existingSession.messages[0]?.createdAt || existingSession.startedAt;
         const isFresh = Date.now() - new Date(lastActivity).getTime() < 60 * 1000;
 
-        // Verify partner is still actively MATCHED to this session
-        const partnerQueue = await prisma.matchmakingQueue.findUnique({
-          where: { userId: partner.id },
-        });
-        const partnerStillMatched =
-          partnerQueue?.status === 'MATCHED' && partnerQueue?.chatSessionId === existingSession.id;
-
-        if (isFresh && partnerStillMatched) {
+        if (isFresh) {
           return NextResponse.json({
             matched: true,
             chatSessionId: existingSession.id,
@@ -69,7 +62,7 @@ export async function POST(req: Request) {
             },
           });
         } else {
-          // Stale / abandoned session: mark it ENDED and clean up
+          // Only truly stale / abandoned sessions (>60s with no messages) are cleaned up
           await prisma.chatSession.update({
             where: { id: existingSession.id },
             data: { status: 'ENDED', endedAt: new Date() },
@@ -277,6 +270,14 @@ export async function POST(req: Request) {
             console.warn('Firestore match sync error:', e);
           }
 
+          console.log('[RANDOM_CHAT][MATCH]', {
+            state: 'matched',
+            matchId: newChatSessionId,
+            user1Id: user.id,
+            user2Id: candidate.userId,
+            timestamp: new Date().toISOString(),
+          });
+
           return NextResponse.json({
             matched: true,
             chatSessionId: newChatSessionId,
@@ -349,7 +350,11 @@ export async function POST(req: Request) {
       message: 'Looking for a person to chat with you...',
     });
   } catch (error: any) {
-    console.error('Matchmaking Join Error:', error);
+    console.error('[RANDOM_CHAT][ERROR]', {
+      state: 'join_queue_error',
+      error: error?.message || String(error),
+      timestamp: new Date().toISOString(),
+    });
     return NextResponse.json({ error: 'Failed to join matchmaking queue' }, { status: 500 });
   }
 }

@@ -64,21 +64,14 @@ export interface UserProfile {
   };
 }
 
+import { calculateDobAge } from '@/lib/validation/dob';
+
 /**
- * Dynamically calculate age from Date of Birth string or Date object.
+ * Dynamically calculate age from Date of Birth string or Date object
+ * using exact calendar day arithmetic.
  */
 export function calculateAge(dob: string | Date | null | undefined): number {
-  if (!dob) return 18;
-  const birthDate = typeof dob === 'string' ? new Date(dob) : dob;
-  if (isNaN(birthDate.getTime())) return 18;
-  
-  const today = new Date();
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const m = today.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
-  }
-  return Math.max(0, age);
+  return calculateDobAge(dob);
 }
 
 /**

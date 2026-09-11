@@ -1,10 +1,58 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
+
+async function resolveCanonicalUserId(identifier: string, displayName = 'Stranger'): Promise<string> {
+  if (!identifier) return identifier;
+  try {
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ id: identifier }, { clerkUserId: identifier }] },
+      select: { id: true },
+    });
+    if (existing) {
+      return existing.id;
+    }
+    const suffix = Math.random().toString(36).slice(2, 6);
+    const created = await prisma.user.create({
+      data: {
+        id: identifier,
+        clerkUserId: identifier,
+        username: `user_${identifier.slice(-6)}_${suffix}`,
+        fullName: displayName,
+        displayName: displayName,
+        gender: 'unspecified',
+        profile: {
+          create: {
+            gender: 'unspecified',
+            avatarEmoji: '😊',
+          },
+        },
+      },
+      select: { id: true },
+    });
+    return created.id;
+  } catch (e) {
+    const fallback = await prisma.user.findFirst({
+      where: { OR: [{ id: identifier }, { clerkUserId: identifier }] },
+      select: { id: true },
+    });
+    return fallback ? fallback.id : identifier;
+  }
+}
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser(req);
+    let user = await getCurrentUser(req);
+    if (!user) {
+      const headerClerkId = req.headers.get('x-clerk-user-id');
+      const { searchParams } = new URL(req.url);
+      const queryClerkId = searchParams.get('clerkUserId');
+      const fallbackClerkId = headerClerkId || queryClerkId;
+      if (fallbackClerkId) {
+        user = await getOrCreateUserFromClerk(fallbackClerkId);
+      }
+    }
+
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -75,13 +123,17 @@ export async function GET(req: Request) {
               if (matchDoc && matchDoc.status === 'active') {
                 const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
                 const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
+                const [canonicalA, canonicalB] = await Promise.all([
+                  resolveCanonicalUserId(uAId, matchDoc.user1DisplayName || 'Stranger'),
+                  resolveCanonicalUserId(uBId, matchDoc.user2DisplayName || 'Stranger'),
+                ]);
                 session = await prisma.chatSession.upsert({
                   where: { id: userQueue.chatSessionId },
                   update: { status: 'ACTIVE' },
                   create: {
                     id: userQueue.chatSessionId,
-                    userAId: uAId,
-                    userBId: uBId,
+                    userAId: canonicalA,
+                    userBId: canonicalB,
                     status: 'ACTIVE',
                   },
                 });
@@ -118,9 +170,12 @@ export async function GET(req: Request) {
               }
             : null,
         });
-      } else {
-        // Session has ended or was terminated
+      } else if (session && session.status === 'ENDED') {
+        // Session explicitly confirmed ENDED in database
         return NextResponse.json({ matched: false, status: 'ENDED' });
+      } else {
+        // Session is not yet synced in local container cache: keep waiting, DO NOT emit premature ENDED
+        return NextResponse.json({ matched: false, status: 'WAITING' });
       }
     }
 
@@ -151,7 +206,11 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ matched: false, status: userQueue.status });
   } catch (error: any) {
-    console.error('[RANDOM_CHAT_STATUS] Error:', error);
+    console.error('[RANDOM_CHAT][ERROR]', {
+      state: 'status_check_error',
+      error: error?.message || String(error),
+      timestamp: new Date().toISOString(),
+    });
     return NextResponse.json({ error: 'Failed to fetch matchmaking status' }, { status: 500 });
   }
 }

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { useAuth as useClerkAuth } from '@clerk/nextjs';
 import { VIP_AVATAR_CATEGORIES } from '@/lib/avatars';
 import { formatDisplayDob, calculateAge } from '@/lib/firestoreUser';
 import AppShell from '@/components/AppShell';
@@ -64,6 +65,7 @@ const PERSONALITY_OPTIONS = [
 
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
+  const { getToken } = useClerkAuth();
   const router = useRouter();
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
@@ -194,13 +196,17 @@ export default function ProfilePage() {
     try {
       // Save directly to Authoritative Database API (which also syncs Firestore server-side)
       const effectiveClerkId = user?.clerkUserId || user?.id || user?.uid;
+      const token = await getToken().catch(() => null);
       const res = await fetch('/api/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
         },
+        credentials: 'include',
         body: JSON.stringify({
+          clerkUserId: effectiveClerkId,
           displayName: isVIP ? displayName : undefined,
           bio: isVIP ? bio : undefined,
           showBio,

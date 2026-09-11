@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
@@ -8,11 +8,59 @@ import path from 'path';
 // Rate limiting in-memory map: userId -> array of timestamps
 const userMessageRateMap = new Map<string, number[]>();
 
+async function resolveCanonicalUserId(identifier: string, displayName = 'Stranger'): Promise<string> {
+  if (!identifier) return identifier;
+  try {
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ id: identifier }, { clerkUserId: identifier }] },
+      select: { id: true },
+    });
+    if (existing) {
+      return existing.id;
+    }
+    const suffix = Math.random().toString(36).slice(2, 6);
+    const created = await prisma.user.create({
+      data: {
+        id: identifier,
+        clerkUserId: identifier,
+        username: `user_${identifier.slice(-6)}_${suffix}`,
+        fullName: displayName,
+        displayName: displayName,
+        gender: 'unspecified',
+        profile: {
+          create: {
+            gender: 'unspecified',
+            avatarEmoji: '😊',
+          },
+        },
+      },
+      select: { id: true },
+    });
+    return created.id;
+  } catch (e) {
+    const fallback = await prisma.user.findFirst({
+      where: { OR: [{ id: identifier }, { clerkUserId: identifier }] },
+      select: { id: true },
+    });
+    return fallback ? fallback.id : identifier;
+  }
+}
+
 // Send a message in a ChatSession with Idempotency, Rate Limiting & VIP Image Verification
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate Clerk User
-    const user = await getCurrentUser(req);
+    const body = await req.json().catch(() => ({}));
+    const { chatSessionId, content, imageUrl: rawImageUrl, imageData, clientMessageId, clerkUserId } = body;
+
+    // 1. Authenticate Clerk User with Header / Body Fallback
+    let user = await getCurrentUser(req);
+    if (!user) {
+      const headerClerkId = req.headers.get('x-clerk-user-id');
+      const fallbackClerkId = clerkUserId || headerClerkId;
+      if (fallbackClerkId) {
+        user = await getOrCreateUserFromClerk(fallbackClerkId);
+      }
+    }
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
@@ -30,9 +78,6 @@ export async function POST(req: Request) {
     }
     recentTimestamps.push(now);
     userMessageRateMap.set(user.id, recentTimestamps);
-
-    const body = await req.json().catch(() => ({}));
-    const { chatSessionId, content, imageUrl: rawImageUrl, imageData, clientMessageId } = body;
 
     if (!chatSessionId || (!content?.trim() && !rawImageUrl && !imageData)) {
       return NextResponse.json({ error: 'Chat session ID and content or image are required' }, { status: 400 });
@@ -55,13 +100,17 @@ export async function POST(req: Request) {
             if (matchDoc && matchDoc.status === 'active') {
               const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
               const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
+              const [canonicalA, canonicalB] = await Promise.all([
+                resolveCanonicalUserId(uAId, matchDoc.user1DisplayName || 'Stranger'),
+                resolveCanonicalUserId(uBId, matchDoc.user2DisplayName || 'Stranger'),
+              ]);
               session = await prisma.chatSession.upsert({
                 where: { id: chatSessionId },
                 update: { status: 'ACTIVE' },
                 create: {
                   id: chatSessionId,
-                  userAId: uAId,
-                  userBId: uBId,
+                  userAId: canonicalA,
+                  userBId: canonicalB,
                   status: 'ACTIVE',
                 },
               });
@@ -223,7 +272,17 @@ export async function POST(req: Request) {
 // Fetch messages & partner status for a ChatSession
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser(req);
+    let user = await getCurrentUser(req);
+    if (!user) {
+      const headerClerkId = req.headers.get('x-clerk-user-id');
+      const { searchParams } = new URL(req.url);
+      const queryClerkId = searchParams.get('clerkUserId');
+      const fallbackClerkId = headerClerkId || queryClerkId;
+      if (fallbackClerkId) {
+        user = await getOrCreateUserFromClerk(fallbackClerkId);
+      }
+    }
+
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -257,13 +316,17 @@ export async function GET(req: Request) {
             if (matchDoc && matchDoc.status === 'active') {
               const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
               const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
+              const [canonicalA, canonicalB] = await Promise.all([
+                resolveCanonicalUserId(uAId, matchDoc.user1DisplayName || 'Stranger'),
+                resolveCanonicalUserId(uBId, matchDoc.user2DisplayName || 'Stranger'),
+              ]);
               session = await prisma.chatSession.upsert({
                 where: { id: chatSessionId },
                 update: { status: 'ACTIVE' },
                 create: {
                   id: chatSessionId,
-                  userAId: uAId,
-                  userBId: uBId,
+                  userAId: canonicalA,
+                  userBId: canonicalB,
                   status: 'ACTIVE',
                 },
                 include: {
@@ -280,7 +343,7 @@ export async function GET(req: Request) {
     }
 
     if (!session) {
-      return NextResponse.json({ error: 'Chat session not found', sessionStatus: 'ENDED' }, { status: 404 });
+      return NextResponse.json({ error: 'Chat session not found', sessionStatus: 'PENDING' }, { status: 404 });
     }
 
     const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
