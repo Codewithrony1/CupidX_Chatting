@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 
@@ -35,11 +35,6 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (!user) {
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
-        setIsConnected(false);
-      }
       return;
     }
 
@@ -47,10 +42,12 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
     const initSocket = async () => {
       try {
-        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
-        // Don't try to connect if no socket URL configured or it's localhost in production
-        if (!socketUrl || (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && socketUrl.includes('localhost'))) {
-          return;
+        let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+        if (!socketUrl && typeof window !== 'undefined') {
+          socketUrl = `${window.location.protocol}//${window.location.hostname}:3001`;
+        }
+        if (!socketUrl) {
+          socketUrl = 'http://localhost:3001';
         }
 
         const res = await fetch('/api/auth/token');
@@ -63,11 +60,11 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           auth: { token },
           transports: ['websocket', 'polling'],
           reconnection: true,
-          reconnectionAttempts: 5,          // Limited retries — don't spam
-          reconnectionDelay: 2000,
-          reconnectionDelayMax: 10000,
-          randomizationFactor: 0.5,
-          timeout: 5000,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          randomizationFactor: 0.3,
+          timeout: 10000,
         });
 
         activeSocket.on('connect', () => {
@@ -142,15 +139,18 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     [socket, isConnected]
   );
 
+  const contextValue = useMemo(
+    () => ({
+      socket,
+      isConnected,
+      emitThrottledTyping,
+      sendBufferedMessage,
+    }),
+    [socket, isConnected, emitThrottledTyping, sendBufferedMessage]
+  );
+
   return (
-    <SocketContext.Provider
-      value={{
-        socket,
-        isConnected,
-        emitThrottledTyping,
-        sendBufferedMessage,
-      }}
-    >
+    <SocketContext.Provider value={contextValue}>
       {children}
     </SocketContext.Provider>
   );

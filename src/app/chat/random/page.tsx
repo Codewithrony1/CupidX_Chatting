@@ -31,23 +31,6 @@ import {
 } from 'lucide-react';
 import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
 
-// Firestore matchmaking
-import {
-  ensureMatchmakingUid,
-  joinQueue,
-  heartbeatQueue,
-  leaveQueue,
-  findAndMatch,
-  listenToMyQueueEntry,
-  listenToMatch,
-  listenToMessages,
-  sendFirestoreMessage,
-  cleanupSession,
-  resolveTimestamp,
-  type MatchDoc,
-  type FirestoreMessage,
-} from '@/lib/firestoreMatchmaking';
-
 const ProfilePreviewSheet = nextDynamic(() => import('@/components/chat/ProfilePreviewSheet'), { ssr: false });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -65,6 +48,7 @@ interface RandomPartner {
   personalityPreferences?: string;
   bio?: string;
   isVIP: boolean;
+  plan?: string;
 }
 
 interface RandomMessage {
@@ -86,7 +70,6 @@ export default function KnotChatRandomPage() {
   const { getToken } = useClerkAuth();
   const { socket, isConnected: socketConnected } = useSocket();
 
-  // Effective authenticated user
   const currentUser = user;
 
   // ── Core state ──
@@ -127,26 +110,11 @@ export default function KnotChatRandomPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
-
-  // Matchmaking control refs
   const lastMessageSentTimeRef = useRef<number>(0);
-  const queueListenerRef = useRef<(() => void) | null>(null);
-  const matchListenerRef = useRef<(() => void) | null>(null);
-  const messagesListenerRef = useRef<(() => void) | null>(null);
-  const matchingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const chatSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const isScanningRef = useRef(false);
   const isSkippingRef = useRef(false);
   const currentUidRef = useRef<string | null>(null);
   const activeMatchIdRef = useRef<string | null>(null);
-
-  // Synchronizer and execution control refs
-  const isSyncingRef = useRef(false);
-  const syncSeqRef = useRef(0);
-  const consecutiveSyncErrorsRef = useRef(0);
   const autoStartExecutedRef = useRef(false);
-  const cachedTokenRef = useRef<{ token: string | null; expiresAt: number }>({ token: null, expiresAt: 0 });
 
   const isVIP =
     currentUser?.membershipTier === 'VIP' ||
@@ -169,68 +137,103 @@ export default function KnotChatRandomPage() {
     }
   }, [user, loading, router]);
 
-  // ─── Socket typing indicator ──────────────────────────────────────────────
+  // ─── Socket Lifecycle & Event Listeners ────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
-    const handlePartnerTyping = (data: { isTyping: boolean }) => setPartnerTyping(data.isTyping);
+
+    const handleQueueJoined = () => {
+      setMatchStatus('searching');
+      setSearchError(null);
+      setReconnecting(false);
+    };
+
+    const handleRandomMatchFound = (data: {
+      matchId: string;
+      roomId: string;
+      partner: RandomPartner;
+      reconnected?: boolean;
+    }) => {
+      console.log('[RANDOM_CHAT] Match established via Socket.IO:', data.matchId);
+      activeMatchIdRef.current = data.matchId;
+      setMatchId(data.matchId);
+      setPartner(data.partner);
+      setMatchStatus('connected');
+      setReconnecting(false);
+      if (!data.reconnected) {
+        setMessages([]);
+      }
+    };
+
+    const handleReceiveRandomMessage = (message: RandomMessage) => {
+      setMessages((prev) => {
+        if (message.clientMessageId) {
+          const exists = prev.some((m) => m.clientMessageId === message.clientMessageId);
+          if (exists) {
+            return prev.map((m) =>
+              m.clientMessageId === message.clientMessageId ? { ...message, status: 'SENT' } : m
+            );
+          }
+        }
+        if (prev.some((m) => m.id === message.id)) {
+          return prev;
+        }
+        return [...prev, { ...message, status: 'SENT' }];
+      });
+    };
+
+    const handlePartnerTyping = (data: { isTyping: boolean }) => {
+      setPartnerTyping(Boolean(data.isTyping));
+    };
+
+    const handlePartnerLeft = (data: { reason?: string }) => {
+      console.log('[RANDOM_CHAT] Partner left:', data?.reason);
+      activeMatchIdRef.current = null;
+      setMatchStatus('ended');
+      setPartnerTyping(false);
+    };
+
+    const handleChatEndedConfirm = () => {
+      activeMatchIdRef.current = null;
+      setMatchStatus('ended');
+      setPartnerTyping(false);
+    };
+
+    const handleDisconnect = () => {
+      if (activeMatchIdRef.current) {
+        setReconnecting(true);
+      }
+    };
+
+    const handleConnect = () => {
+      setReconnecting(false);
+    };
+
+    socket.on('queue_joined', handleQueueJoined);
+    socket.on('random_match_found', handleRandomMatchFound);
+    socket.on('receive_random_message', handleReceiveRandomMessage);
     socket.on('partner_typing_status', handlePartnerTyping);
+    socket.on('partner_left', handlePartnerLeft);
+    socket.on('chat_ended_confirm', handleChatEndedConfirm);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect', handleConnect);
+
     return () => {
+      socket.off('queue_joined', handleQueueJoined);
+      socket.off('random_match_found', handleRandomMatchFound);
+      socket.off('receive_random_message', handleReceiveRandomMessage);
       socket.off('partner_typing_status', handlePartnerTyping);
+      socket.off('partner_left', handlePartnerLeft);
+      socket.off('chat_ended_confirm', handleChatEndedConfirm);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect', handleConnect);
     };
   }, [socket]);
-
-  // Structured diagnostic: [RANDOM_CHAT][SOCKET_CONNECT]
-  useEffect(() => {
-    if (socketConnected && socket) {
-      console.log('[RANDOM_CHAT][SOCKET_CONNECT]', {
-        state: 'connected',
-        socketId: socket.id,
-        userId: currentUser?.id || currentUser?.clerkUserId || currentUidRef.current,
-        timestamp: new Date().toISOString(),
-      });
-    }
-  }, [socketConnected, socket, currentUser?.id, currentUser?.clerkUserId]);
-
-  // ─── Cleanup helpers ──────────────────────────────────────────────────────
-  const stopAllTimers = () => {
-    if (matchingIntervalRef.current) {
-      clearInterval(matchingIntervalRef.current);
-      matchingIntervalRef.current = null;
-    }
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-    if (chatSyncIntervalRef.current) {
-      clearInterval(chatSyncIntervalRef.current);
-      chatSyncIntervalRef.current = null;
-    }
-  };
-
-  const stopAllListeners = () => {
-    queueListenerRef.current?.();
-    queueListenerRef.current = null;
-    matchListenerRef.current?.();
-    matchListenerRef.current = null;
-    messagesListenerRef.current?.();
-    messagesListenerRef.current = null;
-  };
 
   // ─── Cleanup on unmount & window unload ────────────────────────────────────
   useEffect(() => {
     const handleBeforeUnload = () => {
-      const currentMid = activeMatchIdRef.current;
-      if (currentMid) {
-        console.log('[RANDOM_CHAT][DISCONNECT]', {
-          state: 'disconnected',
-          matchId: currentMid,
-          userId: currentUidRef.current,
-          reason: 'page_unload',
-          timestamp: new Date().toISOString(),
-        });
-        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-          navigator.sendBeacon(`/api/chat/${currentMid}/end`);
-        }
+      if (socket && socket.connected) {
+        socket.emit('end_random_chat');
       }
     };
 
@@ -238,267 +241,18 @@ export default function KnotChatRandomPage() {
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      stopAllTimers();
-      stopAllListeners();
-      const effectiveClerkId = currentUidRef.current;
-      if (effectiveClerkId) {
-        leaveQueue(effectiveClerkId).catch(() => {});
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      if (socket && socket.connected) {
+        socket.emit('leave_random_queue');
       }
     };
-  }, []);
+  }, [socket]);
 
-  // ─── Build partner object ─────────────────────────────────────────────────
-  function buildPartner(matchDoc: MatchDoc, myUid: string): RandomPartner {
-    const isUser1 =
-      matchDoc.user1Uid === myUid ||
-      (matchDoc as any).user1ClerkId === myUid ||
-      (currentUser && currentUser.id === matchDoc.user1Uid);
-    return {
-      id: isUser1 ? matchDoc.user2Uid : matchDoc.user1Uid,
-      username: isUser1 ? (matchDoc.user2DisplayName || 'Stranger') : (matchDoc.user1DisplayName || 'Stranger'),
-      displayName: isUser1 ? matchDoc.user2DisplayName : matchDoc.user1DisplayName,
-      fullName: isUser1 ? matchDoc.user2DisplayName : matchDoc.user1DisplayName,
-      avatarUrl: isUser1 ? matchDoc.user2AvatarUrl : matchDoc.user1AvatarUrl,
-      avatarEmoji: isUser1 ? matchDoc.user2AvatarEmoji : matchDoc.user1AvatarEmoji,
-      gender: isUser1 ? matchDoc.user2Gender : matchDoc.user1Gender,
-      isVIP: isUser1 ? matchDoc.user2IsVIP : matchDoc.user1IsVIP,
-    };
-  }
-
-  // ─── Active Chat Realtime Synchronizer ────────────────────────────────────
-  const syncActiveChat = useCallback(async (mid: string) => {
-    if (!mid || activeMatchIdRef.current !== mid) return;
-    if (isSyncingRef.current) return;
-    isSyncingRef.current = true;
-
-    syncSeqRef.current += 1;
-    const requestSeq = syncSeqRef.current;
-
-    try {
-      const effectiveClerkId = currentUidRef.current || '';
-      let token = cachedTokenRef.current.token;
-      if (!token || Date.now() > cachedTokenRef.current.expiresAt) {
-        token = await getToken().catch(() => null);
-        if (token) {
-          cachedTokenRef.current = { token, expiresAt: Date.now() + 60000 };
-        }
-      }
-      const headers: Record<string, string> = {};
-      if (effectiveClerkId) {
-        headers['x-clerk-user-id'] = effectiveClerkId;
-      }
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const res = await fetch(`/api/chat/messages?chatSessionId=${encodeURIComponent(mid)}`, {
-        headers,
-        credentials: 'include',
-      });
-
-      // Discard stale out-of-order responses or if active match changed
-      if (requestSeq !== syncSeqRef.current || activeMatchIdRef.current !== mid) {
-        return;
-      }
-
-      // Handle 404 or non-OK response
-      if (!res.ok) {
-        if (res.status === 404) {
-          const data = await res.json().catch(() => ({}));
-          consecutiveSyncErrorsRef.current += 1;
-          // Only terminate if server explicitly confirmed sessionStatus is ENDED
-          if (data.sessionStatus === 'ENDED') {
-            console.log('[RANDOM_CHAT][DISCONNECT]', {
-              state: 'disconnected',
-              matchId: mid,
-              userId: currentUidRef.current,
-              reason: 'server_confirmed_ended',
-              timestamp: new Date().toISOString(),
-            });
-            stopAllTimers();
-            stopAllListeners();
-            activeMatchIdRef.current = null;
-            setMatchStatus('ended');
-            return;
-          }
-          if (consecutiveSyncErrorsRef.current >= 15) {
-            setReconnecting(true);
-          }
-          return;
-        }
-        if (res.status === 403) {
-          console.warn('[RANDOM_CHAT_SYNC] 403 Forbidden - verify participant authorization for session:', mid);
-        }
-        consecutiveSyncErrorsRef.current += 1;
-        if (consecutiveSyncErrorsRef.current >= 15) {
-          setReconnecting(true);
-        }
-        return;
-      }
-
-      // Read response body ONCE
-      const data = await res.json();
-      consecutiveSyncErrorsRef.current = 0;
-      setReconnecting(false);
-
-      // Check if session has ended on server
-      if (data.sessionStatus === 'ENDED') {
-        console.log('[RANDOM_CHAT][DISCONNECT]', {
-          state: 'disconnected',
-          matchId: mid,
-          userId: currentUidRef.current,
-          reason: 'partner_or_server_ended_session',
-          timestamp: new Date().toISOString(),
-        });
-        stopAllTimers();
-        stopAllListeners();
-        activeMatchIdRef.current = null;
-        setMatchStatus('ended');
-        return;
-      }
-
-      // Update partner info if missing
-      if (data.partner) {
-        setPartner((prev) => {
-          if (prev && prev.id === data.partner.id) return prev;
-          return {
-            id: data.partner.id,
-            displayName: data.partner.displayName || 'Stranger',
-            fullName: data.partner.displayName || 'Stranger',
-            avatarUrl: data.partner.avatarUrl || null,
-            avatarEmoji: data.partner.avatarEmoji || '😊',
-            gender: data.partner.gender || 'unspecified',
-            isVIP: Boolean(data.partner.isVIP),
-          };
-        });
-      }
-
-      // Server-authoritative message merge with zero message-drop guarantee
-      if (Array.isArray(data.messages)) {
-        setMessages((prev) => {
-          const serverMapped: RandomMessage[] = data.messages.map((m: any) => ({
-            id: m.id,
-            clientMessageId: m.clientMessageId || null,
-            senderId: m.senderId,
-            senderUsername: m.senderUsername || 'Stranger',
-            content: m.content || '',
-            imageUrl: m.imageUrl || null,
-            createdAt: m.createdAt,
-            status: 'SENT' as const,
-          }));
-
-          const serverIds = new Set(serverMapped.map((m) => m.id));
-          const serverClientIds = new Set(
-            serverMapped.filter((m) => m.clientMessageId).map((m) => m.clientMessageId)
-          );
-
-          // Retain local messages that haven't yet been confirmed by this specific server response
-          // Keep both SENDING and locally confirmed SENT messages that the server query hasn't returned yet
-          const unconfirmedLocal = prev.filter(
-            (local) =>
-              !serverIds.has(local.id) &&
-              (!local.clientMessageId || !serverClientIds.has(local.clientMessageId))
-          );
-
-          const combined = [...serverMapped, ...unconfirmedLocal];
-          combined.sort(
-            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-          );
-
-          const prevSig = prev.map((m) => `${m.id}:${m.status}:${m.content}`).join('|');
-          const nextSig = combined.map((m) => `${m.id}:${m.status}:${m.content}`).join('|');
-          if (prevSig === nextSig) return prev;
-
-          return combined;
-        });
-      }
-    } catch (err: any) {
-      console.error('[RANDOM_CHAT][ERROR]', {
-        state: 'sync_error',
-        matchId: mid,
-        userId: currentUidRef.current,
-        error: err?.message || String(err),
-        timestamp: new Date().toISOString(),
-      });
-      consecutiveSyncErrorsRef.current += 1;
-      if (consecutiveSyncErrorsRef.current >= 15) {
-        setReconnecting(true);
-      }
-    } finally {
-      isSyncingRef.current = false;
-    }
-  }, []);
-
-  // ─── Attach active match ──────────────────────────────────────────────────
-  const attachActiveMatch = useCallback((mid: string, partnerData?: any) => {
-    if (!mid || activeMatchIdRef.current === mid) return;
-    activeMatchIdRef.current = mid;
-    setMatchId(mid);
-    if (partnerData) {
-      setPartner(partnerData);
-    }
-    setMatchStatus('connected');
-    setReconnecting(false);
-    console.log('[RANDOM_CHAT][MATCH]', {
-      state: 'matched',
-      matchId: mid,
-      userId: currentUidRef.current,
-      partnerId: partnerData?.id,
-      timestamp: new Date().toISOString(),
-    });
-
-    stopAllTimers();
-    if (queueListenerRef.current) {
-      queueListenerRef.current();
-      queueListenerRef.current = null;
-    }
-
-    const myUid = currentUidRef.current || '';
-
-    // 1. High-frequency server-authoritative sync (every 500ms for rapid Omegle-style message delivery)
-    syncActiveChat(mid);
-    chatSyncIntervalRef.current = setInterval(() => {
-      syncActiveChat(mid);
-    }, 500);
-
-    // 2. Firestore match status fallback (if active, without throwing unhandled exceptions)
-    try {
-      matchListenerRef.current?.();
-      matchListenerRef.current = listenToMatch(
-        mid,
-        (matchDoc: MatchDoc) => {
-          if (matchDoc.status === 'ended') {
-            stopAllTimers();
-            stopAllListeners();
-            activeMatchIdRef.current = null;
-            setMatchStatus('ended');
-            return;
-          }
-          if (!partnerData && myUid) {
-            setPartner(buildPartner(matchDoc, myUid));
-          }
-          setMatchStatus('connected');
-        },
-        () => {} // Silent error handler
-      );
-    } catch (e) {}
-
-    // 3. Firestore push trigger (triggers canonical syncActiveChat instead of clashing state IDs)
-    try {
-      messagesListenerRef.current?.();
-      messagesListenerRef.current = listenToMessages(
-        mid,
-        () => {
-          syncActiveChat(mid);
-        },
-        () => {} // Silent error handler
-      );
-    } catch (e) {}
-  }, [syncActiveChat]);
-
-  // ─── START MATCHMAKING (Server-Controlled) ─────────────────────────────────
+  // ─── START MATCHMAKING ─────────────────────────────────────────────────────
   const handleStartMatch = useCallback(
-    async (skipCurrent = false, excludePartnerId?: string | null) => {
+    (skipCurrent = false) => {
       setMatchStatus('searching');
       setPartner(null);
       setMessages([]);
@@ -507,113 +261,25 @@ export default function KnotChatRandomPage() {
       setReconnecting(false);
       activeMatchIdRef.current = null;
 
-      stopAllTimers();
-      stopAllListeners();
+      const emitQueueJoin = () => {
+        if (!socket || !socket.connected) return;
+        const preferences = {
+          gender: currentUser?.profile?.gender || 'unspecified',
+          preferredGender: currentUser?.profile?.preferredGender || 'auto',
+          mood: currentUser?.profile?.mood || 'chill',
+          language: currentUser?.profile?.language || 'english',
+        };
+        socket.emit('join_random_queue', preferences);
+      };
 
-      try {
-        const currentUserId = currentUidRef.current || currentUser?.id;
-        if (!currentUserId) return;
-        console.log('[RANDOM_CHAT] STATE: SEARCHING | EVENT: START_SEARCH | USER:', currentUserId, '| SKIP CURRENT:', skipCurrent);
-
-        // Call server-controlled matchmaking API with fallback header
-        const res = await fetch('/api/matchmaking/join', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-clerk-user-id': currentUserId,
-          },
-          body: JSON.stringify({
-            skipCurrentMatch: skipCurrent,
-            excludePartnerId: excludePartnerId || null,
-          }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          if (res.status === 503 || errData.disabled) {
-            setRandomChatDisabled(true);
-            setSearchError('Random Chat is currently unavailable. Please try again later.');
-            setMatchStatus('idle');
-            return;
-          }
-          throw new Error(errData.error || 'Failed to join matchmaking.');
-        }
-
-        const data = await res.json();
-
-        // Case 1: Immediately matched by server
-        if (data.matched && data.chatSessionId) {
-          attachActiveMatch(data.chatSessionId, data.partner);
-          return;
-        }
-
-        // Case 2: In waiting queue -> dual push & polling
-        const sessionStartedAt = Date.now();
-
-        // 1. Push: Listen to own queue doc in Firestore for instant notification
-        try {
-          queueListenerRef.current = listenToMyQueueEntry(
-            currentUserId,
-            sessionStartedAt,
-            async () => {
-              if (activeMatchIdRef.current) return;
-              try {
-                const statusRes = await fetch('/api/matchmaking/status', {
-                  headers: { 'x-clerk-user-id': currentUserId },
-                });
-                if (statusRes.ok) {
-                  const statusData = await statusRes.json();
-                  if (statusData.matched && statusData.chatSessionId) {
-                    attachActiveMatch(statusData.chatSessionId, statusData.partner);
-                  }
-                }
-              } catch (e) {
-                console.warn('Push match status error:', e);
-              }
-            },
-            () => {} // Silent error handler
-          );
-        } catch (e) {}
-
-        // 2. Server-Authoritative Polling: Poll /api/matchmaking/status every 1000ms
-        matchingIntervalRef.current = setInterval(async () => {
-          if (activeMatchIdRef.current) {
-            if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-            return;
-          }
-
-          try {
-            const statusRes = await fetch('/api/matchmaking/status', {
-              headers: { 'x-clerk-user-id': currentUserId },
-            });
-            if (statusRes.ok) {
-              const statusData = await statusRes.json();
-              if (activeMatchIdRef.current) {
-                if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-                return;
-              }
-              if (statusData.matched && statusData.chatSessionId) {
-                if (matchingIntervalRef.current) clearInterval(matchingIntervalRef.current);
-                attachActiveMatch(statusData.chatSessionId, statusData.partner);
-              }
-            }
-          } catch (e) {
-            console.warn('Status poll error:', e);
-          }
-        }, 1000);
-      } catch (err: any) {
-        console.error('[RANDOM_CHAT][ERROR]', {
-          state: 'matchmaking_error',
-          matchId: null,
-          userId: currentUidRef.current || currentUser?.id,
-          error: err?.message || String(err),
-          timestamp: new Date().toISOString(),
-        });
-        setSearchError(err?.message || 'Could not connect to matchmaking queue.');
-        setMatchStatus('idle');
+      if (socket && socket.connected) {
+        emitQueueJoin();
+      } else {
+        const timer = setTimeout(emitQueueJoin, 600);
+        return () => clearTimeout(timer);
       }
     },
-    [currentUser?.id, attachActiveMatch]
+    [socket, currentUser?.profile]
   );
 
   // ─── Check availability & auto-start on mount when user is ready ──────────
@@ -650,107 +316,49 @@ export default function KnotChatRandomPage() {
     return () => {
       isMounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id]);
+  }, [currentUser?.id, handleStartMatch]);
 
-  // ─── CANCEL SEARCH (Server-Side + Race-Safe) ───────────────────────────────
-  const handleCancelSearch = async () => {
-    stopAllTimers();
-    stopAllListeners();
+  // ─── CANCEL SEARCH ─────────────────────────────────────────────────────────
+  const handleCancelSearch = () => {
     activeMatchIdRef.current = null;
     setMatchStatus('idle');
-
-    try {
-      const effectiveClerkId = currentUidRef.current || '';
-      const res = await fetch('/api/matchmaking/cancel', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
-        },
-      });
-      const data = await res.json();
-      if (data.matched && data.chatSessionId) {
-        // Match won the race condition right before cancellation
-        const statusRes = await fetch('/api/matchmaking/status', {
-          headers: effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {},
-        });
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          if (statusData.matched && statusData.chatSessionId) {
-            attachActiveMatch(statusData.chatSessionId, statusData.partner);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Cancel error:', e);
+    if (socket && socket.connected) {
+      socket.emit('leave_random_queue');
     }
   };
 
   // ─── NEXT PARTNER ─────────────────────────────────────────────────────────
-  const handleNextPartner = async () => {
+  const handleNextPartner = () => {
     if (isSkippingRef.current) return;
     isSkippingRef.current = true;
     setTimeout(() => {
       isSkippingRef.current = false;
-    }, 800);
+    }, 500);
 
-    const currentMid = activeMatchIdRef.current || matchId;
-    const currentPartnerId = partner?.id;
-
-    stopAllTimers();
-    stopAllListeners();
     activeMatchIdRef.current = null;
     setPartner(null);
     setMessages([]);
+    setPartnerTyping(false);
+    setMatchStatus('searching');
 
-    if (currentMid) {
-      console.log('[RANDOM_CHAT][DISCONNECT]', {
-        state: 'disconnected',
-        matchId: currentMid,
-        userId: currentUidRef.current,
-        reason: 'user_skipped_to_next',
-        timestamp: new Date().toISOString(),
+    if (socket && socket.connected) {
+      socket.emit('next_partner', {
+        gender: currentUser?.profile?.gender || 'unspecified',
+        preferredGender: currentUser?.profile?.preferredGender || 'auto',
       });
-      const effectiveClerkId = currentUidRef.current || '';
-      fetch(`/api/chat/${currentMid}/next`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
-        },
-      }).catch(() => {});
+    } else {
+      handleStartMatch(true);
     }
-
-    handleStartMatch(true, currentPartnerId);
   };
 
-  const handleEndChat = async () => {
+  const handleEndChat = () => {
     setShowOptionsMenu(false);
-    const currentMid = activeMatchIdRef.current || matchId;
-
-    stopAllTimers();
-    stopAllListeners();
     activeMatchIdRef.current = null;
+    setPartnerTyping(false);
 
-    if (currentMid) {
-      console.log('[RANDOM_CHAT][DISCONNECT]', {
-        state: 'disconnected',
-        matchId: currentMid,
-        userId: currentUidRef.current,
-        reason: 'user_ended_chat',
-        timestamp: new Date().toISOString(),
-      });
-      const effectiveClerkId = currentUidRef.current || '';
-      fetch(`/api/chat/${currentMid}/end`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
-        },
-      }).catch(() => {});
+    if (socket && socket.connected) {
+      socket.emit('end_random_chat');
     }
-
     setMatchStatus('ended');
   };
 
@@ -764,14 +372,12 @@ export default function KnotChatRandomPage() {
     const activeMid = activeMatchIdRef.current || matchId;
     if (!activeMid) return;
 
-    // Rate-limiting: prevent spam flooding (max 1 message per 400ms)
     const now = Date.now();
-    if (now - lastMessageSentTimeRef.current < 400) {
+    if (now - lastMessageSentTimeRef.current < 250) {
       return;
     }
     lastMessageSentTimeRef.current = now;
 
-    // Length limit: 2,000 characters
     const textToSend = inputText.trim();
     if (textToSend.length > 2000) {
       alert('Message exceeds the maximum limit of 2,000 characters.');
@@ -800,18 +406,17 @@ export default function KnotChatRandomPage() {
     setImagePreview(null);
     setSendingMsg(true);
 
-    try {
-      if (socket && socketConnected && socket.connected) {
-        socket.emit('random_typing_status', { isTyping: false, partnerId: partner?.id, roomId: activeMid });
+    if (isCurrentlyTypingRef.current) {
+      isCurrentlyTypingRef.current = false;
+      if (socket && socket.connected) {
+        socket.emit('random_typing_status', { isTyping: false });
       }
-    } catch (e) {}
-    isCurrentlyTypingRef.current = false;
-
-    const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
-    const token = await getToken().catch(() => null);
+    }
 
     try {
       if (imageToSend) {
+        const token = await getToken().catch(() => null);
+        const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
         const uploadRes = await fetch('/api/chat/upload-image', {
           method: 'POST',
           headers: {
@@ -819,12 +424,10 @@ export default function KnotChatRandomPage() {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
           },
-          credentials: 'include',
           body: JSON.stringify({
             matchId: activeMid,
             content: textToSend,
             imageData: imageToSend,
-            clerkUserId: effectiveClerkId,
           }),
         });
 
@@ -836,80 +439,44 @@ export default function KnotChatRandomPage() {
           throw new Error(uploadData.error || 'Failed to upload photo.');
         }
 
-        // Update optimistic image message to confirmed
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId
-              ? {
-                  ...m,
-                  id: uploadData.messageId || tempId,
-                  imageUrl: uploadData.imageUrl || m.imageUrl,
-                  status: 'SENT' as const,
-                }
-              : m
-          )
-        );
-        syncActiveChat(activeMid);
-      } else {
-        // Send message via backend API with IDOR and participant verification
-        const msgRes = await fetch('/api/chat/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            chatSessionId: activeMid,
+        if (socket && socket.connected) {
+          socket.emit('send_random_message', {
             content: textToSend,
+            imageUrl: uploadData.imageUrl || null,
             clientMessageId: tempId,
-            clerkUserId: effectiveClerkId,
-          }),
-        });
-
-        if (msgRes.ok) {
-          const msgData = await msgRes.json().catch(() => ({}));
-          const serverMsg = msgData.message;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempId
-                ? {
-                    ...m,
-                    id: serverMsg?.id || tempId,
-                    createdAt: serverMsg?.createdAt || m.createdAt,
-                    status: 'SENT' as const,
-                  }
-                : m
-            )
-          );
-          syncActiveChat(activeMid);
-        } else {
-          const errData = await msgRes.json().catch(() => ({}));
-          console.warn('[RANDOM_CHAT] POST /api/chat/messages returned non-OK status:', msgRes.status, errData);
-
-          // Fallback direct send via Firestore if available
-          try {
-            await sendFirestoreMessage(
-              activeMid,
-              senderUid,
-              senderDisplayName,
-              textToSend,
-              null
-            );
-            setMessages((prev) =>
-              prev.map((m) => (m.id === tempId ? { ...m, status: 'SENT' as const } : m))
-            );
-          } catch (e) {
-            if (errData.error === 'Chat session has already ended') {
-              stopAllTimers();
-              stopAllListeners();
-              activeMatchIdRef.current = null;
-              setMatchStatus('ended');
-              return;
+          });
+        }
+      } else {
+        if (socket && socket.connected) {
+          socket.emit(
+            'send_random_message',
+            {
+              content: textToSend,
+              clientMessageId: tempId,
+            },
+            (res: any) => {
+              if (res?.error) {
+                console.warn('Socket message notice:', res.error);
+              }
             }
-            throw new Error(errData.error || 'Failed to deliver message');
-          }
+          );
+        } else {
+          // Fallback to HTTP POST
+          const token = await getToken().catch(() => null);
+          const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+          await fetch('/api/chat/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+            },
+            body: JSON.stringify({
+              chatSessionId: activeMid,
+              content: textToSend,
+              clientMessageId: tempId,
+            }),
+          });
         }
       }
     } catch (err: any) {
@@ -922,29 +489,23 @@ export default function KnotChatRandomPage() {
     }
   };
 
-  // ─── TYPING INDICATOR ─────────────────────────────────────────────────────
+  // ─── TYPING INDICATOR (Pure local input, throttled socket emit, zero reconnect) ──
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputText(e.target.value);
+    const val = e.target.value;
+    setInputText(val);
 
-    try {
-      if (socket && socketConnected && socket.connected && matchStatus === 'connected') {
-        const activeMid = activeMatchIdRef.current || matchId;
-        if (!isCurrentlyTypingRef.current) {
-          isCurrentlyTypingRef.current = true;
-          socket.emit('random_typing_status', { isTyping: true, partnerId: partner?.id, roomId: activeMid });
-        }
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = setTimeout(() => {
-          isCurrentlyTypingRef.current = false;
-          try {
-            if (socket && socket.connected) {
-              socket.emit('random_typing_status', { isTyping: false, partnerId: partner?.id, roomId: activeMid });
-            }
-          } catch (e) {}
-        }, 2000);
+    if (socket && socket.connected && matchStatus === 'connected') {
+      if (!isCurrentlyTypingRef.current) {
+        isCurrentlyTypingRef.current = true;
+        socket.emit('random_typing_status', { isTyping: true });
       }
-    } catch (e) {
-      console.warn('Typing indicator emit notice:', e);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        isCurrentlyTypingRef.current = false;
+        if (socket && socket.connected) {
+          socket.emit('random_typing_status', { isTyping: false });
+        }
+      }, 1500);
     }
   };
 

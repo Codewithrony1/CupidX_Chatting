@@ -10,6 +10,23 @@ function ensureDatabaseSchema(targetDbPath) {
   let db;
   try {
     db = new Database(targetDbPath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
+    db.pragma('synchronous = NORMAL');
+
+    try {
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS "User_email_idx" ON "User"("email");
+        CREATE INDEX IF NOT EXISTS "User_role_idx" ON "User"("role");
+        CREATE INDEX IF NOT EXISTS "MatchmakingQueue_status_updatedAt_idx" ON "MatchmakingQueue"("status", "updatedAt");
+        CREATE INDEX IF NOT EXISTS "MatchmakingQueue_userId_status_idx" ON "MatchmakingQueue"("userId", "status");
+        CREATE INDEX IF NOT EXISTS "ChatSession_status_startedAt_idx" ON "ChatSession"("status", "startedAt");
+        CREATE INDEX IF NOT EXISTS "ManualUpiPayment_status_idx" ON "ManualUpiPayment"("status");
+        CREATE INDEX IF NOT EXISTS "VipRequest_status_idx" ON "VipRequest"("status");
+      `);
+    } catch (e) {
+      // ignore if tables not yet created
+    }
 
     // 1. Inspect and ensure User table columns
     const userTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='User'").get();
