@@ -16,7 +16,6 @@ export interface QueueCandidate {
   language: string;
   joinedAt: number;
   blockedUserIds: string[];
-  bannedUserIds: string[];
 }
 
 // Mood Compatibility Map
@@ -44,12 +43,10 @@ export function calculateMatchScore(userA: QueueCandidate, userB: QueueCandidate
     return { canMatch: false, score: -1 };
   }
 
-  // 2. Abuse prevention: Block & VIP Ban check (Never re-suggest banned pairings)
+  // 2. Abuse prevention: Block check (Never re-suggest blocked pairings)
   if (
     userA.blockedUserIds.includes(userB.userId) ||
-    userB.blockedUserIds.includes(userA.userId) ||
-    userA.bannedUserIds.includes(userB.userId) ||
-    userB.bannedUserIds.includes(userA.userId)
+    userB.blockedUserIds.includes(userA.userId)
   ) {
     return { canMatch: false, score: -1 };
   }
@@ -115,7 +112,6 @@ class InMemoryMatchQueue {
       joinedAt: candidate.joinedAt || Date.now(),
       tags: candidate.tags || [],
       blockedUserIds: candidate.blockedUserIds || [],
-      bannedUserIds: candidate.bannedUserIds || [],
     });
   }
 

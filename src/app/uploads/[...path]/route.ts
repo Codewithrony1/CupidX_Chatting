@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { getCurrentUser } from '@/lib/auth';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,12 +31,29 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
     }
 
+    // Privacy & Security: receipts/ can only be accessed by admin or the uploader
+    if (safeSegments[0] === 'receipts') {
+      const { authorized: isAdmin } = await verifyAdminAccess(req);
+      if (!isAdmin) {
+        const user = await getCurrentUser(req);
+        const filename = safeSegments[safeSegments.length - 1];
+        const isOwner =
+          user &&
+          ((user.clerkUserId && filename.includes(user.clerkUserId)) ||
+            (user.id && filename.includes(user.id)));
+
+        if (!isOwner) {
+          return NextResponse.json({ error: 'Unauthorized to view this receipt.' }, { status: 403 });
+        }
+      }
+    }
+
     const relativePath = path.join(...safeSegments);
 
     const cwd = process.cwd();
     const publicUploads = path.join(cwd, 'public', 'uploads');
     const rootUploads = path.join(cwd, 'uploads');
-    const tmpUploads = path.join('/tmp', 'uploads');
+    const tmpUploads = path.join(os.tmpdir(), 'uploads');
 
     // Check multiple potential upload directories
     const candidatePaths = [

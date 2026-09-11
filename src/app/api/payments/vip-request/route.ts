@@ -73,7 +73,8 @@ export async function POST(req: Request) {
     // Save screenshot proof if provided (5MB size cap check handled on client & server)
     let proofUrl: string | null = null;
     if (screenshotData && screenshotData.startsWith('data:image/')) {
-      const uploadRes = await saveBase64Image(screenshotData, 'uploads/vip-proofs', `vip_${method}_${user.username}`);
+      const clerkId = user.clerkUserId || user.id;
+      const uploadRes = await saveBase64Image(screenshotData, 'uploads/vip-proofs', `payment-proof_${clerkId}`);
       if (uploadRes.success && uploadRes.url) {
         proofUrl = uploadRes.url;
       } else {

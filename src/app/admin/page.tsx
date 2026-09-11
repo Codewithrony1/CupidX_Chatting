@@ -84,6 +84,7 @@ interface PaymentRequestItem {
   currency: string;
   paymentId?: string | null;
   screenshotUrl?: string | null;
+  screenshotKey?: string | null;
   status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'pending' | 'approved' | 'rejected';
   rejectionReason?: string | null;
   createdAt: string;
@@ -904,7 +905,18 @@ export default function AdminPage() {
 
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400 font-bold uppercase text-[10px]">Clerk User ID</span>
-                        <span className="font-mono text-slate-300 text-[10px]">{req.clerkUserId || 'N/A'}</span>
+                        <div className="flex items-center space-x-1">
+                          <span className="font-mono text-slate-300 text-[10px]">{req.clerkUserId || 'N/A'}</span>
+                          {req.clerkUserId && (
+                            <button
+                              onClick={() => copyToClipboard(req.clerkUserId!, `clerk_${req.id}`)}
+                              className="p-1 rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                              title="Copy Clerk ID"
+                            >
+                              {copiedId === `clerk_${req.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -937,6 +949,25 @@ export default function AdminPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* Unique Stored Filename */}
+                    {(req.screenshotKey || req.screenshotUrl) && (
+                      <div className="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between text-xs">
+                        <div className="overflow-hidden mr-2">
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase">Stored Filename</span>
+                          <span className="font-mono text-emerald-400 text-[11px] truncate block" title={req.screenshotKey || req.screenshotUrl?.split('/').pop()}>
+                            {req.screenshotKey || req.screenshotUrl?.split('/').pop()}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(req.screenshotKey || req.screenshotUrl!.split('/').pop()!, `fn_${req.id}`)}
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
+                          title="Copy Unique Filename"
+                        >
+                          {copiedId === `fn_${req.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    )}
 
                     {/* Screenshot Preview */}
                     {req.screenshotUrl && (
@@ -1544,6 +1575,14 @@ export default function AdminPage() {
                 <div className="flex justify-between items-center">
                   <span className="text-slate-400">UTR / Reference</span>
                   <span className="font-mono text-yellow-400 font-bold">{confirmApprovalItem.paymentId}</span>
+                </div>
+              )}
+              {(confirmApprovalItem.screenshotKey || confirmApprovalItem.screenshotUrl) && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Stored Proof</span>
+                  <span className="font-mono text-emerald-400 text-[10px] truncate max-w-[200px]" title={confirmApprovalItem.screenshotKey || confirmApprovalItem.screenshotUrl?.split('/').pop()}>
+                    {confirmApprovalItem.screenshotKey || confirmApprovalItem.screenshotUrl?.split('/').pop()}
+                  </span>
                 </div>
               )}
             </div>

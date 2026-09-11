@@ -53,6 +53,7 @@ export async function GET(req: Request) {
 
     const enrichedRequests = requests.map((item) => ({
       ...item,
+      screenshotKey: item.screenshotKey || (item.screenshotUrl ? item.screenshotUrl.split('/').pop() : null),
       clerkUserId: item.clerkUserId || item.user.clerkUserId || item.user.id,
       userName: item.userFullName || item.user.fullName || item.user.displayName || item.user.username,
       userEmail: item.userEmail || item.user.email || null,

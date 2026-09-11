@@ -1,11 +1,14 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 
 export interface ImageUploadResult {
   success: boolean;
   url?: string;
   filename?: string;
+  size?: number;
+  mimeType?: string;
   error?: string;
   statusCode?: number;
 }
@@ -13,27 +16,31 @@ export interface ImageUploadResult {
 /**
  * Validates base64 image data against strict size limits and binary magic bytes signatures.
  * Strictly derives extension from binary magic bytes (never trusting user MIME or filename).
- * Prevents stored XSS, HTML/SVG execution, and unvalidated file upload vulnerabilities.
+ * Enforces a strict 5 MB limit ("Image must be 5 MB or smaller.").
+ * Generates collision-resistant unique filenames and safely writes to persistent & fallback directories.
  */
 export async function saveBase64Image(
   dataUri: string,
   subDirectory: string = 'uploads',
   filenamePrefix: string = 'img',
-  maxBytes: number = 5 * 1024 * 1024 // 5MB limit
+  maxBytes: number = 5 * 1024 * 1024 // 5MB strict limit
 ): Promise<ImageUploadResult> {
-  if (!dataUri || typeof dataUri !== 'string' || !dataUri.startsWith('data:image/')) {
-    return { success: false, error: 'Invalid or missing image data URI.', statusCode: 400 };
+  if (!dataUri || typeof dataUri !== 'string') {
+    return { success: false, error: 'Invalid or missing image data.', statusCode: 400 };
   }
 
-  const matches = dataUri.match(/^data:image\/[A-Za-z0-9+.-]+;base64,(.+)$/);
-  if (!matches || matches.length !== 2) {
-    return { success: false, error: 'Malformed base64 image data.', statusCode: 400 };
+  // 1. Resilient base64 payload extraction (handles headers, newlines, and raw base64)
+  const commaIdx = dataUri.indexOf(',');
+  const rawBase64 = commaIdx !== -1 ? dataUri.slice(commaIdx + 1) : dataUri;
+  const cleanBase64 = rawBase64.replace(/\s+/g, '');
+
+  if (!cleanBase64) {
+    return { success: false, error: 'Empty image payload.', statusCode: 400 };
   }
 
-  const base64Data = matches[1];
   let buffer: Buffer;
   try {
-    buffer = Buffer.from(base64Data, 'base64');
+    buffer = Buffer.from(cleanBase64, 'base64');
   } catch (err) {
     return { success: false, error: 'Invalid base64 encoding.', statusCode: 400 };
   }
@@ -42,15 +49,17 @@ export async function saveBase64Image(
     return { success: false, error: 'Empty image buffer.', statusCode: 400 };
   }
 
+  // 2. Strict 5 MB file size enforcement
   if (buffer.length > maxBytes) {
     return {
       success: false,
-      error: `Image exceeds maximum allowed size of ${(maxBytes / (1024 * 1024)).toFixed(0)}MB.`,
+      error: 'Image must be 5 MB or smaller.',
       statusCode: 400,
     };
   }
 
-  // Magic Bytes Validation (JPEG, PNG, WebP, GIF)
+  // 3. Binary Magic Bytes Validation (JPEG, PNG, WebP only)
+  // Rejects PDF, ZIP, EXE, JS, HTML, SVG, and arbitrary binaries
   const isPng =
     buffer.length >= 8 &&
     buffer[0] === 0x89 &&
@@ -75,36 +84,59 @@ export async function saveBase64Image(
     buffer[10] === 0x42 &&
     buffer[11] === 0x50;
 
-  const isGif =
-    buffer.length >= 4 &&
-    buffer[0] === 0x47 &&
-    buffer[1] === 0x49 &&
-    buffer[2] === 0x46 &&
-    buffer[3] === 0x38;
-
-  if (!isPng && !isJpg && !isWebp && !isGif) {
+  if (!isPng && !isJpg && !isWebp) {
     return {
       success: false,
-      error: 'Invalid file format. Only JPG, PNG, WEBP, and GIF images are permitted.',
+      error: 'Invalid image file format. Only JPG, PNG, and WebP images are allowed.',
       statusCode: 400,
     };
   }
 
-  const ext = isPng ? 'png' : isWebp ? 'webp' : isGif ? 'gif' : 'jpg';
-  const randomKey = crypto.randomBytes(16).toString('hex');
-  const safePrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
-  const filename = `${safePrefix}_${Date.now()}_${randomKey}.${ext}`;
+  const ext = isPng ? 'png' : isWebp ? 'webp' : 'jpg';
+  const mimeType = isPng ? 'image/png' : isWebp ? 'image/webp' : 'image/jpeg';
 
-  // Target directories: public/<subDirectory>
-  const primaryDir = path.join(process.cwd(), 'public', subDirectory);
-  await fs.mkdir(primaryDir, { recursive: true });
-  await fs.writeFile(path.join(primaryDir, filename), buffer);
+  // 4. Collision-resistant unique filename generation
+  const safePrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+  const randomHex = crypto.randomBytes(4).toString('hex');
+  const filename = `${safePrefix}_${Date.now()}_${randomHex}.${ext}`;
 
-  const relativeUrl = `/${subDirectory.replace(/\\/g, '/')}/${filename}`.replace(/\/+/g, '/');
+  // 5. Multi-tier storage persistence with fallback
+  const subPath = subDirectory.replace(/^\/+|\/+$/g, '');
+  const candidateDirs = [
+    path.join(process.cwd(), 'public', subPath),
+    path.join(process.cwd(), subPath),
+    path.join(os.tmpdir(), subPath),
+  ];
+
+  let writeSuccess = false;
+  let lastWriteError: any = null;
+
+  for (const targetDir of candidateDirs) {
+    try {
+      await fs.mkdir(targetDir, { recursive: true });
+      await fs.writeFile(path.join(targetDir, filename), buffer);
+      writeSuccess = true;
+    } catch (err) {
+      lastWriteError = err;
+    }
+  }
+
+  if (!writeSuccess) {
+    console.error('Image storage failure across all directories:', lastWriteError);
+    return {
+      success: false,
+      error: 'Failed to write image to server storage. Please try again.',
+      statusCode: 500,
+    };
+  }
+
+  const relativeUrl = `/${subPath}/${filename}`.replace(/\/+/g, '/');
 
   return {
     success: true,
     url: relativeUrl,
     filename,
+    size: buffer.length,
+    mimeType,
   };
 }

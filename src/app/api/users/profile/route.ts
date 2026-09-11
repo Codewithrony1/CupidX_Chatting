@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { checkBlockBetween } from '@/lib/vipAuth';
 
 export async function GET(req: Request) {
   try {
@@ -28,6 +29,13 @@ export async function GET(req: Request) {
 
     if (!targetUser || targetUser.isSuspended) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    if (me.id !== targetUser.id) {
+      const isBlocked = await checkBlockBetween(me.id, targetUser.id);
+      if (isBlocked) {
+        return NextResponse.json({ error: 'User unavailable.' }, { status: 404 });
+      }
     }
 
     const isVIP = targetUser.membershipTier === 'VIP' || (targetUser.subscription?.isActive === true && targetUser.subscription?.plan === 'VIP');

@@ -322,6 +322,11 @@ export default function AdminConsolePage() {
                       {/* Screenshot Proof */}
                       <div className="bg-white/5 p-3.5 rounded-xl border border-white/5 flex flex-col justify-between">
                         <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Uploaded Screenshot Proof</span>
+                        {req.proofUrl && (
+                          <span className="text-[9px] font-mono text-emerald-400 block truncate mb-1" title={req.proofUrl.split('/').pop()}>
+                            {req.proofUrl.split('/').pop()}
+                          </span>
+                        )}
                         {req.proofUrl ? (
                           <div
                             onClick={() => setSelectedImage(req.proofUrl)}

@@ -70,6 +70,43 @@ export async function POST(req: Request) {
       });
     });
 
+    // 1. Sync Cloud Firestore for instant real-time reflection across all devices
+    try {
+      const { getAdminDb } = await import('@/lib/firebaseAdmin');
+      const db = getAdminDb();
+      if (db) {
+        const uids = Array.from(new Set([user!.id, user!.clerkUserId, (user as any).firebaseUid])).filter(Boolean) as string[];
+        await Promise.all(
+          uids.map((uid) =>
+            db.collection('users').doc(uid).set({
+              username: clean,
+              vipUsername: clean,
+              updatedAt: new Date().toISOString(),
+            }, { merge: true }).catch(() => {})
+          )
+        );
+      }
+    } catch (fsErr) {
+      console.warn('Firestore username sync warning (non-critical):', fsErr);
+    }
+
+    // 2. Sync Clerk user metadata
+    try {
+      const targetClerkId = user!.clerkUserId || user!.id;
+      if (targetClerkId && targetClerkId.startsWith('user_')) {
+        const { clerkClient } = await import('@clerk/nextjs/server');
+        const client = await clerkClient();
+        await client.users.updateUserMetadata(targetClerkId, {
+          publicMetadata: {
+            vipUsername: clean,
+            username: clean,
+          },
+        });
+      }
+    } catch (clerkErr) {
+      console.warn('Clerk username sync notice (non-critical):', clerkErr);
+    }
+
     return NextResponse.json({
       success: true,
       username: updated.vipUsername,

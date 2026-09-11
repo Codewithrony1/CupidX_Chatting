@@ -176,11 +176,18 @@ export default function SelfHostedVipModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMsg('Image size exceeds 5MB limit.');
+    const validMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validMimes.includes(file.type)) {
+      setErrorMsg('Invalid image file format. Only JPG, PNG, and WebP images are allowed.');
       return;
     }
 
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('Image must be 5 MB or smaller.');
+      return;
+    }
+
+    setErrorMsg('');
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result as string;

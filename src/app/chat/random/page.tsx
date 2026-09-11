@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Radio,
   Eye,
+  Lock,
 } from 'lucide-react';
 import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
 
@@ -1003,12 +1004,22 @@ export default function KnotChatRandomPage() {
 
   const handleBlockPartner = async () => {
     if (!partner) return;
+    if (!isVIP) {
+      setShowOptionsMenu(false);
+      setShowVipModal(true);
+      return;
+    }
     try {
-      await fetch('/api/chat/block', {
+      const res = await fetch('/api/chat/block', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blockedUserId: partner.id }),
       });
+      if (res.status === 403) {
+        setShowOptionsMenu(false);
+        setShowVipModal(true);
+        return;
+      }
       setShowOptionsMenu(false);
       handleNextPartner();
     } catch (e) {
@@ -1209,10 +1220,17 @@ export default function KnotChatRandomPage() {
                       </button>
                       <button
                         onClick={handleBlockPartner}
-                        className="w-full px-3 py-2 rounded-xl text-left text-rose-300 hover:text-rose-200 hover:bg-rose-500/10 flex items-center gap-2 transition-colors cursor-pointer"
+                        className="w-full px-3 py-2 rounded-xl text-left text-rose-300 hover:text-rose-200 hover:bg-rose-500/10 flex items-center justify-between transition-colors cursor-pointer"
                       >
-                        <Ban className="w-3.5 h-3.5 text-rose-400" />
-                        <span>Block &amp; Skip</span>
+                        <div className="flex items-center gap-2">
+                          <Ban className="w-3.5 h-3.5 text-rose-400" />
+                          <span>Block &amp; Skip</span>
+                        </div>
+                        {!isVIP && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                            <Lock className="w-2.5 h-2.5" /> VIP
+                          </span>
+                        )}
                       </button>
                       <button
                         onClick={handleEndChat}

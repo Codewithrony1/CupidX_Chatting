@@ -17,9 +17,6 @@ export async function POST(
     const body = await req.json().catch(() => ({}));
     const days = parseInt((body.days || 30).toString(), 10);
 
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-
     const user = await prisma.user.findFirst({
       where: {
         OR: [{ id }, { firebaseUid: id }, { clerkUserId: id }],
@@ -30,12 +27,19 @@ export async function POST(
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
+    const now = new Date();
+    let baseExpiryDate = now;
+    if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) > now) {
+      baseExpiryDate = new Date(user.vip_expires_at);
+    }
+    const expiresAt = new Date(baseExpiryDate.getTime() + days * 24 * 60 * 60 * 1000);
+
     await prisma.user.update({
       where: { id: user.id },
       data: {
         membershipTier: 'VIP',
         is_vip: true,
-        vip_started_at: now,
+        vip_started_at: user.vip_started_at || now,
         vip_expires_at: expiresAt,
       },
     });
@@ -47,14 +51,14 @@ export async function POST(
         plan: 'VIP',
         isActive: true,
         subscriptionStatus: 'ACTIVE',
-        startDate: now,
+        startDate: user.vip_started_at || now,
         endDate: expiresAt,
       },
       update: {
         plan: 'VIP',
         isActive: true,
         subscriptionStatus: 'ACTIVE',
-        startDate: now,
+        startDate: user.vip_started_at || now,
         endDate: expiresAt,
       },
     });
@@ -91,6 +95,22 @@ export async function POST(
         };
         const uids = Array.from(new Set([user.id, user.clerkUserId, user.firebaseUid])).filter(Boolean) as string[];
         await Promise.all(uids.map((u) => db.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
+      }
+    } catch (e) {}
+
+    // Sync Clerk metadata
+    try {
+      const targetClerkId = user.clerkUserId || user.id;
+      if (targetClerkId) {
+        const { clerkClient } = await import('@clerk/nextjs/server');
+        const client = await clerkClient();
+        await client.users.updateUserMetadata(targetClerkId, {
+          publicMetadata: {
+            is_vip: true,
+            membershipTier: 'VIP',
+            vip_expires_at: expiresAt.toISOString(),
+          },
+        });
       }
     } catch (e) {}
 

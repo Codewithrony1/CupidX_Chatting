@@ -20,6 +20,7 @@ import {
   AlertCircle,
   X,
   Sparkles,
+  Lock,
 } from 'lucide-react';
 
 interface PartnerInfo {
@@ -430,16 +431,26 @@ export default function PrivateChatPage() {
   // ─── Block & Report ───────────────────────────────────────────────────────
   const handleBlockUser = async () => {
     if (!partner) return;
+    if (!isVip) {
+      alert('🔒 Blocking members is an exclusive VIP feature! Please upgrade to CupidX VIP.');
+      return;
+    }
     if (!confirm(`Are you sure you want to block @${partner.username}?`)) return;
 
     try {
-      await fetch('/api/chat/block', {
+      const res = await fetch('/api/chat/block', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ blockedUserId: partner.id }),
       });
-      alert(`@${partner.username} has been blocked.`);
-      router.push('/friends');
+      if (res.ok) {
+        alert(`@${partner.username} has been blocked.`);
+        router.push('/friends');
+      } else if (res.status === 403) {
+        alert('🔒 CupidX VIP membership required to block members.');
+      } else {
+        alert('Failed to block member.');
+      }
     } catch (e) {
       alert('Failed to block member.');
     }
@@ -552,10 +563,17 @@ export default function PrivateChatPage() {
                     setShowOptions(false);
                     handleBlockUser();
                   }}
-                  className="w-full px-3 py-2 rounded-xl text-left text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition-colors cursor-pointer"
+                  className="w-full px-3 py-2 rounded-xl text-left text-rose-400 hover:bg-rose-500/10 flex items-center justify-between transition-colors cursor-pointer"
                 >
-                  <Ban className="w-3.5 h-3.5" />
-                  <span>Block Member</span>
+                  <div className="flex items-center gap-2">
+                    <Ban className="w-3.5 h-3.5" />
+                    <span>Block Member</span>
+                  </div>
+                  {!isVip && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                      <Lock className="w-2.5 h-2.5" /> VIP
+                    </span>
+                  )}
                 </button>
               </div>
             )}

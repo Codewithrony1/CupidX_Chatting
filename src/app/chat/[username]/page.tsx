@@ -20,7 +20,8 @@ import {
   MessageSquare,
   User,
   Lock,
-  Crown
+  Crown,
+  Loader2
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -140,11 +141,9 @@ export default function ChatWindow() {
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
-  // VIP Ban & Profile View States
-  const [showBanModal, setShowBanModal] = useState(false);
+  // VIP Lock & Profile View States
   const [showVipLockModal, setShowVipLockModal] = useState(false);
   const [showUserProfileModal, setShowUserProfileModal] = useState(false);
-  const [banSubmitting, setBanSubmitting] = useState(false);
 
   const isVIP = Boolean(
     user?.is_vip ||
@@ -152,35 +151,6 @@ export default function ChatWindow() {
     user?.membershipTier === 'VIP' ||
     (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP')
   );
-
-  const handleBanUser = async () => {
-    if (!targetUser) return;
-    setBanSubmitting(true);
-    try {
-      const res = await fetch('/api/chat/ban', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUserId: targetUser.id, action: 'ban' }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert(`@${targetUser.username} has been personally banned. They can no longer connect or match with you.`);
-        setShowBanModal(false);
-        router.push('/dashboard');
-      } else if (res.status === 403 && data.isVipRequired) {
-        setShowBanModal(false);
-        setShowVipLockModal(true);
-      } else {
-        alert(data.error || 'Failed to ban user.');
-      }
-    } catch (e) {
-      console.error(e);
-      alert('Error applying personal ban.');
-    } finally {
-      setBanSubmitting(false);
-    }
-  };
 
   // Input states
   const [inputText, setInputText] = useState('');
@@ -370,21 +340,14 @@ export default function ChatWindow() {
     });
   };
 
-  // Message Delete (Soft Delete) trigger
-  const handleDeleteMessage = useCallback((messageId: string) => {
-    if (!socket) return;
-    if (confirm('Are you sure you want to delete this message?')) {
-      socket.emit('delete_message', { messageId }, (res: any) => {
-        if (res.error) {
-          alert(res.error);
-        }
-      });
-    }
-  }, [socket]);
-
   // Block Action trigger
   const handleBlockUser = async () => {
     if (!targetUser) return;
+    if (!isVIP) {
+      setShowMenu(false);
+      setShowVipLockModal(true);
+      return;
+    }
     const action = blockedByMe ? 'unblock' : 'block';
     
     if (confirm(`Are you sure you want to ${action} @${targetUser.username}?`)) {
@@ -398,6 +361,9 @@ export default function ChatWindow() {
           setBlockedByMe(!blockedByMe);
           setIsBlocked(!blockedByMe);
           setShowMenu(false);
+        } else if (res.status === 403) {
+          setShowMenu(false);
+          setShowVipLockModal(true);
         }
       } catch (e) {
         console.error(e);
@@ -430,72 +396,97 @@ export default function ChatWindow() {
     }
   };
 
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      const res = await fetch(`/api/chat/message?id=${messageId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      }
+    } catch (e) {
+      console.error('Failed to delete message:', e);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex-grow flex items-center justify-center bg-slate-950">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-12 h-12 rounded-full border-t-2 border-r-2 border-purple-500 animate-spin" />
-          <span className="text-slate-400 text-sm">Opening conversation secure tunnel...</span>
-        </div>
+      <div className="min-h-[100dvh] bg-[#07000e] text-white flex flex-col items-center justify-center space-y-4">
+        <Loader2 className="w-8 h-8 text-pink-500 animate-spin" />
+        <p className="text-xs font-bold text-slate-400">Loading private chat...</p>
       </div>
     );
   }
 
-  if (!targetUser) return null;
+  if (!targetUser) {
+    return null;
+  }
 
   return (
-    <div className="flex-grow flex flex-col h-full bg-[#040118] relative">
-      {/* Header */}
-      <header className="px-6 py-4 glass border-b border-white/5 flex items-center justify-between z-10 shrink-0">
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer block md:hidden"
+    <div className="min-h-[100dvh] max-h-[100dvh] bg-[#07000e] text-white flex flex-col overflow-hidden font-sans relative">
+      {/* Dynamic Background */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-lg h-96 bg-gradient-to-b from-pink-600/15 via-purple-600/10 to-transparent blur-3xl pointer-events-none" />
+
+      {/* Top Header */}
+      <header className="px-4 py-3 border-b border-white/5 glass flex items-center justify-between z-20 shrink-0">
+        <div className="flex items-center space-x-3">
+          <Link
+            href="/dashboard"
+            className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5" />
-          </button>
-          
-          <div className="relative">
-            <img
-              src={targetUser.avatarUrl}
-              alt={targetUser.fullName}
-              className="w-10 h-10 rounded-full object-cover bg-slate-800"
-            />
-            {targetUser.isOnline && (
-              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-slate-950" />
-            )}
-          </div>
+          </Link>
 
-          <div>
-            <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-              <span>{targetUser.fullName}</span>
-              <span className="text-sm leading-none" title="Location: India">🇮🇳</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400 border border-white/5 font-normal">
-                @{targetUser.username}
-              </span>
-            </h4>
-            <span className="text-[10px] text-slate-400 font-light block mt-0.5">
-              {targetUser.isOnline ? 'Active Online' : 'Offline'}
-            </span>
+          <div
+            onClick={() => setShowUserProfileModal(true)}
+            className="flex items-center space-x-3 cursor-pointer group"
+          >
+            <div className="relative">
+              <img
+                src={targetUser.avatarUrl || '/default-avatar.png'}
+                alt={targetUser.username}
+                className="w-10 h-10 rounded-full object-cover bg-slate-900 border border-pink-500/30 group-hover:border-pink-400 transition-colors"
+              />
+              {targetUser.isOnline && (
+                <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
+              )}
+            </div>
+
+            <div>
+              <h4 className="text-sm font-black text-white flex items-center gap-1.5 leading-tight">
+                <span>@{targetUser.username}</span>
+                {targetUser.isVIP && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                    <Sparkles className="w-2.5 h-2.5 fill-current" /> VIP
+                  </span>
+                )}
+              </h4>
+              <p className="text-[11px] text-slate-400 font-medium">
+                {targetUserTyping
+                  ? 'Typing...'
+                  : targetUser.isOnline
+                  ? 'Online now'
+                  : 'Offline'}
+              </p>
+            </div>
           </div>
         </div>
 
+        {/* Right Menu Action */}
         <div className="relative">
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer"
+            className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
           >
             <MoreVertical className="w-5 h-5" />
           </button>
 
           {showMenu && (
-            <div className="absolute right-0 mt-2 w-52 glass rounded-2xl p-2 border border-white/10 shadow-2xl z-30 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+            <div className="absolute right-0 mt-2 w-48 rounded-2xl glass-dropdown border border-white/10 p-1.5 shadow-2xl z-50 space-y-1">
               <button
                 onClick={() => {
                   setShowMenu(false);
                   setShowUserProfileModal(true);
                 }}
-                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:bg-white/5 transition-all text-left cursor-pointer"
+                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all text-left cursor-pointer"
               >
                 <User className="w-4 h-4 text-purple-400" />
                 <span>View Profile</span>
@@ -506,26 +497,11 @@ export default function ChatWindow() {
                   setShowMenu(false);
                   handleBlockUser();
                 }}
-                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-pink-400 hover:bg-pink-500/10 transition-all text-left cursor-pointer"
-              >
-                <Ban className="w-4 h-4" />
-                <span>{blockedByMe ? 'Unblock User' : 'Block User'}</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setShowMenu(false);
-                  if (isVIP) {
-                    setShowBanModal(true);
-                  } else {
-                    setShowVipLockModal(true);
-                  }
-                }}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-yellow-400 hover:bg-yellow-500/10 transition-all text-left cursor-pointer"
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-pink-400 hover:bg-pink-500/10 transition-all text-left cursor-pointer"
               >
                 <div className="flex items-center space-x-2.5">
-                  <Sparkles className="w-4 h-4 text-yellow-400 fill-current" />
-                  <span>Ban User</span>
+                  <Ban className="w-4 h-4" />
+                  <span>{blockedByMe ? 'Unblock User' : 'Block User'}</span>
                 </div>
                 {!isVIP && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
@@ -717,47 +693,7 @@ export default function ChatWindow() {
         </div>
       )}
 
-      {/* VIP User Personal Ban Confirmation Modal */}
-      {showBanModal && targetUser && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-yellow-500/30 shadow-2xl">
-            <button
-              onClick={() => setShowBanModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
 
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-yellow-500 to-amber-600 flex items-center justify-center mx-auto text-slate-950 shadow-lg shadow-yellow-500/20">
-              <Sparkles className="w-6 h-6 fill-current" />
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="text-lg font-black text-white">Ban @{targetUser.username}?</h3>
-              <p className="text-xs text-pink-200/80 leading-relaxed px-2">
-                This will prevent this user from connecting or matching with you across Cupidx discovery features.
-              </p>
-            </div>
-
-            <div className="flex items-center space-x-3 pt-2">
-              <button
-                onClick={() => setShowBanModal(false)}
-                className="flex-1 py-3 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all cursor-pointer"
-              >
-                Cancel
-              </button>
-
-              <button
-                onClick={handleBanUser}
-                disabled={banSubmitting}
-                className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
-              >
-                {banSubmitting ? 'Banning...' : 'Ban User'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Public User Profile View Modal (Requirement 13 & 14) */}
       {showUserProfileModal && targetUser && (

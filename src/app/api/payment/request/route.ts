@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import crypto from 'crypto';
-import fs from 'fs/promises';
-import path from 'path';
+import { saveBase64Image } from '@/lib/safeImageUpload';
 
 export async function POST(req: Request) {
   try {
@@ -68,39 +67,27 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Screenshot Processing (Secure MIME & Magic Bytes Validation)
+    // 5. Screenshot Processing (Secure MIME & Magic Bytes Validation via safeImageUpload)
     let screenshotUrl: string | null = null;
     let screenshotKey: string | null = null;
 
     if (hasScreenshot) {
-      const matches = screenshot.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        const rawExt = matches[1].toLowerCase();
-        const ext = rawExt === 'jpeg' ? 'jpg' : (rawExt === 'png' ? 'png' : (rawExt === 'webp' ? 'webp' : 'jpg'));
-        const base64Data = matches[2];
-        const buffer = Buffer.from(base64Data, 'base64');
+      const uploadRes = await saveBase64Image(
+        screenshot,
+        'uploads/receipts',
+        `payment-proof_${clerkId}`,
+        5 * 1024 * 1024
+      );
 
-        if (buffer.length > 5 * 1024 * 1024) {
-          return NextResponse.json({ error: 'Screenshot file size exceeds 5MB limit.' }, { status: 400 });
-        }
-
-        const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
-        const isJpg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-        const isWebp = buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46;
-
-        if (!isPng && !isJpg && !isWebp) {
-          return NextResponse.json({ error: 'Invalid image file format. Only JPG, PNG, and WebP are allowed.' }, { status: 400 });
-        }
-
-        const randomKey = crypto.randomBytes(16).toString('hex');
-        const filename = `cpx_ss_${Date.now()}_${randomKey}.${ext}`;
-        const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'receipts');
-        await fs.mkdir(uploadDir, { recursive: true });
-
-        await fs.writeFile(path.join(uploadDir, filename), buffer);
-        screenshotUrl = `/uploads/receipts/${filename}`;
-        screenshotKey = filename;
+      if (!uploadRes.success) {
+        return NextResponse.json(
+          { error: uploadRes.error || 'Failed to process payment screenshot.' },
+          { status: uploadRes.statusCode || 400 }
+        );
       }
+
+      screenshotUrl = uploadRes.url || null;
+      screenshotKey = uploadRes.filename || null;
     }
 
     // 6. Plan & Pricing Configuration (Server-Side Canonical Source of Truth)

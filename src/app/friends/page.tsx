@@ -93,7 +93,7 @@ interface SearchedUserItem {
 
 export default function FriendsHubPage() {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
 
   const isVIP = Boolean(
     user?.membershipTier === 'VIP' ||
@@ -227,6 +227,9 @@ export default function FriendsHubPage() {
       const data = await res.json();
       if (res.ok && data.success) {
         setClaimedUsername(data.username);
+        try {
+          await refreshUser?.();
+        } catch (e) {}
         alert(data.message);
       } else {
         alert(data.error || 'Failed to claim username.');

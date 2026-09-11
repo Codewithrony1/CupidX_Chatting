@@ -39,6 +39,8 @@ export async function GET(req: Request) {
           role: user.role,
           membershipTier: isVIP ? 'VIP' : 'FREE',
           is_vip: isVIP,
+          vip_started_at: user.vip_started_at || user.subscription?.startDate || null,
+          vip_expires_at: user.vip_expires_at || user.subscription?.endDate || null,
           profileCompleted: isProfileDone,
           profileLocked: isProfileDone,
           profile: user.profile,

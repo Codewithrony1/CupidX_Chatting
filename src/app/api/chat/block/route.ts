@@ -1,12 +1,25 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { isUserVip } from '@/lib/vipAuth';
 
 export async function GET(req: Request) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Strict VIP Gating: Only active VIP users can view blocked users
+    if (!isUserVip(user)) {
+      return NextResponse.json(
+        {
+          error: 'CupidX VIP membership required to view blocked users.',
+          isVipRequired: true,
+          blockedUsers: [],
+        },
+        { status: 403 }
+      );
     }
 
     const blocks = await prisma.block.findMany({
@@ -49,6 +62,17 @@ export async function POST(req: Request) {
     const user = await getCurrentUser(req);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Strict VIP Gating: Free users cannot block or unblock
+    if (!isUserVip(user)) {
+      return NextResponse.json(
+        {
+          error: 'CupidX VIP membership required to block or unblock users.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
     }
 
     const body = await req.json().catch(() => ({}));

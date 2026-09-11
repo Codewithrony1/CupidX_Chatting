@@ -157,19 +157,14 @@ export async function POST(req: Request) {
       data: { status: 'EXPIRED' },
     });
 
-    // 3. Find list of blocked or banned user IDs + excludePartnerId
+    // 3. Find list of blocked user IDs + excludePartnerId
     const blockedRelations = await prisma.block.findMany({
       where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
     });
     const blockedUserIds = blockedRelations.map((b) => (b.blockerId === user.id ? b.blockedId : b.blockerId));
 
-    const bannedRelations = await prisma.userBan.findMany({
-      where: { OR: [{ bannedByUserId: user.id }, { bannedUserId: user.id }] },
-    });
-    const bannedUserIds = bannedRelations.map((b) => (b.bannedByUserId === user.id ? b.bannedUserId : b.bannedByUserId));
-
     const excludeUserIds = Array.from(
-      new Set([user.id, ...blockedUserIds, ...bannedUserIds, ...(excludePartnerId ? [excludePartnerId] : [])])
+      new Set([user.id, ...blockedUserIds, ...(excludePartnerId ? [excludePartnerId] : [])])
     );
 
     // 4. Find all active WAITING candidates currently on the website

@@ -61,7 +61,8 @@ export async function POST(req: Request) {
     let screenshotUrl = paymentRecord.screenshotUrl;
 
     if (screenshotData && screenshotData.startsWith('data:image/')) {
-      const uploadRes = await saveBase64Image(screenshotData, 'uploads/receipts', `utr_${user.username}`);
+      const clerkId = user.clerkUserId || user.id;
+      const uploadRes = await saveBase64Image(screenshotData, 'uploads/receipts', `payment-proof_${clerkId}`);
       if (uploadRes.success && uploadRes.url) {
         screenshotUrl = uploadRes.url;
       } else {

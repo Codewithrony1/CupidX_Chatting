@@ -32,19 +32,6 @@ interface BlockedUser {
   };
 }
 
-interface BannedUserItem {
-  id: string;
-  bannedUserId: string;
-  bannedUser: {
-    id: string;
-    username: string;
-    fullName: string;
-    profile?: {
-      avatarUrl?: string;
-    };
-  };
-}
-
 export default function SettingsPage() {
   const { user, logout, refreshUser } = useAuth();
   const router = useRouter();
@@ -58,28 +45,22 @@ export default function SettingsPage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
-  const [bannedUsers, setBannedUsers] = useState<BannedUserItem[]>([]);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
 
-  // Fetch blocked & personal banned users list
+  // Fetch blocked users list (VIP exclusive)
   const fetchPrivacyLists = async () => {
     try {
-      const [blockRes, banRes] = await Promise.all([
-        fetch('/api/chat/block'),
-        fetch('/api/chat/ban'),
-      ]);
-
+      setLoadingBlocks(true);
+      const blockRes = await fetch('/api/chat/block');
       if (blockRes.ok) {
         const data = await blockRes.json();
         setBlockedUsers(data.blockedUsers || []);
-      }
-
-      if (banRes.ok) {
-        const data = await banRes.json();
-        setBannedUsers(data.bans || []);
+      } else {
+        setBlockedUsers([]);
       }
     } catch (e) {
       console.error(e);
+      setBlockedUsers([]);
     } finally {
       setLoadingBlocks(false);
     }
@@ -130,29 +111,6 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         setBlockedUsers((prev) => prev.filter((b) => b.blockedId !== blockedId));
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleUnban = async (targetUserId: string) => {
-    if (!isVIP) {
-      alert('🔒 Unbanning users is an exclusive VIP feature! Active VIP membership is required to manage personal bans.');
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/chat/ban', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUserId, action: 'unban' }),
-      });
-      if (res.ok) {
-        setBannedUsers((prev) => prev.filter((b) => b.bannedUserId !== targetUserId));
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Failed to unban user.');
       }
     } catch (e) {
       console.error(e);
@@ -236,22 +194,39 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Section 2: Privacy (Blocked & Banned Users) */}
+          {/* Section 2: Privacy (Blocked Users - VIP Exclusive) */}
           <div className="glass-romantic rounded-3xl p-6 space-y-5">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Shield className="w-4 h-4 text-purple-400" />
-              Privacy & User Moderation
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Shield className="w-4 h-4 text-purple-400" />
+                <span>Privacy &amp; Blocked Users</span>
+              </h3>
+              {!isVIP && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                  <Lock className="w-3 h-3" /> VIP Feature
+                </span>
+              )}
+            </div>
 
             {/* Blocked Users Sub-Section */}
             <div className="space-y-3">
-              <h4 className="text-xs font-extrabold text-pink-300 uppercase tracking-wider">Blocked Users (Free & Everyone)</h4>
+              <h4 className="text-xs font-extrabold text-pink-300 uppercase tracking-wider">Blocked Members List</h4>
 
-              {loadingBlocks ? (
-                <div className="text-xs text-pink-200/50">Loading list...</div>
+              {!isVIP ? (
+                <div className="text-xs text-pink-200/70 p-4 rounded-2xl bg-white/5 border border-yellow-500/20 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-yellow-300 font-bold">
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Exclusive VIP Privacy Control</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Blocking members and managing your blocked users list is an exclusive CupidX VIP privilege. Upgrade to VIP to block users and keep your experience personalized.
+                  </p>
+                </div>
+              ) : loadingBlocks ? (
+                <div className="text-xs text-pink-200/50">Loading blocked members...</div>
               ) : blockedUsers.length === 0 ? (
                 <div className="text-xs text-pink-200/60 italic p-3 rounded-2xl bg-white/5 border border-white/5">
-                  You have not blocked any users.
+                  You have not blocked any members.
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -278,61 +253,6 @@ export default function SettingsPage() {
                         className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/40 text-pink-300 text-xs font-bold border border-pink-500/30 transition-all cursor-pointer"
                       >
                         Unblock
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* VIP Personal Banned Users Sub-Section */}
-            <div className="space-y-3 pt-2 border-t border-pink-500/15">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-extrabold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 fill-current" />
-                  <span>Banned Users (VIP Personal Bans)</span>
-                </h4>
-                {!isVIP && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
-                    <Lock className="w-3 h-3" /> VIP Feature
-                  </span>
-                )}
-              </div>
-
-              {loadingBlocks ? (
-                <div className="text-xs text-pink-200/50">Loading list...</div>
-              ) : bannedUsers.length === 0 ? (
-                <div className="text-xs text-pink-200/60 italic p-3 rounded-2xl bg-white/5 border border-white/5">
-                  You have not personally banned any users.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {bannedUsers.map((item) => (
-                    <div
-                      key={item.id}
-                      className="p-3 rounded-2xl bg-white/5 border border-yellow-500/20 flex items-center justify-between"
-                    >
-                      <div className="flex items-center space-x-3">
-                        <img
-                          src={item.bannedUser.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${item.bannedUser.username}`}
-                          alt={item.bannedUser.username}
-                          className="w-8 h-8 rounded-full object-cover bg-slate-800 border border-yellow-500/40"
-                        />
-                        <div>
-                          <p className="text-xs font-bold text-white flex items-center gap-1">
-                            <span>@{item.bannedUser.username}</span>
-                            <Sparkles className="w-3 h-3 text-yellow-400 fill-current shrink-0" />
-                          </p>
-                          <p className="text-[10px] text-pink-200/60">{item.bannedUser.fullName}</p>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleUnban(item.bannedUserId)}
-                        className="px-3 py-1.5 rounded-xl bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-300 text-xs font-bold border border-yellow-500/30 transition-all cursor-pointer"
-                      >
-                        Unban
                       </button>
                     </div>
                   ))}
