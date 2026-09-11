@@ -80,7 +80,12 @@ export default function ChatWindow() {
   const [showUserProfileModal, setShowUserProfileModal] = useState(false);
   const [banSubmitting, setBanSubmitting] = useState(false);
 
-  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
+  const isVIP = Boolean(
+    user?.is_vip ||
+    user?.isVIP ||
+    user?.membershipTier === 'VIP' ||
+    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP')
+  );
 
   const handleBanUser = async () => {
     if (!targetUser) return;
@@ -272,6 +277,10 @@ export default function ChatWindow() {
   // Send Message trigger
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isVIP) {
+      alert('You cannot message this person. Get VIP to chat.');
+      return;
+    }
     if (!socket || !targetUser || (!inputText.trim() && !imageFile)) return;
 
     // Clear typing indicator instantly
@@ -566,6 +575,19 @@ export default function ChatWindow() {
                 ? 'You have blocked this user. Unblock them to resume messaging.'
                 : 'You have been blocked from messaging this user.'}
             </span>
+          </div>
+        ) : !isVIP ? (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-pink-500/10 via-purple-500/10 to-amber-500/10 border border-pink-500/30">
+            <div className="flex items-center space-x-2.5 text-xs text-pink-200">
+              <AlertCircle className="w-4 h-4 text-pink-400 shrink-0" />
+              <span>You cannot message this person. Get VIP to chat.</span>
+            </div>
+            <Link
+              href="/vip"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 via-rose-500 to-amber-500 text-white text-xs font-black tracking-wide shadow-md shadow-pink-500/20 hover:brightness-110 active:scale-95 transition-all text-center whitespace-nowrap"
+            >
+              Get VIP
+            </Link>
           </div>
         ) : (
           <form onSubmit={handleSendMessage} className="space-y-3">

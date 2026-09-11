@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAuthUser, getCanonicalPair, checkBlockBetween } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, checkBlockBetween, isUserVip } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 
 export async function GET(
@@ -129,6 +129,17 @@ export async function POST(
   try {
     const { user, response } = await requireAuthUser(req);
     if (response) return response;
+
+    // Strict Asymmetric Rule: Only VIP users can send messages
+    if (!isUserVip(user)) {
+      return NextResponse.json(
+        {
+          error: 'You cannot message this person. Get VIP to chat.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
+    }
 
     const { id: conversationId } = await params;
 

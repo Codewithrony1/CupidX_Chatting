@@ -1,12 +1,23 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAuthUser, getCanonicalPair, checkBlockBetween } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, checkBlockBetween, isUserVip } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 
 export async function POST(req: Request) {
   try {
     const { user, response } = await requireAuthUser(req);
     if (response) return response;
+
+    // Strict Asymmetric Rule: Only VIP users can initiate calls
+    if (!isUserVip(user)) {
+      return NextResponse.json(
+        {
+          error: 'You cannot call this person. Get VIP to chat.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
+    }
 
     if (!checkRateLimit(`call_start_${user!.id}`, 6, 60000)) {
       return NextResponse.json({ error: 'Call rate limit reached. Please wait a moment.' }, { status: 429 });

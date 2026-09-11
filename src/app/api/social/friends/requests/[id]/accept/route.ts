@@ -37,12 +37,11 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: You are not the recipient of this request.' }, { status: 403 });
     }
 
-    // Strict VIP enforcement: Both users must be VIP to connect as friends
-    if (!isUserVip(user) || !isUserVip(request.sender)) {
+    // Verify sender is VIP (Free users can accept friend requests from VIP users)
+    if (!isUserVip(request.sender)) {
       return NextResponse.json(
         {
-          error: 'Both users must be VIP members to connect.',
-          contactAdmin: 'Contact the administrator if you want the other user to get VIP access.',
+          error: 'The sender is no longer an active VIP member.',
           isVipRequired: true,
         },
         { status: 403 }

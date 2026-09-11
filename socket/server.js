@@ -807,6 +807,58 @@ io.on('connection', async (socket) => {
         return;
       }
 
+      // Asymmetric VIP enforcement: Only VIP members can send messages
+      let senderData = await getCachedUserData(userId);
+      let isSenderVip = senderData?.isVIP === true;
+      if (!isSenderVip) {
+        // Double-check database in case user recently purchased VIP
+        const freshUser = await prisma.user.findFirst({
+          where: { OR: [{ id: userId }, { clerkUserId: userId }] },
+          include: { subscription: true },
+        });
+        const now = new Date();
+        if (freshUser) {
+          if (freshUser.vip_expires_at && new Date(freshUser.vip_expires_at).getTime() <= now.getTime()) {
+            isSenderVip = false;
+          } else if (freshUser.subscription) {
+            const subEnd = freshUser.subscription.endDate || freshUser.subscription.currentPeriodEnd;
+            if (subEnd && new Date(subEnd).getTime() <= now.getTime()) {
+              isSenderVip = false;
+            } else if (freshUser.subscription.isActive === true && freshUser.subscription.plan === 'VIP') {
+              isSenderVip = true;
+            }
+          }
+          if (!isSenderVip && (freshUser.is_vip || freshUser.membershipTier === 'VIP')) {
+            if (!freshUser.vip_expires_at || new Date(freshUser.vip_expires_at).getTime() > now.getTime()) {
+              isSenderVip = true;
+            }
+          }
+        }
+        if (isSenderVip) {
+          userCache.delete(userId);
+        }
+      }
+
+      if (!isSenderVip) {
+        if (typeof callback === 'function') {
+          callback({
+            error: 'You cannot message this person. Get VIP to chat.',
+            isVipRequired: true,
+          });
+        }
+        return;
+      }
+
+      // Verify active friendship
+      const [u1, u2] = userId < receiverId ? [userId, receiverId] : [receiverId, userId];
+      const friendship = await prisma.friendship.findUnique({
+        where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+      });
+      if (!friendship) {
+        if (typeof callback === 'function') callback({ error: 'You must be friends to exchange messages.' });
+        return;
+      }
+
       const msgObj = {
         id: `pmsg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         clientMessageId: clientMessageId || null,

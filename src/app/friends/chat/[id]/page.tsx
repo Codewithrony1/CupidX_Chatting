@@ -52,6 +52,13 @@ export default function PrivateChatPage() {
   const { user } = useAuth();
   const conversationId = params?.id as string;
 
+  const isVip = Boolean(
+    user?.is_vip ||
+    user?.isVIP ||
+    user?.membershipTier === 'VIP' ||
+    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP')
+  );
+
   const [partner, setPartner] = useState<PartnerInfo | null>(null);
   const [messages, setMessages] = useState<SocialMessage[]>([]);
   const [inputText, setInputText] = useState('');
@@ -169,6 +176,10 @@ export default function PrivateChatPage() {
   // ─── Send Message ─────────────────────────────────────────────────────────
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!isVip) {
+      alert('You cannot message this person. Get VIP to chat.');
+      return;
+    }
     if ((!inputText.trim() && !selectedFile) || sending) return;
 
     const textToSend = inputText.trim();
@@ -568,41 +579,56 @@ export default function PrivateChatPage() {
 
       {/* Message Composer */}
       <footer className="p-3 bg-slate-950/80 border-t border-white/10 shrink-0 backdrop-blur-md">
-        <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-w-4xl mx-auto">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            className="hidden"
-          />
+        {!isVip ? (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-pink-500/10 via-purple-500/10 to-amber-500/10 border border-pink-500/30 max-w-4xl mx-auto">
+            <div className="flex items-center space-x-2.5 text-xs text-pink-200">
+              <AlertCircle className="w-4 h-4 text-pink-400 shrink-0" />
+              <span>You cannot message this person. Get VIP to chat.</span>
+            </div>
+            <Link
+              href="/vip"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 via-rose-500 to-amber-500 text-white text-xs font-black tracking-wide shadow-md shadow-pink-500/20 hover:brightness-110 active:scale-95 transition-all text-center whitespace-nowrap"
+            >
+              Get VIP
+            </Link>
+          </div>
+        ) : (
+          <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-w-4xl mx-auto">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+            />
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-pink-400 border border-white/10 transition-all cursor-pointer"
-            title="Attach Image"
-          >
-            <ImageIcon className="w-4 h-4" />
-          </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-pink-400 border border-white/10 transition-all cursor-pointer"
+              title="Attach Image"
+            >
+              <ImageIcon className="w-4 h-4" />
+            </button>
 
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Type a private message..."
-            maxLength={2000}
-            className="flex-1 px-4 py-2.5 rounded-2xl bg-black/50 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-pink-500 transition-all font-sans"
-          />
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Type a private message..."
+              maxLength={2000}
+              className="flex-1 px-4 py-2.5 rounded-2xl bg-black/50 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-pink-500 transition-all font-sans"
+            />
 
-          <button
-            type="submit"
-            disabled={(!inputText.trim() && !selectedFile) || sending}
-            className="p-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 disabled:opacity-40 hover:from-pink-500 hover:to-purple-500 text-white font-bold cursor-pointer shadow-md shadow-pink-500/20 active:scale-95 transition-all shrink-0"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={(!inputText.trim() && !selectedFile) || sending}
+              className="p-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 disabled:opacity-40 hover:from-pink-500 hover:to-purple-500 text-white font-bold cursor-pointer shadow-md shadow-pink-500/20 active:scale-95 transition-all shrink-0"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+        )}
       </footer>
 
       {/* Fullscreen Image Zoom Modal */}

@@ -95,10 +95,12 @@ export default function FriendsHubPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-  const isVIP =
+  const isVIP = Boolean(
     user?.membershipTier === 'VIP' ||
     user?.is_vip ||
-    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
+    user?.isVIP ||
+    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP')
+  );
 
   // Navigation tab
   const [activeTab, setActiveTab] = useState<'friends' | 'chats' | 'requests' | 'discover'>('friends');
@@ -849,83 +851,104 @@ export default function FriendsHubPage() {
 
             {/* TAB CONTENT 4: DISCOVER / SEARCH */}
             {activeTab === 'discover' && (
-              <div className="space-y-4">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-500 absolute left-4 top-3.5" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => handleSearchChange(e.target.value)}
-                    placeholder="Search by @username or name..."
-                    className="w-full pl-11 pr-4 py-3 rounded-2xl bg-black/40 border border-white/10 text-white text-xs placeholder:text-slate-600 focus:outline-none focus:border-pink-500 transition-all font-sans"
-                  />
-                  {searching && (
-                    <span className="absolute right-4 top-3.5 text-xs text-slate-400 animate-spin">⏳</span>
-                  )}
+              !isVIP ? (
+                <div className="p-8 text-center rounded-3xl bg-gradient-to-b from-white/5 to-pink-500/5 border border-pink-500/20 space-y-4">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-yellow-500/20 via-pink-500/20 to-purple-500/20 border border-pink-500/30 flex items-center justify-center mx-auto text-yellow-400 shadow-lg">
+                    <Crown className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-1.5 max-w-sm mx-auto">
+                    <h4 className="text-base font-black text-white">VIP Discovery</h4>
+                    <p className="text-xs text-pink-200/70 leading-relaxed">
+                      Searching members and sending friend requests is an exclusive VIP feature. Upgrade to connect directly with anyone.
+                    </p>
+                  </div>
+                  <Link
+                    href="/vip"
+                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-amber-500 text-white font-black text-xs shadow-lg shadow-pink-500/20 hover:brightness-110 active:scale-95 transition-all"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Get CupidX VIP</span>
+                  </Link>
                 </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-500 absolute left-4 top-3.5" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      placeholder="Search by @username or name..."
+                      className="w-full pl-11 pr-4 py-3 rounded-2xl bg-black/40 border border-white/10 text-white text-xs placeholder:text-slate-600 focus:outline-none focus:border-pink-500 transition-all font-sans"
+                    />
+                    {searching && (
+                      <span className="absolute right-4 top-3.5 text-xs text-slate-400 animate-spin">⏳</span>
+                    )}
+                  </div>
 
-                {searchResults.length === 0 && searchQuery.length >= 2 && !searching && (
-                  <p className="text-xs text-slate-400 text-center py-6">
-                    No members found matching &ldquo;{searchQuery}&rdquo;.
-                  </p>
-                )}
+                  {searchResults.length === 0 && searchQuery.length >= 2 && !searching && (
+                    <p className="text-xs text-slate-400 text-center py-6">
+                      No members found matching &ldquo;{searchQuery}&rdquo;.
+                    </p>
+                  )}
 
-                <div className="space-y-3">
-                  {searchResults.map((target) => (
-                    <div
-                      key={target.id}
-                      className="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-4"
-                    >
-                      <div className="flex items-center space-x-3 overflow-hidden">
-                        <div className="w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
-                          {target.avatarUrl ? (
-                            <img src={target.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  <div className="space-y-3">
+                    {searchResults.map((target) => (
+                      <div
+                        key={target.id}
+                        className="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-4"
+                      >
+                        <div className="flex items-center space-x-3 overflow-hidden">
+                          <div className="w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
+                            {target.avatarUrl ? (
+                              <img src={target.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-xl">{target.avatarEmoji}</span>
+                            )}
+                          </div>
+
+                          <div className="overflow-hidden">
+                            <h4 className="text-sm font-bold text-white truncate">{target.displayName}</h4>
+                            <p className="text-xs font-mono font-bold text-pink-400 truncate">@{target.username}</p>
+                            {target.bio && <p className="text-[11px] text-slate-400 truncate">{target.bio}</p>}
+                          </div>
+                        </div>
+
+                        {/* Relationship status buttons */}
+                        <div className="shrink-0">
+                          {target.relationshipStatus === 'FRIENDS' ? (
+                            <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-1">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Friends</span>
+                            </span>
+                          ) : target.relationshipStatus === 'REQUEST_SENT' ? (
+                            <span className="px-3 py-1.5 rounded-xl bg-white/5 text-slate-400 text-xs font-bold flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              <span>Requested</span>
+                            </span>
+                          ) : target.relationshipStatus === 'REQUEST_RECEIVED' ? (
+                            <button
+                              onClick={() => target.requestId && handleAcceptRequest(target.requestId)}
+                              className="px-3.5 py-1.5 rounded-xl bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
+                            >
+                              Accept
+                            </button>
                           ) : (
-                            <span className="text-xl">{target.avatarEmoji}</span>
+                            <button
+                              onClick={() => handleSendRequest(target.id)}
+                              disabled={actionLoading === target.id}
+                              className="px-3.5 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-pink-500/20 active:scale-95 transition-all"
+                            >
+                              <UserPlus className="w-3.5 h-3.5" />
+                              <span>Add Friend</span>
+                            </button>
                           )}
                         </div>
-
-                        <div className="overflow-hidden">
-                          <h4 className="text-sm font-bold text-white truncate">{target.displayName}</h4>
-                          <p className="text-xs font-mono font-bold text-pink-400 truncate">@{target.username}</p>
-                          {target.bio && <p className="text-[11px] text-slate-400 truncate">{target.bio}</p>}
-                        </div>
                       </div>
-
-                      {/* Relationship status buttons */}
-                      <div className="shrink-0">
-                        {target.relationshipStatus === 'FRIENDS' ? (
-                          <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-1">
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Friends</span>
-                          </span>
-                        ) : target.relationshipStatus === 'REQUEST_SENT' ? (
-                          <span className="px-3 py-1.5 rounded-xl bg-white/5 text-slate-400 text-xs font-bold flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5" />
-                            <span>Requested</span>
-                          </span>
-                        ) : target.relationshipStatus === 'REQUEST_RECEIVED' ? (
-                          <button
-                            onClick={() => target.requestId && handleAcceptRequest(target.requestId)}
-                            className="px-3.5 py-1.5 rounded-xl bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
-                          >
-                            Accept
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleSendRequest(target.id)}
-                            disabled={actionLoading === target.id}
-                            className="px-3.5 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-pink-500/20 active:scale-95 transition-all"
-                          >
-                            <UserPlus className="w-3.5 h-3.5" />
-                            <span>Add Friend</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )
             )}
           </div>
         )}

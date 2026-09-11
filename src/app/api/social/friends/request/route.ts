@@ -12,8 +12,7 @@ export async function POST(req: Request) {
     if (!isUserVip(user)) {
       return NextResponse.json(
         {
-          error: 'Both users must be VIP members to connect.',
-          contactAdmin: 'Contact the administrator if you want the other user to get VIP access.',
+          error: 'Only VIP members can send friend requests.',
           isVipRequired: true,
         },
         { status: 403 }
@@ -62,18 +61,6 @@ export async function POST(req: Request) {
 
     if (targetUser.id === user!.id) {
       return NextResponse.json({ error: 'You cannot send a friend request to yourself.' }, { status: 400 });
-    }
-
-    // Verify recipient is also VIP
-    if (!isUserVip(targetUser)) {
-      return NextResponse.json(
-        {
-          error: 'Both users must be VIP members to connect.',
-          contactAdmin: 'Contact the administrator if you want the other user to get VIP access.',
-          isVipRequired: true,
-        },
-        { status: 403 }
-      );
     }
 
     // Check block status

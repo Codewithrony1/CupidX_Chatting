@@ -1,12 +1,23 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAuthUser, getCanonicalPair } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, isUserVip } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 
 export async function GET(req: Request) {
   try {
     const { user, response } = await requireAuthUser(req);
     if (response) return response;
+
+    // Strict VIP enforcement: Only VIP users can search and discover members
+    if (!isUserVip(user)) {
+      return NextResponse.json(
+        {
+          error: 'VIP membership required to search and discover members.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
+    }
 
     if (!checkRateLimit(`user_search_${user!.id}`, 30, 60000)) {
       return NextResponse.json({ error: 'Search rate limit reached. Please slow down.' }, { status: 429 });
