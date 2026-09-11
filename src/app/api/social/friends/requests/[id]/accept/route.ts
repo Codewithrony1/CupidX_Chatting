@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAuthUser, getCanonicalPair } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, isUserVip } from '@/lib/vipAuth';
 
 export async function POST(
   req: Request,
@@ -14,7 +14,19 @@ export async function POST(
 
     const request = await prisma.friendRequest.findUnique({
       where: { id: requestId },
-      include: { sender: { select: { id: true, vipUsername: true, username: true, displayName: true } } },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            vipUsername: true,
+            username: true,
+            displayName: true,
+            is_vip: true,
+            membershipTier: true,
+            subscription: true,
+          },
+        },
+      },
     });
 
     if (!request) {
@@ -25,8 +37,27 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: You are not the recipient of this request.' }, { status: 403 });
     }
 
+    // Strict VIP enforcement: Both users must be VIP to connect as friends
+    if (!isUserVip(user) || !isUserVip(request.sender)) {
+      return NextResponse.json(
+        {
+          error: 'Both users must be VIP members to connect.',
+          contactAdmin: 'Contact the administrator if you want the other user to get VIP access.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
+    }
+
     if (request.status === 'ACCEPTED') {
       return NextResponse.json({ message: 'Friend request already accepted.' });
+    }
+
+    if (request.status !== 'PENDING') {
+      return NextResponse.json(
+        { error: 'Friend request is no longer valid or has been cancelled.' },
+        { status: 400 }
+      );
     }
 
     const [u1, u2] = getCanonicalPair(user!.id, request.senderId);

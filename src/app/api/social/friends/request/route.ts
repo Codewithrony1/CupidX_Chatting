@@ -1,12 +1,24 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAuthUser, getCanonicalPair, checkBlockBetween } from '@/lib/vipAuth';
+import { requireAuthUser, getCanonicalPair, checkBlockBetween, isUserVip } from '@/lib/vipAuth';
 import { checkRateLimit } from '@/lib/socialRateLimit';
 
 export async function POST(req: Request) {
   try {
     const { user, response } = await requireAuthUser(req);
     if (response) return response;
+
+    // Verify sender is VIP
+    if (!isUserVip(user)) {
+      return NextResponse.json(
+        {
+          error: 'Both users must be VIP members to connect.',
+          contactAdmin: 'Contact the administrator if you want the other user to get VIP access.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
+    }
 
     if (!checkRateLimit(`friend_req_${user!.id}`, 10, 60000)) {
       return NextResponse.json({ error: 'Friend request rate limit reached. Please wait a minute.' }, { status: 429 });
@@ -19,18 +31,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Target user identifier is required.' }, { status: 400 });
     }
 
-    // Resolve target user
+    // Resolve target user with VIP membership details
     let targetUser = null;
+    const selectFields = {
+      id: true,
+      isSuspended: true,
+      vipUsername: true,
+      username: true,
+      is_vip: true,
+      membershipTier: true,
+      subscription: true,
+    };
+
     if (targetUserId) {
       targetUser = await prisma.user.findUnique({
         where: { id: targetUserId },
-        select: { id: true, isSuspended: true, vipUsername: true, username: true },
+        select: selectFields,
       });
     } else {
       const cleanUsername = targetUsername.toLowerCase().trim().replace(/^@/, '');
       targetUser = await prisma.user.findFirst({
         where: { OR: [{ vipUsername: cleanUsername }, { username: cleanUsername }] },
-        select: { id: true, isSuspended: true, vipUsername: true, username: true },
+        select: selectFields,
       });
     }
 
@@ -40,6 +62,18 @@ export async function POST(req: Request) {
 
     if (targetUser.id === user!.id) {
       return NextResponse.json({ error: 'You cannot send a friend request to yourself.' }, { status: 400 });
+    }
+
+    // Verify recipient is also VIP
+    if (!isUserVip(targetUser)) {
+      return NextResponse.json(
+        {
+          error: 'Both users must be VIP members to connect.',
+          contactAdmin: 'Contact the administrator if you want the other user to get VIP access.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
     }
 
     // Check block status
@@ -76,8 +110,10 @@ export async function POST(req: Request) {
           // The other user already sent a request to us! Auto-accept into friendship!
           const [cu1, cu2] = getCanonicalPair(user!.id, targetUser.id);
           const [friendship] = await prisma.$transaction([
-            prisma.friendship.create({
-              data: { user1Id: cu1, user2Id: cu2 },
+            prisma.friendship.upsert({
+              where: { user1Id_user2Id: { user1Id: cu1, user2Id: cu2 } },
+              update: {},
+              create: { user1Id: cu1, user2Id: cu2 },
             }),
             prisma.friendRequest.update({
               where: { id: existingRequest.id },
@@ -131,6 +167,12 @@ export async function POST(req: Request) {
       message: 'Friend request sent successfully!',
     });
   } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return NextResponse.json({
+        success: true,
+        message: 'Friend request is already pending.',
+      });
+    }
     console.error('Send friend request error:', error);
     return NextResponse.json({ error: 'Failed to send friend request.' }, { status: 500 });
   }

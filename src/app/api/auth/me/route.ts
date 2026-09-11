@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, signToken } from '@/lib/auth';
+import { isUserVip } from '@/lib/vipAuth';
 
 export async function GET(req: Request) {
   try {
     const user: any = await getCurrentUser(req);
 
     if (user) {
-      const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
+      const isVIP = isUserVip(user);
       const isProfileDone = Boolean(
         user.profileCompleted ||
         user.profileLocked ||

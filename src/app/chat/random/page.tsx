@@ -117,9 +117,12 @@ export default function KnotChatRandomPage() {
   const autoStartExecutedRef = useRef(false);
   const serverlessPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const isVIP =
-    currentUser?.membershipTier === 'VIP' ||
-    (currentUser?.subscription?.isActive === true && currentUser?.subscription?.plan === 'VIP');
+  const isVIP = Boolean(
+    (!currentUser?.vip_expires_at || new Date(currentUser.vip_expires_at).getTime() > Date.now()) &&
+    (currentUser?.membershipTier === 'VIP' ||
+      currentUser?.is_vip ||
+      (currentUser?.subscription?.isActive === true && currentUser?.subscription?.plan === 'VIP'))
+  );
 
   // Sync current user ID into ref
   useEffect(() => {
@@ -193,14 +196,36 @@ export default function KnotChatRandomPage() {
     const handlePartnerLeft = (data: { reason?: string }) => {
       console.log('[RANDOM_CHAT] Partner left:', data?.reason);
       activeMatchIdRef.current = null;
+      setMatchId(null);
+      setPartner(null);
+      setMessages([]);
       setMatchStatus('ended');
       setPartnerTyping(false);
+      setInputText('');
+      setSelectedImageFile(null);
+      setImagePreview(null);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      isCurrentlyTypingRef.current = false;
     };
 
     const handleChatEndedConfirm = () => {
       activeMatchIdRef.current = null;
+      setMatchId(null);
+      setPartner(null);
+      setMessages([]);
       setMatchStatus('ended');
       setPartnerTyping(false);
+      setInputText('');
+      setSelectedImageFile(null);
+      setImagePreview(null);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      isCurrentlyTypingRef.current = false;
     };
 
     const handleDisconnect = () => {
@@ -435,9 +460,18 @@ export default function KnotChatRandomPage() {
 
     const oldMid = activeMatchIdRef.current || matchId;
     activeMatchIdRef.current = null;
+    setMatchId(null);
     setPartner(null);
     setMessages([]);
     setPartnerTyping(false);
+    setInputText('');
+    setSelectedImageFile(null);
+    setImagePreview(null);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    isCurrentlyTypingRef.current = false;
     setMatchStatus('searching');
 
     if (serverlessPollIntervalRef.current) {
@@ -470,7 +504,18 @@ export default function KnotChatRandomPage() {
     setShowOptionsMenu(false);
     const oldMid = activeMatchIdRef.current || matchId;
     activeMatchIdRef.current = null;
+    setMatchId(null);
+    setPartner(null);
+    setMessages([]);
     setPartnerTyping(false);
+    setInputText('');
+    setSelectedImageFile(null);
+    setImagePreview(null);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    isCurrentlyTypingRef.current = false;
 
     if (serverlessPollIntervalRef.current) {
       clearInterval(serverlessPollIntervalRef.current);
@@ -654,6 +699,9 @@ export default function KnotChatRandomPage() {
           const data = await res.json();
           if (data.sessionStatus === 'ENDED') {
             activeMatchIdRef.current = null;
+            setMatchId(null);
+            setPartner(null);
+            setMessages([]);
             setMatchStatus('ended');
             setPartnerTyping(false);
             return;
@@ -1218,7 +1266,7 @@ export default function KnotChatRandomPage() {
             </div>
 
             <button
-              onClick={() => handleStartMatch()}
+              onClick={() => handleStartMatch(true)}
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-600 to-purple-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-pink-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
             >
               <FastForward className="w-4 h-4" />

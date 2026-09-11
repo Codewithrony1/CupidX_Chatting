@@ -33,11 +33,33 @@ export const RESERVED_USERNAMES = new Set([
 
 export function isUserVip(user: any): boolean {
   if (!user) return false;
-  return Boolean(
-    user.is_vip ||
-    user.membershipTier === 'VIP' ||
-    (user.subscription?.isActive === true && user.subscription?.plan === 'VIP')
-  );
+  const now = new Date();
+
+  // 1. Explicit vip_expires_at on User
+  if (user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= now.getTime()) {
+    return false;
+  }
+
+  // 2. Subscription period check
+  if (user.subscription) {
+    const sub = user.subscription;
+    const subEnd = sub.endDate || sub.currentPeriodEnd;
+    if (subEnd && new Date(subEnd).getTime() <= now.getTime()) {
+      return false;
+    }
+    if (sub.isActive === true && sub.plan === 'VIP') {
+      return true;
+    }
+  }
+
+  // 3. User VIP flags
+  if (user.is_vip || user.membershipTier === 'VIP') {
+    if (!user.vip_expires_at || new Date(user.vip_expires_at).getTime() > now.getTime()) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function validateUsernameFormat(raw: string): { valid: boolean; clean: string; reason?: string } {

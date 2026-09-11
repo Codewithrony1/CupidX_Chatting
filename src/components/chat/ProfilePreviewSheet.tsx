@@ -1,12 +1,14 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import BottomSheet from '@/components/ui/BottomSheet';
-import { Heart, Crown, Sparkles, User, Shield, X, MapPin } from 'lucide-react';
+import { Crown, UserPlus, Check } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 interface PartnerProfile {
   id: string;
   username?: string;
+  vipUsername?: string | null;
   fullName?: string;
   displayName?: string;
   avatarType?: string;
@@ -30,6 +32,20 @@ export default function ProfilePreviewSheet({
   onClose,
   partner,
 }: ProfilePreviewSheetProps) {
+  const { user } = useAuth();
+  const now = new Date();
+  const isExpired = user?.vip_expires_at && new Date(user.vip_expires_at).getTime() <= now.getTime();
+  const isViewerVip = !isExpired && Boolean(
+    user?.is_vip ||
+    user?.membershipTier === 'VIP' ||
+    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP')
+  );
+
+  const [sendingReq, setSendingReq] = useState(false);
+  const [reqSent, setReqSent] = useState(false);
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
+
   if (!partner) return null;
 
   const displayName = partner.displayName || partner.fullName || 'Stranger';
@@ -39,6 +55,34 @@ export default function ProfilePreviewSheet({
   const personalityTags = partner.personalityPreferences
     ? partner.personalityPreferences.split(',').filter(Boolean)
     : [];
+
+  const handleSendFriendRequest = async () => {
+    if (sendingReq || reqSent) return;
+    setSendingReq(true);
+    setErrorNotice(null);
+    setSuccessNotice(null);
+
+    try {
+      const res = await fetch('/api/social/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: partner.id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setReqSent(true);
+        setSuccessNotice('Friend request sent successfully! ✨');
+      } else {
+        const primaryError = data.error || 'Failed to send friend request.';
+        const adminMsg = data.contactAdmin ? ` ${data.contactAdmin}` : '';
+        setErrorNotice(`${primaryError}${adminMsg}`);
+      }
+    } catch {
+      setErrorNotice('Network error sending friend request.');
+    } finally {
+      setSendingReq(false);
+    }
+  };
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title={`${displayName}'s Profile`}>
@@ -68,6 +112,11 @@ export default function ProfilePreviewSheet({
 
           <div>
             <h3 className="text-xl font-black tracking-tight text-white">{displayName}</h3>
+            {isViewerVip && (partner.vipUsername || partner.username) && (
+              <p className="text-xs font-bold text-pink-400 mt-0.5">
+                @{partner.vipUsername || partner.username}
+              </p>
+            )}
             {partner.isVIP && (
               <div className="flex items-center justify-center space-x-1.5 mt-1">
                 <span className="text-[10px] font-black text-yellow-300 bg-yellow-500/20 px-2 py-0.5 rounded-full border border-yellow-500/30 flex items-center gap-1">
@@ -112,11 +161,38 @@ export default function ProfilePreviewSheet({
           </div>
         )}
 
+        {/* Notices */}
+        {errorNotice && (
+          <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium text-center space-y-1">
+            <p>{errorNotice}</p>
+          </div>
+        )}
+
+        {successNotice && (
+          <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium text-center flex items-center justify-center gap-1.5">
+            <Check className="w-3.5 h-3.5 text-emerald-400" />
+            <p>{successNotice}</p>
+          </div>
+        )}
+
+        {/* VIP Friend Request Action */}
+        {isViewerVip && (
+          <button
+            type="button"
+            onClick={handleSendFriendRequest}
+            disabled={sendingReq || reqSent}
+            className="w-full py-3 rounded-2xl font-bold bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-xs shadow-md shadow-pink-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 active:scale-98"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>{reqSent ? 'Friend Request Sent' : sendingReq ? 'Sending...' : 'Send Friend Request'}</span>
+          </button>
+        )}
+
         {/* Close Button */}
         <button
           type="button"
           onClick={onClose}
-          className="w-full py-3.5 rounded-2xl font-bold bg-white/10 hover:bg-white/20 text-white text-xs transition-colors cursor-pointer"
+          className="w-full py-3 rounded-2xl font-bold bg-white/10 hover:bg-white/20 text-white text-xs transition-colors cursor-pointer"
         >
           Close Preview
         </button>

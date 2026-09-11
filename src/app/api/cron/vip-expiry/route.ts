@@ -23,13 +23,22 @@ export async function GET(req: Request) {
 
     const now = new Date();
 
-    // 2. Find users whose VIP subscription has expired
+    // 2. Find users whose VIP status or subscription has expired
     const expiredUsers = await prisma.user.findMany({
       where: {
-        is_vip: true,
-        vip_expires_at: {
-          lte: now,
-        },
+        OR: [
+          { is_vip: true, vip_expires_at: { lte: now } },
+          { membershipTier: 'VIP', vip_expires_at: { lte: now } },
+          {
+            subscription: {
+              isActive: true,
+              OR: [
+                { endDate: { lte: now } },
+                { currentPeriodEnd: { lte: now } },
+              ],
+            },
+          },
+        ],
       },
       select: { id: true, username: true },
     });

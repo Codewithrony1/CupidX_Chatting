@@ -99,8 +99,8 @@ export async function GET(req: Request) {
           });
         } catch (e) {}
       });
-    } else {
-      // Legacy fallback: check legacy ChatSession if Conversation has no messages
+    } else if (user?.profile?.saveChatHistory && targetUser?.profile?.saveChatHistory) {
+      // Opt-in fallback: only check ChatSession if both users explicitly opted into saveChatHistory
       const session = await prisma.chatSession.findFirst({
         where: {
           OR: [

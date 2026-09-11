@@ -25,8 +25,42 @@ export async function GET(req: Request) {
     // 7-day retention period for ephemeral sessions without saved history
     const retentionCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    // Only clean up sessions that ended > 7 days ago, where neither user opted into
-    // saveChatHistory, and where no active user reports are attached
+    // 1. Clean up stale MatchmakingQueue entries (CANCELLED or older than 2 hours)
+    const queueCutoff = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    const deletedQueue = await prisma.matchmakingQueue.deleteMany({
+      where: {
+        OR: [
+          { status: 'CANCELLED' },
+          { updatedAt: { lt: queueCutoff } },
+        ],
+      },
+    });
+
+    // 2. Auto-end abandoned ACTIVE sessions older than 24 hours
+    const abandonedCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const abandonedSessions = await prisma.chatSession.findMany({
+      where: {
+        status: 'ACTIVE',
+        startedAt: { lt: abandonedCutoff },
+      },
+      select: { id: true },
+      take: 200,
+    });
+
+    const abandonedIds = abandonedSessions.map((s) => s.id);
+    if (abandonedIds.length > 0) {
+      await prisma.$transaction([
+        prisma.message.deleteMany({
+          where: { chatSessionId: { in: abandonedIds } },
+        }),
+        prisma.chatSession.updateMany({
+          where: { id: { in: abandonedIds } },
+          data: { status: 'ENDED', endedAt: now },
+        }),
+      ]);
+    }
+
+    // 3. Clean up sessions that ended > 7 days ago where neither user saved history
     const expiredSessions = await prisma.chatSession.findMany({
       where: {
         status: 'ENDED',

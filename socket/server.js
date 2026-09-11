@@ -105,11 +105,27 @@ async function getCachedUserData(userId) {
       include: { profile: true, subscription: true },
     });
 
-    const isVIP = Boolean(
-      userDb?.is_vip ||
-      userDb?.membershipTier === 'VIP' ||
-      (userDb?.subscription?.isActive === true && userDb?.subscription?.plan === 'VIP')
-    );
+    const now = new Date();
+    let isVIP = false;
+
+    if (userDb) {
+      if (userDb.vip_expires_at && new Date(userDb.vip_expires_at).getTime() <= now.getTime()) {
+        isVIP = false;
+      } else if (userDb.subscription) {
+        const subEnd = userDb.subscription.endDate || userDb.subscription.currentPeriodEnd;
+        if (subEnd && new Date(subEnd).getTime() <= now.getTime()) {
+          isVIP = false;
+        } else if (userDb.subscription.isActive === true && userDb.subscription.plan === 'VIP') {
+          isVIP = true;
+        }
+      }
+
+      if (!isVIP && (userDb.is_vip || userDb.membershipTier === 'VIP')) {
+        if (!userDb.vip_expires_at || new Date(userDb.vip_expires_at).getTime() > now.getTime()) {
+          isVIP = true;
+        }
+      }
+    }
 
     const userInterests = userDb?.profile?.interests
       ? userDb.profile.interests.split(',').map((s) => s.trim().toLowerCase())
@@ -118,12 +134,15 @@ async function getCachedUserData(userId) {
     const data = {
       userId: userDb?.id || userId,
       username: userDb?.username || `user_${userId.slice(0, 6)}`,
+      vipUsername: userDb?.vipUsername || null,
       fullName: userDb?.fullName || userDb?.displayName || userDb?.username || 'Stranger',
       avatarUrl: userDb?.profile?.avatarUrl || null,
       avatarEmoji: userDb?.profile?.avatarEmoji || '😊',
       gender: userDb?.profile?.gender || 'unspecified',
       preferredGender: userDb?.profile?.preferredGender || 'auto',
       mood: userDb?.profile?.mood || 'chill',
+      bio: userDb?.profile?.bio || '',
+      personalityPreferences: userDb?.profile?.interests || '',
       tags: userInterests,
       language: userDb?.profile?.language || 'english',
       plan: isVIP ? 'vip' : 'free',
@@ -136,12 +155,15 @@ async function getCachedUserData(userId) {
     return {
       userId,
       username: `user_${userId.slice(0, 6)}`,
+      vipUsername: null,
       fullName: 'Stranger',
       avatarUrl: null,
       avatarEmoji: '😊',
       gender: 'unspecified',
       preferredGender: 'auto',
       mood: 'chill',
+      bio: '',
+      personalityPreferences: '',
       tags: [],
       language: 'english',
       plan: 'free',
@@ -423,11 +445,15 @@ function processMatchQueue() {
           partner: {
             id: candidateB.userId,
             username: candidateB.username,
+            vipUsername: candidateB.vipUsername || null,
             fullName: candidateB.fullName,
             displayName: candidateB.fullName,
             avatarUrl: candidateB.avatarUrl,
             avatarEmoji: candidateB.avatarEmoji || '😊',
             gender: candidateB.gender,
+            mood: candidateB.mood || 'chill',
+            bio: candidateB.bio || '',
+            personalityPreferences: candidateB.personalityPreferences || '',
             isVIP: candidateB.isVIP,
             plan: candidateB.plan,
           },
@@ -443,11 +469,15 @@ function processMatchQueue() {
           partner: {
             id: candidateA.userId,
             username: candidateA.username,
+            vipUsername: candidateA.vipUsername || null,
             fullName: candidateA.fullName,
             displayName: candidateA.fullName,
             avatarUrl: candidateA.avatarUrl,
             avatarEmoji: candidateA.avatarEmoji || '😊',
             gender: candidateA.gender,
+            mood: candidateA.mood || 'chill',
+            bio: candidateA.bio || '',
+            personalityPreferences: candidateA.personalityPreferences || '',
             isVIP: candidateA.isVIP,
             plan: candidateA.plan,
           },
@@ -502,6 +532,25 @@ function teardownMatch(matchId, reason, triggeringUserId) {
   userActiveMatch.delete(userB.userId);
 
   console.log(`[SESSION_CLEANUP] Match ${matchId} (Room: ${roomId}) ended: ${reason}. Ephemeral state cleared.`);
+
+  // Asynchronously purge any DB/ephemeral records for this session
+  setImmediate(async () => {
+    try {
+      await prisma.$transaction([
+        prisma.chatSession.updateMany({
+          where: { id: matchId },
+          data: { status: 'ENDED', endedAt: new Date() },
+        }),
+        prisma.message.deleteMany({
+          where: { chatSessionId: matchId },
+        }),
+        prisma.matchmakingQueue.updateMany({
+          where: { chatSessionId: matchId },
+          data: { status: 'CANCELLED', chatSessionId: null, partnerUserId: null },
+        }),
+      ]);
+    } catch {}
+  });
 }
 
 // ── Connection Event Router ──────────────────────────────────────────────────
