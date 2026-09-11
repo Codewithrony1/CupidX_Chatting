@@ -234,11 +234,9 @@ export default function KnotChatRandomPage() {
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
       stopAllTimers();
       stopAllListeners();
       const effectiveClerkId = currentUidRef.current;
@@ -301,14 +299,13 @@ export default function KnotChatRandomPage() {
         if (res.status === 404) {
           const data = await res.json().catch(() => ({}));
           consecutiveSyncErrorsRef.current += 1;
-          // Only terminate if server explicitly confirmed sessionStatus is ENDED,
-          // or if 6 consecutive 404s occur (guards against single container cold-start misses)
-          if (data.sessionStatus === 'ENDED' || consecutiveSyncErrorsRef.current >= 6) {
+          // Only terminate if server explicitly confirmed sessionStatus is ENDED
+          if (data.sessionStatus === 'ENDED') {
             console.log('[RANDOM_CHAT][DISCONNECT]', {
               state: 'disconnected',
               matchId: mid,
               userId: currentUidRef.current,
-              reason: data.sessionStatus === 'ENDED' ? 'server_confirmed_ended' : 'sync_consecutive_misses_exceeded',
+              reason: 'server_confirmed_ended',
               timestamp: new Date().toISOString(),
             });
             stopAllTimers();
@@ -316,6 +313,9 @@ export default function KnotChatRandomPage() {
             activeMatchIdRef.current = null;
             setMatchStatus('ended');
             return;
+          }
+          if (consecutiveSyncErrorsRef.current >= 6) {
+            setReconnecting(true);
           }
           return;
         }
@@ -748,8 +748,11 @@ export default function KnotChatRandomPage() {
   };
 
   // ─── SEND MESSAGE ─────────────────────────────────────────────────────────
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSendMessage = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      if ('stopPropagation' in e) e.stopPropagation();
+    }
     if ((!inputText.trim() && !selectedImageFile) || matchStatus !== 'connected' || sendingMsg) return;
     const activeMid = activeMatchIdRef.current || matchId;
     if (!activeMid) return;
@@ -872,13 +875,7 @@ export default function KnotChatRandomPage() {
           syncActiveChat(activeMid);
         } else {
           const errData = await msgRes.json().catch(() => ({}));
-          if (errData.error === 'Chat session has already ended') {
-            stopAllTimers();
-            stopAllListeners();
-            activeMatchIdRef.current = null;
-            setMatchStatus('ended');
-            return;
-          }
+          console.warn('[RANDOM_CHAT] POST /api/chat/messages returned non-OK status:', msgRes.status, errData);
 
           // Fallback direct send via Firestore if available
           try {
@@ -893,6 +890,13 @@ export default function KnotChatRandomPage() {
               prev.map((m) => (m.id === tempId ? { ...m, status: 'SENT' as const } : m))
             );
           } catch (e) {
+            if (errData.error === 'Chat session has already ended') {
+              stopAllTimers();
+              stopAllListeners();
+              activeMatchIdRef.current = null;
+              setMatchStatus('ended');
+              return;
+            }
             throw new Error(errData.error || 'Failed to deliver message');
           }
         }
@@ -1347,7 +1351,11 @@ export default function KnotChatRandomPage() {
 
             {/* COMPOSER */}
             <form
-              onSubmit={handleSendMessage}
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSendMessage(e);
+              }}
               className="p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] bg-[#0d0119]/95 backdrop-blur-xl border-t border-pink-500/20 flex items-center space-x-2 z-30 shrink-0"
             >
               {!isVIP ? (
@@ -1387,6 +1395,7 @@ export default function KnotChatRandomPage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
+                    e.stopPropagation();
                     handleSendMessage();
                   }
                 }}
@@ -1394,7 +1403,12 @@ export default function KnotChatRandomPage() {
               />
 
               <button
-                type="submit"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSendMessage();
+                }}
                 disabled={sendingMsg || (!inputText.trim() && !selectedImageFile)}
                 className="p-2.5 rounded-2xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-md shadow-pink-500/30 transition-all active:scale-95 disabled:opacity-40 cursor-pointer shrink-0"
               >

@@ -86,6 +86,10 @@ export async function POST(req: Request) {
     // 3. Strict IDOR Check: Verify ChatSession exists and user is a participant
     let session = await prisma.chatSession.findUnique({
       where: { id: chatSessionId },
+      include: {
+        userA: { select: { id: true, clerkUserId: true } },
+        userB: { select: { id: true, clerkUserId: true } },
+      },
     });
 
     if (!session) {
@@ -97,7 +101,7 @@ export async function POST(req: Request) {
           const snap = await adminDb.collection('matches').doc(chatSessionId).get();
           if (snap.exists) {
             const matchDoc = snap.data();
-            if (matchDoc && matchDoc.status === 'active') {
+            if (matchDoc && (matchDoc.status === 'active' || matchDoc.status === 'ACTIVE')) {
               const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
               const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
               const [canonicalA, canonicalB] = await Promise.all([
@@ -113,6 +117,10 @@ export async function POST(req: Request) {
                   userBId: canonicalB,
                   status: 'ACTIVE',
                 },
+                include: {
+                  userA: { select: { id: true, clerkUserId: true } },
+                  userB: { select: { id: true, clerkUserId: true } },
+                },
               });
             }
           }
@@ -127,12 +135,41 @@ export async function POST(req: Request) {
     }
 
     const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
-    if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
+    const isParticipant =
+      userIds.includes(session.userAId) ||
+      userIds.includes(session.userBId) ||
+      (session.userA && (userIds.includes(session.userA.id) || (session.userA.clerkUserId && userIds.includes(session.userA.clerkUserId)))) ||
+      (session.userB && (userIds.includes(session.userB.id) || (session.userB.clerkUserId && userIds.includes(session.userB.clerkUserId))));
+
+    if (!isParticipant) {
       return NextResponse.json({ error: 'Forbidden: You are not a participant in this chat' }, { status: 403 });
     }
 
     if (session.status !== 'ACTIVE') {
-      return NextResponse.json({ error: 'Chat session has already ended' }, { status: 400 });
+      // Cross-verify with Firestore before rejecting as ended
+      let isStillActiveInCloud = false;
+      try {
+        const { getAdminDb } = await import('@/lib/firebaseAdmin');
+        const adminDb = getAdminDb();
+        if (adminDb) {
+          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
+          if (snap.exists) {
+            const m = snap.data();
+            if (m && (m.status === 'active' || m.status === 'ACTIVE')) {
+              isStillActiveInCloud = true;
+              await prisma.chatSession.update({
+                where: { id: chatSessionId },
+                data: { status: 'ACTIVE' },
+              });
+              session.status = 'ACTIVE';
+            }
+          }
+        }
+      } catch (e) {}
+
+      if (!isStillActiveInCloud) {
+        return NextResponse.json({ error: 'Chat session has already ended' }, { status: 400 });
+      }
     }
 
     // 4. VIP Image Verification & Secure Image Processing
@@ -313,7 +350,7 @@ export async function GET(req: Request) {
           const snap = await adminDb.collection('matches').doc(chatSessionId).get();
           if (snap.exists) {
             const matchDoc = snap.data();
-            if (matchDoc && matchDoc.status === 'active') {
+            if (matchDoc && (matchDoc.status === 'active' || matchDoc.status === 'ACTIVE')) {
               const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
               const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
               const [canonicalA, canonicalB] = await Promise.all([
@@ -347,13 +384,40 @@ export async function GET(req: Request) {
     }
 
     const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
-    if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
+    const isParticipant =
+      userIds.includes(session.userAId) ||
+      userIds.includes(session.userBId) ||
+      (session.userA && (userIds.includes(session.userA.id) || (session.userA.clerkUserId && userIds.includes(session.userA.clerkUserId)))) ||
+      (session.userB && (userIds.includes(session.userB.id) || (session.userB.clerkUserId && userIds.includes(session.userB.clerkUserId))));
+
+    if (!isParticipant) {
       return NextResponse.json({ error: 'Forbidden: Access denied' }, { status: 403 });
     }
 
-    const isUserA = userIds.includes(session.userAId);
+    // Self-heal active status from cloud if local DB was out of sync
+    if (session.status !== 'ACTIVE') {
+      try {
+        const { getAdminDb } = await import('@/lib/firebaseAdmin');
+        const adminDb = getAdminDb();
+        if (adminDb) {
+          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
+          if (snap.exists) {
+            const m = snap.data();
+            if (m && (m.status === 'active' || m.status === 'ACTIVE')) {
+              await prisma.chatSession.update({
+                where: { id: chatSessionId },
+                data: { status: 'ACTIVE' },
+              });
+              session.status = 'ACTIVE';
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    const isUserA = userIds.includes(session.userAId) || (session.userA && (userIds.includes(session.userA.id) || (session.userA.clerkUserId && userIds.includes(session.userA.clerkUserId))));
     const partner = isUserA ? session.userB : session.userA;
-    const isPartnerVIP = partner.membershipTier === 'VIP' || partner.is_vip;
+    const isPartnerVIP = Boolean(partner?.membershipTier === 'VIP' || partner?.is_vip);
 
     // Filter messages
     const messageWhere: any = { chatSessionId };
@@ -381,15 +445,17 @@ export async function GET(req: Request) {
     return NextResponse.json({
       success: true,
       sessionStatus: session.status,
-      partner: {
-        id: partner.id,
-        username: partner.username,
-        displayName: partner.displayName || partner.fullName,
-        gender: partner.profile?.gender || partner.gender,
-        avatarEmoji: partner.profile?.avatarEmoji || '😊',
-        avatarUrl: partner.profile?.avatarUrl,
-        isVIP: isPartnerVIP,
-      },
+      partner: partner
+        ? {
+            id: partner.id,
+            username: partner.username || 'user',
+            displayName: partner.displayName || partner.fullName || 'Stranger',
+            gender: partner.profile?.gender || partner.gender || 'unspecified',
+            avatarEmoji: partner.profile?.avatarEmoji || '😊',
+            avatarUrl: partner.profile?.avatarUrl || null,
+            isVIP: isPartnerVIP,
+          }
+        : null,
       messages: messages.map((m) => ({
         id: m.id,
         clientMessageId: m.clientMessageId,

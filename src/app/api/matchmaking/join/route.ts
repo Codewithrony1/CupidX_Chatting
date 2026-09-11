@@ -42,9 +42,9 @@ export async function POST(req: Request) {
         const isUserA = userIds.includes(existingSession.userAId);
         const partner = isUserA ? existingSession.userB : existingSession.userA;
 
-        // Verify session freshness: created or has message within last 60 seconds
+        // Verify session freshness: created or has message within last 10 minutes
         const lastActivity = existingSession.messages[0]?.createdAt || existingSession.startedAt;
-        const isFresh = Date.now() - new Date(lastActivity).getTime() < 60 * 1000;
+        const isFresh = Date.now() - new Date(lastActivity).getTime() < 10 * 60 * 1000;
 
         if (isFresh) {
           return NextResponse.json({
@@ -62,11 +62,41 @@ export async function POST(req: Request) {
             },
           });
         } else {
-          // Only truly stale / abandoned sessions (>60s with no messages) are cleaned up
-          await prisma.chatSession.update({
-            where: { id: existingSession.id },
-            data: { status: 'ENDED', endedAt: new Date() },
-          });
+          // Check Firestore before marking as ended
+          let isActiveInCloud = false;
+          try {
+            const { getAdminDb } = await import('@/lib/firebaseAdmin');
+            const adminDb = getAdminDb();
+            if (adminDb) {
+              const snap = await adminDb.collection('matches').doc(existingSession.id).get();
+              if (snap.exists && snap.data()?.status === 'active') {
+                isActiveInCloud = true;
+              }
+            }
+          } catch (e) {}
+
+          if (isActiveInCloud) {
+            return NextResponse.json({
+              matched: true,
+              chatSessionId: existingSession.id,
+              partner: {
+                id: partner.id,
+                displayName: partner.displayName || partner.fullName || 'Stranger',
+                avatarUrl: partner.profile?.avatarUrl || null,
+                avatarEmoji: partner.profile?.avatarEmoji || '😊',
+                gender: partner.profile?.gender || partner.gender || 'unspecified',
+                mood: partner.profile?.mood || '',
+                bio: partner.profile?.bio || '',
+                isVIP: partner.membershipTier === 'VIP' || partner.is_vip,
+              },
+            });
+          } else {
+            // Only truly stale / abandoned sessions (>10m with no messages and not active in cloud) are cleaned up
+            await prisma.chatSession.update({
+              where: { id: existingSession.id },
+              data: { status: 'ENDED', endedAt: new Date() },
+            });
+          }
         }
       }
     }
