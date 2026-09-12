@@ -105,6 +105,10 @@ model Profile {
   randomChatIntroSeen    Boolean   @default(false)
   nameChangesCount       Int       @default(0)
   nameChangesDate        DateTime?
+  aiGenderEstimate       String    @default("unknown") // "male", "female", "non-binary", "unknown"
+  aiGenderConfidence     Float?
+  aiGenderEstimatedAt    DateTime?
+  aiGenderConsent        Boolean   @default(false)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 }

@@ -85,6 +85,22 @@ function ensureDatabaseSchema(targetDbPath) {
         console.log(`[SCHEMA SYNC] Adding Profile.profileLocked to ${targetDbPath}`);
         db.exec('ALTER TABLE "Profile" ADD COLUMN profileLocked BOOLEAN NOT NULL DEFAULT 0;');
       }
+      if (!profileCols.includes('aiGenderEstimate')) {
+        console.log(`[SCHEMA SYNC] Adding Profile.aiGenderEstimate to ${targetDbPath}`);
+        db.exec("ALTER TABLE \"Profile\" ADD COLUMN aiGenderEstimate TEXT NOT NULL DEFAULT 'unknown';");
+      }
+      if (!profileCols.includes('aiGenderConfidence')) {
+        console.log(`[SCHEMA SYNC] Adding Profile.aiGenderConfidence to ${targetDbPath}`);
+        db.exec('ALTER TABLE "Profile" ADD COLUMN aiGenderConfidence REAL;');
+      }
+      if (!profileCols.includes('aiGenderEstimatedAt')) {
+        console.log(`[SCHEMA SYNC] Adding Profile.aiGenderEstimatedAt to ${targetDbPath}`);
+        db.exec('ALTER TABLE "Profile" ADD COLUMN aiGenderEstimatedAt DATETIME;');
+      }
+      if (!profileCols.includes('aiGenderConsent')) {
+        console.log(`[SCHEMA SYNC] Adding Profile.aiGenderConsent to ${targetDbPath}`);
+        db.exec('ALTER TABLE "Profile" ADD COLUMN aiGenderConsent BOOLEAN NOT NULL DEFAULT 0;');
+      }
 
       db.exec(`
         UPDATE "Profile"

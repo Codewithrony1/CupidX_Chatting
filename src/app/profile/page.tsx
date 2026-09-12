@@ -96,6 +96,18 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Optional AI Gender Estimation
+  const [aiEstimate, setAiEstimate] = useState<string>((user?.profile as any)?.aiGenderEstimate || 'unknown');
+  const [aiConfidence, setAiConfidence] = useState<number | null>((user?.profile as any)?.aiGenderConfidence ?? null);
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiPhotoData, setAiPhotoData] = useState<string>('');
+  const [aiPhotoPreview, setAiPhotoPreview] = useState<string | null>(null);
+  const [aiConsentChecked, setAiConsentChecked] = useState(false);
+  const [aiEstimating, setAiEstimating] = useState(false);
+  const [aiErrorMsg, setAiErrorMsg] = useState('');
+  const [aiSuccessMsg, setAiSuccessMsg] = useState('');
+  const aiFileInputRef = useRef<HTMLInputElement>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -117,6 +129,9 @@ export default function ProfilePage() {
         ? user.profile.personalityPreferences.split(',').filter(Boolean)
         : [];
       setPersonalityTags(tags);
+
+      setAiEstimate((user.profile as any)?.aiGenderEstimate || 'unknown');
+      setAiConfidence((user.profile as any)?.aiGenderConfidence ?? null);
     }
   }, [user]);
 
@@ -238,6 +253,95 @@ export default function ProfilePage() {
       alert('Error updating profile');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAiPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validMimes.includes(file.type)) {
+      setAiErrorMsg('Invalid image file format. Only JPG, PNG, and WebP images are allowed.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setAiErrorMsg('Image must be 5 MB or smaller.');
+      return;
+    }
+
+    setAiErrorMsg('');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      setAiPhotoPreview(result);
+      setAiPhotoData(result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRunAiEstimate = async () => {
+    if (!aiConsentChecked) {
+      setAiErrorMsg('Please check the consent box to proceed with optional AI estimation.');
+      return;
+    }
+
+    const imageToUse = aiPhotoData || (avatarType === 'IMAGE' && (imagePreview || avatarUrl));
+    if (!imageToUse) {
+      setAiErrorMsg('Please select or upload a photo to analyze.');
+      return;
+    }
+
+    setAiEstimating(true);
+    setAiErrorMsg('');
+    setAiSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/profile/ai-gender-estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: imageToUse,
+          consent: true,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAiEstimate(data.aiGenderEstimate);
+        setAiConfidence(data.aiGenderConfidence);
+        setAiSuccessMsg(
+          data.aiGenderEstimate === 'unknown'
+            ? 'Estimation result is unknown or inconclusive. Your chosen profile gender remains your official identity.'
+            : `AI estimate: ${data.aiGenderEstimate}. Your chosen profile gender remains your official identity.`
+        );
+        await refreshUser();
+        setTimeout(() => {
+          setShowAiModal(false);
+          setAiSuccessMsg('');
+        }, 2200);
+      } else {
+        setAiErrorMsg(data.error || 'Failed to estimate gender.');
+      }
+    } catch (e) {
+      setAiErrorMsg('Network error while requesting AI estimation.');
+    } finally {
+      setAiEstimating(false);
+    }
+  };
+
+  const handleClearAiEstimate = async () => {
+    if (!confirm('Clear the current AI gender estimate? Your selected profile gender will not be affected.')) return;
+    try {
+      const res = await fetch('/api/profile/ai-gender-estimate', { method: 'DELETE' });
+      if (res.ok) {
+        setAiEstimate('unknown');
+        setAiConfidence(null);
+        await refreshUser();
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -627,6 +731,70 @@ export default function ProfilePage() {
                 {isVIP ? 'VIP members can update their gender preferences.' : 'Gender is locked after initial setup. Upgrade to VIP to change.'}
               </p>
             </div>
+
+            {/* Optional AI Gender Assist (Assistive Signal Only) */}
+            <div className="p-3.5 rounded-2xl bg-black/40 border border-white/10 space-y-2.5 mt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="text-xs font-bold text-white">AI Gender Assist (Optional)</span>
+                </div>
+                <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                  Assistive Only
+                </span>
+              </div>
+
+              <p className="text-[10px] text-pink-200/70 leading-relaxed">
+                Your selected profile gender above is always your official identity. This optional AI estimate is an assistive signal only, never treated as proof of gender, and never exposed publicly.
+              </p>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/5 border border-white/5 text-xs">
+                <div>
+                  <span className="text-[9px] uppercase font-bold text-slate-400 block">AI Estimate</span>
+                  <span className="font-bold text-white capitalize">
+                    {aiEstimate && aiEstimate !== 'unknown' ? (
+                      <span className="text-purple-300 flex items-center gap-1">
+                        <span>🤖 {aiEstimate}</span>
+                        {aiConfidence ? (
+                          <span className="text-[10px] text-slate-400 font-normal">
+                            ({Math.round(aiConfidence * 100)}% confidence)
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 font-normal text-xs italic">Unknown / Not analyzed</span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  {aiEstimate && aiEstimate !== 'unknown' && (
+                    <button
+                      type="button"
+                      disabled={aiEstimating}
+                      onClick={handleClearAiEstimate}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={aiEstimating}
+                    onClick={() => {
+                      setAiErrorMsg('');
+                      setAiSuccessMsg('');
+                      setShowAiModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{aiEstimate && aiEstimate !== 'unknown' ? 'Re-estimate' : 'Estimate with AI'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* SECTION 3: PERSONALITY TAGS */}
@@ -706,6 +874,144 @@ export default function ProfilePage() {
                   className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Optional AI Gender Estimation Modal */}
+        {showAiModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-3xl bg-[#120021] border border-purple-500/30 p-6 space-y-4 shadow-2xl text-left relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAiModal(false);
+                  setAiErrorMsg('');
+                  setAiSuccessMsg('');
+                }}
+                className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-purple-500/20 border border-purple-500/30 text-purple-300 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">AI Gender Assist (Optional)</h3>
+                  <p className="text-[11px] text-pink-200/70">In-memory assistive photo analysis</p>
+                </div>
+              </div>
+
+              {/* Informative source-of-truth disclaimer */}
+              <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-[11px] text-purple-200 leading-relaxed">
+                <span className="font-bold block text-white mb-0.5">📌 Source of Truth Notice:</span>
+                Your user-selected profile gender (<strong>{gender || 'unspecified'}</strong>) is your permanent official identity. The AI estimate is never used to restrict or verify your account, and is never shared publicly.
+              </div>
+
+              {/* Photo Input Area */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">
+                  Select Photo for Analysis
+                </label>
+
+                <div className="flex items-center space-x-3">
+                  {aiPhotoPreview || (avatarType === 'IMAGE' && (imagePreview || avatarUrl)) ? (
+                    <img
+                      src={aiPhotoPreview || imagePreview || avatarUrl!}
+                      alt="Analysis Preview"
+                      className="w-16 h-16 rounded-2xl object-cover border border-purple-400/50 bg-slate-900"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 text-xs text-center p-1">
+                      No Photo
+                    </div>
+                  )}
+
+                  <div className="flex-1 space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => aiFileInputRef.current?.click()}
+                      className="w-full py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>{aiPhotoPreview ? 'Change Photo' : 'Upload Photo (max 5 MB)'}</span>
+                    </button>
+
+                    {avatarType === 'IMAGE' && (imagePreview || avatarUrl) && !aiPhotoData && (
+                      <p className="text-[10px] text-purple-300">
+                        Defaulting to your active avatar photo.
+                      </p>
+                    )}
+                  </div>
+
+                  <input
+                    ref={aiFileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={handleAiPhotoChange}
+                  />
+                </div>
+              </div>
+
+              {/* Explicit Consent Checkbox */}
+              <label className="flex items-start space-x-2.5 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={aiConsentChecked}
+                  onChange={(e) => {
+                    setAiConsentChecked(e.target.checked);
+                    if (e.target.checked) setAiErrorMsg('');
+                  }}
+                  className="mt-0.5 rounded border-white/20 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                />
+                <span className="text-[11px] text-slate-300 leading-tight">
+                  I consent to an optional in-memory AI analysis of my photo for assistive gender estimation. I understand my chosen profile gender remains my official source of truth and photos are not permanently stored for this purpose.
+                </span>
+              </label>
+
+              {/* Feedback messages */}
+              {aiErrorMsg && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-medium">
+                  {aiErrorMsg}
+                </div>
+              )}
+              {aiSuccessMsg && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
+                  {aiSuccessMsg}
+                </div>
+              )}
+
+              {/* Modal Buttons */}
+              <div className="flex items-center space-x-2 pt-1">
+                <button
+                  type="button"
+                  disabled={aiEstimating || !aiConsentChecked}
+                  onClick={handleRunAiEstimate}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-black text-xs uppercase tracking-wider shadow-lg disabled:opacity-40 cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                >
+                  {aiEstimating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Analyzing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>Analyze &amp; Estimate</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAiModal(false)}
+                  className="px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancel
                 </button>
               </div>
             </div>
