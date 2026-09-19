@@ -1,20 +1,44 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser, getAuthCookieOptions } from '@/lib/auth';
+import { createDeletionLock } from '@/lib/deletionLock';
 
 async function performAccountDeletion(req: Request) {
   try {
     let user: any = await getCurrentUser(req);
+    let clerkEmail: string | null = null;
+    let clerkId: string | null = null;
+
     if (!user) {
       try {
-        const { auth: clerkAuth } = await import('@clerk/nextjs/server');
+        const { auth: clerkAuth, currentUser: clerkCurrentUser } = await import('@clerk/nextjs/server');
         const session = await clerkAuth();
         if (session?.userId) {
+          clerkId = session.userId;
+          const cUser = await clerkCurrentUser().catch(() => null);
+          clerkEmail =
+            cUser?.primaryEmailAddress?.emailAddress ||
+            cUser?.emailAddresses?.[0]?.emailAddress ||
+            null;
+
           user = await prisma.user.findFirst({
             where: { OR: [{ clerkUserId: session.userId }, { id: session.userId }] },
           });
         }
       } catch (e) {}
+    } else {
+      clerkId = user.clerkUserId;
+      if (!user.email && clerkId) {
+        try {
+          const { clerkClient } = await import('@clerk/nextjs/server');
+          const client = await clerkClient();
+          const clerkDetail = await client.users.getUser(clerkId);
+          clerkEmail =
+            clerkDetail?.primaryEmailAddress?.emailAddress ||
+            clerkDetail?.emailAddresses?.[0]?.emailAddress ||
+            null;
+        } catch (e) {}
+      }
     }
 
     if (!user) {
@@ -31,6 +55,7 @@ async function performAccountDeletion(req: Request) {
     }
 
     const userId = user.id;
+    const verifiedEmail = user.email || clerkEmail;
 
     // 1. Terminate any active random chat sessions and notify partner
     try {
@@ -42,23 +67,34 @@ async function performAccountDeletion(req: Request) {
       });
 
       for (const session of activeSessions) {
-        await prisma.chatSession.update({
-          where: { id: session.id },
-          data: { status: 'ENDED', endedAt: new Date() },
-        }).catch(() => {});
+        await prisma.chatSession
+          .update({
+            where: { id: session.id },
+            data: { status: 'ENDED', endedAt: new Date() },
+          })
+          .catch(() => {});
 
-        await prisma.message.deleteMany({
-          where: { chatSessionId: session.id },
-        }).catch(() => {});
+        await prisma.message
+          .deleteMany({
+            where: { chatSessionId: session.id },
+          })
+          .catch(() => {});
 
         try {
           const { getAdminDb } = await import('@/lib/firebaseAdmin');
           const adminDb = getAdminDb();
           if (adminDb) {
-            await adminDb.collection('matches').doc(session.id).set({
-              status: 'ended',
-              endedAt: Date.now(),
-            }, { merge: true }).catch(() => {});
+            await adminDb
+              .collection('matches')
+              .doc(session.id)
+              .set(
+                {
+                  status: 'ended',
+                  endedAt: Date.now(),
+                },
+                { merge: true }
+              )
+              .catch(() => {});
           }
         } catch (e) {}
       }
@@ -79,7 +115,51 @@ async function performAccountDeletion(req: Request) {
       console.warn('Queue cleanup notice during deletion:', queueErr);
     }
 
-    // 3. Atomically delete all user-associated records from database
+    // 3. Statutory Financial Record Preservation (Tax & Dispute Compliance)
+    // Decoupled from personal profile, retains minimal transaction metadata required for accounting
+    try {
+      const paymentRequests = await prisma.paymentRequest.findMany({
+        where: { userId },
+      });
+      for (const pr of paymentRequests) {
+        await prisma.financialAuditRecord
+          .create({
+            data: {
+              orderId: pr.paymentId || pr.requestId,
+              amount: pr.amount,
+              currency: pr.currency || 'INR',
+              plan: pr.plan || 'VIP',
+              status: pr.status,
+              paymentMethod: 'MANUAL_UPI',
+              transactionDate: pr.createdAt,
+            },
+          })
+          .catch(() => {});
+      }
+
+      const manualPayments = await prisma.manualUpiPayment.findMany({
+        where: { userId },
+      });
+      for (const mp of manualPayments) {
+        await prisma.financialAuditRecord
+          .create({
+            data: {
+              orderId: mp.utrNumber || mp.paymentId,
+              amount: mp.amount,
+              currency: 'INR',
+              plan: mp.planName || 'VIP Membership',
+              status: mp.status,
+              paymentMethod: 'MANUAL_UPI',
+              transactionDate: mp.createdAt,
+            },
+          })
+          .catch(() => {});
+      }
+    } catch (auditErr) {
+      console.warn('Notice archiving statutory financial records:', auditErr);
+    }
+
+    // 4. Atomically delete all user-associated application records from database
     await prisma.$transaction([
       prisma.userConsent.deleteMany({ where: { userId } }),
       prisma.message.deleteMany({ where: { senderId: userId } }),
@@ -99,18 +179,31 @@ async function performAccountDeletion(req: Request) {
       prisma.report.deleteMany({
         where: { OR: [{ reporterId: userId }, { reportedUserId: userId }] },
       }),
+      prisma.notification.deleteMany({ where: { userId } }),
+      prisma.vipRequest.deleteMany({ where: { userId } }),
+      prisma.paymentRequest.deleteMany({ where: { userId } }),
+      prisma.manualUpiPayment.deleteMany({ where: { userId } }),
+      prisma.payment.deleteMany({ where: { userId } }),
       prisma.subscription.deleteMany({ where: { userId } }),
       prisma.profile.deleteMany({ where: { userId } }),
       prisma.user.delete({ where: { id: userId } }),
     ]);
 
-    // 4. Invalidate and delete Clerk authentication account
-    const clerkId = user.clerkUserId;
-    if (clerkId) {
+    // 5. Create 48-Hour Deletion Lock Tombstone (Anti-Abuse Protection)
+    // Raw email is NEVER retained; only salted HMAC-SHA256 with 48h TTL
+    if (verifiedEmail) {
+      await createDeletionLock(verifiedEmail).catch((lockErr) => {
+        console.warn('Notice creating 48-hour deletion lock:', lockErr);
+      });
+    }
+
+    // 6. Invalidate and delete Clerk authentication account
+    const effectiveClerkId = clerkId || user.clerkUserId;
+    if (effectiveClerkId) {
       try {
         const { clerkClient } = await import('@clerk/nextjs/server');
         const client = await clerkClient();
-        await client.users.deleteUser(clerkId);
+        await client.users.deleteUser(effectiveClerkId);
       } catch (clerkErr) {
         console.warn('Clerk user deletion notice (account may already be removed):', clerkErr);
       }
@@ -121,7 +214,7 @@ async function performAccountDeletion(req: Request) {
       message: 'Account, identity, profile, and all application data permanently deleted.',
     });
 
-    // 5. Invalidate auth session cookies
+    // 7. Invalidate auth session cookies
     res.cookies.set('token', '', {
       ...getAuthCookieOptions(req, 0),
       expires: new Date(0),

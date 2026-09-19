@@ -316,6 +316,44 @@ function ensureDatabaseSchema(targetDbPath) {
         CREATE INDEX IF NOT EXISTS "UserConsent_userId_idx" ON "UserConsent"("userId");
       `);
     }
+
+    // 13. Inspect and ensure DeletedAccountLock table (48-hour re-registration protection)
+    const lockTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='DeletedAccountLock'").get();
+    if (!lockTable) {
+      console.log(`[SCHEMA SYNC] Creating DeletedAccountLock table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "DeletedAccountLock" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "emailHash" TEXT NOT NULL UNIQUE,
+          "expiresAt" DATETIME NOT NULL,
+          "reason" TEXT NOT NULL DEFAULT 'ACCOUNT_DELETION_COOLDOWN',
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "DeletedAccountLock_emailHash_key" ON "DeletedAccountLock"("emailHash");
+        CREATE INDEX IF NOT EXISTS "DeletedAccountLock_emailHash_idx" ON "DeletedAccountLock"("emailHash");
+        CREATE INDEX IF NOT EXISTS "DeletedAccountLock_expiresAt_idx" ON "DeletedAccountLock"("expiresAt");
+      `);
+    }
+
+    // 14. Inspect and ensure FinancialAuditRecord table (Statutory payment retention)
+    const auditTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='FinancialAuditRecord'").get();
+    if (!auditTable) {
+      console.log(`[SCHEMA SYNC] Creating FinancialAuditRecord table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "FinancialAuditRecord" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "orderId" TEXT,
+          "amount" REAL NOT NULL,
+          "currency" TEXT NOT NULL DEFAULT 'INR',
+          "plan" TEXT NOT NULL,
+          "status" TEXT NOT NULL,
+          "paymentMethod" TEXT NOT NULL DEFAULT 'MANUAL_UPI',
+          "transactionDate" DATETIME NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS "FinancialAuditRecord_orderId_idx" ON "FinancialAuditRecord"("orderId");
+      `);
+    }
   } catch (err) {
     console.warn(`[SCHEMA SYNC WARNING] ${targetDbPath}:`, err.message);
   } finally {

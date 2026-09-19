@@ -2,8 +2,33 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Shield, Lock, Trash2, Heart, EyeOff, Server, UserCheck } from 'lucide-react';
+import {
+  ArrowLeft,
+  Shield,
+  Lock,
+  Trash2,
+  Heart,
+  EyeOff,
+  Server,
+  UserCheck,
+  CreditCard,
+  Clock,
+  Globe,
+  Bell,
+  Mail,
+  Building,
+} from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
+import {
+  OPERATOR_NAME,
+  OPERATOR_LEGAL_STATEMENT,
+  OPERATOR_ADDRESS_PLACEHOLDER,
+  SUPPORT_EMAIL,
+  PRIVACY_CONTACT_EMAIL,
+  CURRENT_PRIVACY_VERSION,
+  PRIVACY_EFFECTIVE_DATE,
+  DELETION_LOCK_TTL_HOURS,
+} from '@/lib/config/policy';
 
 export default function PrivacyPage() {
   return (
@@ -24,7 +49,9 @@ export default function PrivacyPage() {
               <Shield className="w-6 h-6 text-pink-400" />
               <div>
                 <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">Privacy Policy</h1>
-                <p className="text-[11px] text-pink-300/70 font-mono">Version 2026-09-01 • Effective: September 1, 2026</p>
+                <p className="text-[11px] text-pink-300/70 font-mono">
+                  Version {CURRENT_PRIVACY_VERSION} • Effective: {PRIVACY_EFFECTIVE_DATE}
+                </p>
               </div>
             </div>
           </div>
@@ -35,103 +62,179 @@ export default function PrivacyPage() {
         </div>
 
         {/* Content Card */}
-        <div className="rounded-3xl bg-[#11001c]/90 border border-pink-500/20 p-6 sm:p-8 space-y-6 text-xs sm:text-sm text-slate-300 leading-relaxed shadow-2xl backdrop-blur-md">
-          <section className="space-y-2">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <EyeOff className="w-4 h-4 text-pink-400" />
-              1. What We Collect &amp; Why (Ephemeral vs. Persistent Data)
-            </h2>
+        <div className="rounded-3xl bg-[#11001c]/90 border border-pink-500/20 p-6 sm:p-8 space-y-8 text-xs sm:text-sm text-slate-300 leading-relaxed shadow-2xl backdrop-blur-md">
+          {/* Section A: Who Operates */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <Building className="w-5 h-5 text-pink-400" />
+              <h2>A. Who Operates CupidX</h2>
+            </div>
+            <p className="p-3 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-pink-200">
+              <strong className="text-white">{OPERATOR_LEGAL_STATEMENT}</strong> We operate CupidX (cupidxchat.in) with a core commitment to user privacy, clear notice, and data minimization consistent with modern privacy frameworks (such as India&apos;s Digital Personal Data Protection Act principles and GDPR).
+            </p>
+            <p className="text-[11px] text-slate-400 italic">
+              Legal Notice: This policy details actual technical data processing systems. It should be reviewed by qualified legal counsel for organizational compliance in specific jurisdictions.
+            </p>
+          </section>
+
+          {/* Section B, C, D: What Data, Why, How Used */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <EyeOff className="w-5 h-5 text-purple-400" />
+              <h2>B. What Data We Collect &amp; Specific Purposes</h2>
+            </div>
             <p>
-              CupidX (cupidxchat.in) is engineered with a strict distinction between <strong>ephemeral random communication</strong> and <strong>persistent account credentials</strong>:
+              CupidX collects only data necessary to provide a safe, functional, and anonymous social chat experience:
             </p>
             <ul className="list-disc pl-5 space-y-2 text-slate-400">
               <li>
-                <strong>Ephemeral Chat Messages &amp; Media (Temporary):</strong> Messages, text snippets, and emojis sent during 1-to-1 random chat sessions are strictly ephemeral. They are routed via encrypted WebSockets (WSS) and are automatically destroyed from server memory and databases immediately when either participant presses NEXT or disconnects.
+                <strong className="text-white">Account &amp; Profile Identity:</strong> Your verified email (managed securely via Clerk), unique @username, public display name, date of birth (collected solely to enforce the 18+ legal age gate), gender tag, and avatar emoji.
               </li>
               <li>
-                <strong>Persistent Profile Identity:</strong> To allow you to log in, maintain your identity, and access VIP perks, we securely store your chosen unique @username, public display name, date of birth (collected exclusively to ensure 18+ age verification and child safety legal compliance), gender preferences, avatar (emoji or VIP uploaded profile image), and short bio.
+                <strong className="text-white">Ephemeral Chat Messages:</strong> Real-time messages transmitted during random chat sessions. <em>Storage policy:</em> Strictly ephemeral. Messages are held in temporary memory during the active session and are permanently wiped when either participant clicks NEXT or disconnects.
               </li>
               <li>
-                <strong>Authentication Credentials:</strong> Securely handled by Clerk. We do not store your raw passwords on our application servers.
+                <strong className="text-white">Technical Connection Information:</strong> Connection IP address processed automatically by server infrastructure for DDoS protection, rate limiting, and approximate country code estimation (e.g. 🇮🇳 India).
               </li>
               <li>
-                <strong>Technical Information &amp; Approximate Country:</strong> Your IP address is processed automatically by network infrastructure solely for security, rate-limiting, and DDoS protection. We derive your approximate country (e.g. India / 🇮🇳) to display a country badge in the interface. We <strong>NEVER</strong> disclose your raw IP address to strangers, nor do we track exact GPS, latitude, longitude, or street coordinates.
+                <strong className="text-white">VIP Payment Metadata:</strong> User-submitted UPI transaction reference (UTR) and payment screenshot proofs submitted for manual subscription verification.
               </li>
               <li>
-                <strong>VIP Payment Records:</strong> Transaction IDs (UTR) and payment screenshot proofs submitted by users solely for manual VIP membership verification and activation.
-              </li>
-              <li>
-                <strong>Platform Integrity &amp; Abuse Prevention:</strong> Rate-limiting metrics, abuse report flags, and block records used solely to prevent bots, harassment, and unauthorized access.
+                <strong className="text-white">Consent Audit Records:</strong> Authoritative server timestamps logging your acceptance of terms, privacy policies, age verification, and optional communication preferences.
               </li>
             </ul>
           </section>
 
-          <section className="space-y-2">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Lock className="w-4 h-4 text-purple-400" />
-              2. Profile Privacy & Random Chat Partner Isolation
-            </h2>
-            <p>
-              When you join the random matching queue, CupidX strictly isolates your private information:
+          {/* Section E, F: Retention Periods & Processors */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <Server className="w-5 h-5 text-blue-400" />
+              <h2>C. Data Retention Categories &amp; Third-Party Processors</h2>
+            </div>
+            <div className="space-y-2">
+              <div className="p-3 rounded-2xl bg-black/40 border border-white/5 space-y-1">
+                <span className="font-bold text-pink-300 block">Ephemeral Chat Transcripts: Zero Permanent Retention</span>
+                <p className="text-[11px] text-slate-400">
+                  Transcripts are destroyed upon session end. We do not maintain historical chat logs of stranger conversations.
+                </p>
+              </div>
+              <div className="p-3 rounded-2xl bg-black/40 border border-white/5 space-y-1">
+                <span className="font-bold text-pink-300 block">Personal Profile Data: User-Controlled</span>
+                <p className="text-[11px] text-slate-400">
+                  Retained until you update your profile or permanently delete your account.
+                </p>
+              </div>
+              <div className="p-3 rounded-2xl bg-black/40 border border-white/5 space-y-1">
+                <span className="font-bold text-pink-300 block">Statutory Financial Audit Records: 7-Year Accounting Retention</span>
+                <p className="text-[11px] text-slate-400">
+                  Anonymized payment transaction references (UTR, amount, currency, date) are retained as required by tax regulations, decoupled from deleted personal profile data.
+                </p>
+              </div>
+            </div>
+            <p className="text-slate-400 pt-1">
+              <strong>Third-Party Infrastructure:</strong> Authentication is handled by <strong>Clerk</strong>. Databases and hosting are deployed on encrypted enterprise cloud infrastructure. We never sell, rent, or trade your data to third-party data brokers.
             </p>
-            <ul className="list-disc pl-5 space-y-1 text-slate-400">
-              <li>Your chat partner <strong>NEVER</strong> receives access to your email address, phone number, Clerk User ID, internal database identifiers, or IP address.</li>
-              <li>Random partners only see your public profile representation: your display name, @username, avatar emoji/DP, gender tag, and age.</li>
-              <li>You have full autonomy to skip any conversation instantly by clicking NEXT.</li>
+          </section>
+
+          {/* Section G, H, I: User Rights, Deletion, Consent Withdrawal */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <UserCheck className="w-5 h-5 text-emerald-400" />
+              <h2>D. User Rights, Consent Withdrawal &amp; Account Deletion</h2>
+            </div>
+            <p>Under privacy principles, you have complete control over your personal data:</p>
+            <ul className="list-disc pl-5 space-y-1.5 text-slate-400">
+              <li><strong className="text-white">Right to Access &amp; Update:</strong> View and modify your profile, bio, display name, and avatar at any time in Settings.</li>
+              <li><strong className="text-white">Withdrawable Marketing Consent:</strong> Toggle optional product announcements ON or OFF at any time via Settings without affecting chat functionality.</li>
+              <li><strong className="text-white">Permanent Account Deletion:</strong> Delete your account and all associated profile, matchmaking, and message data permanently in Settings by typing &quot;DELETE&quot;.</li>
             </ul>
           </section>
 
-          <section className="space-y-2">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Server className="w-4 h-4 text-blue-400" />
-              3. Message Storage, Ephemeral Architecture & DP Security
-            </h2>
+          {/* Section J, P: Payments & VIP */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <CreditCard className="w-5 h-5 text-amber-400" />
+              <h2>E. Payment Processing &amp; Financial Data Privacy</h2>
+            </div>
             <p>
-              We believe romantic conversations should stay private between two individuals:
+              Optional VIP subscriptions (₹29/month, ₹99/3 months, ₹399/year) are processed in India via dynamic UPI QR code scanning and manual verification:
             </p>
-            <ul className="list-disc pl-5 space-y-1 text-slate-400">
-              <li><strong>Zero Permanent Chat Archives:</strong> We do not log, retain, or index chat transcripts from random chat sessions. Once a session ends, the temporary messages are wiped.</li>
-              <li><strong>Profile Photo (DP) Storage:</strong> Custom profile pictures uploaded by VIP members are stored securely in protected storage. They are never shared with advertising networks, third-party data aggregators, or search engines.</li>
-              <li><strong>Transport Encryption:</strong> All client-to-server traffic is protected using modern Transport Layer Security (TLS/HTTPS) and Secure WebSockets (WSS).</li>
+            <ul className="list-disc pl-5 space-y-1.5 text-slate-400">
+              <li>You submit a transaction reference (UTR) and payment screenshot. An administrator verifies the payment and activates VIP perks.</li>
+              <li><strong className="text-white">No Sensitive Financial Data Stored:</strong> CupidX never collects or stores credit card numbers, debit card numbers, CVVs, netbanking credentials, or UPI PINs.</li>
+              <li>Screenshot proofs are stored in protected storage accessible solely to authorized administrators and are deleted upon account removal or verification archiving.</li>
             </ul>
           </section>
 
-          <section className="space-y-2">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <UserCheck className="w-4 h-4 text-emerald-400" />
-              4. Third-Party Infrastructure & Safety Compliance
-            </h2>
+          {/* Section K, L: Security & Cookies */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <Lock className="w-5 h-5 text-pink-400" />
+              <h2>F. Security Measures &amp; Cookie Usage</h2>
+            </div>
             <p>
-              We utilize trusted infrastructure providers including Clerk (Authentication) and encrypted cloud databases. We never sell, rent, or trade your personal information or profile data to third parties. We comply with all applicable digital safety, age gate, and data protection standards.
+              All traffic between your browser and our servers is encrypted using modern TLS (HTTPS) and Secure WebSockets (WSS). We use strictly necessary cookies:
             </p>
-          </section>
-
-          <section className="space-y-2">
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <Trash2 className="w-4 h-4 text-rose-400" />
-              5. User Rights, Consent Control &amp; Permanent Account Deletion
-            </h2>
-            <p>
-              You maintain total ownership of your personal profile data. Under applicable privacy principles, you have the right to:
-            </p>
-            <ul className="list-disc pl-5 space-y-2 text-slate-400">
-              <li>
-                <strong>Profile Transparency &amp; Editing:</strong> Edit or remove your display name, bio, and avatar at any time from your Profile Settings.
-              </li>
-              <li>
-                <strong>Consent Tracking &amp; Withdrawal:</strong> Review your current consent status (Terms, Privacy, Age, Random Chat, Approximate Country) in your Settings dashboard. You may withdraw optional marketing and product announcement consent at any time using the preferences switch.
-              </li>
-              <li>
-                <strong>Permanent Account &amp; Data Deletion:</strong> You can delete your account permanently via Settings &gt; Account Management by typing &quot;DELETE&quot;. Deletion immediately terminates any active random chat sessions, erases your public profile, removes your uploaded photos and direct messages, wipes your matchmaking queue state, and permanently deletes your Clerk authentication credentials.
-              </li>
+            <ul className="list-disc pl-5 space-y-1.5 text-slate-400">
+              <li><strong className="text-white">Authentication Token:</strong> Secure HTTP-only cookies (<code className="text-pink-300">token</code>, Clerk session cookies) maintaining your logged-in state.</li>
+              <li><strong className="text-white">Local Preferences:</strong> Storage of your UI theme preference (light/dark/system). We do not use third-party tracking cookies or ad network beacons.</li>
             </ul>
           </section>
 
-          <div className="border-t border-pink-500/20 pt-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
-            <span>© {new Date().getFullYear()} CupidX (cupidxchat.in). All rights reserved.</span>
-            <div className="flex space-x-4">
-              <Link href="/privacy" className="hover:text-pink-400 transition-colors">Privacy Policy</Link>
-              <Link href="/terms" className="hover:text-pink-400 transition-colors">Terms</Link>
+          {/* Section M, N, O: IP Processing & Country Isolation */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <Globe className="w-5 h-5 text-blue-400" />
+              <h2>G. IP Address Processing &amp; Country Badge Isolation</h2>
+            </div>
+            <p>
+              When connecting to CupidX, your IP address is processed server-side solely to detect your approximate country code (e.g. 🇮🇳 India) to display a country badge to your random partner.
+            </p>
+            <div className="p-3 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-200">
+              <strong>Partner Isolation Guarantee:</strong> Your raw IP address is <strong>NEVER</strong> shared with or exposed to your chat partner. We do not track GPS coordinates, latitude, longitude, or street addresses. Multiple users sharing a public IP (e.g. university or coffee shop) are treated as distinct independent accounts.
+            </div>
+          </section>
+
+          {/* Section Q, R, S: 48-Hour Re-Registration Cooldown */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <Clock className="w-5 h-5 text-amber-400" />
+              <h2>H. 48-Hour Re-Registration Restriction (Anti-Abuse Tombstone)</h2>
+            </div>
+            <p>
+              When an account is deleted, a temporary security tombstone is generated:
+            </p>
+            <ul className="list-disc pl-5 space-y-1.5 text-slate-400">
+              <li><strong className="text-white">Purpose:</strong> Product security and abuse prevention — specifically preventing immediate re-registration churn, harassment evasion, and bot creation.</li>
+              <li><strong className="text-white">Privacy-Safe Hash:</strong> We do <strong>NOT</strong> retain your raw email address in this table. Instead, a salted one-way HMAC-SHA256 hash (<code className="text-pink-300">HMAC-SHA256(email, secret)</code>) is stored.</li>
+              <li><strong className="text-white">Automatic Expiration:</strong> The tombstone expires automatically after exactly <strong className="text-white">{DELETION_LOCK_TTL_HOURS} hours</strong>. Once expired, the same email identity is fully permitted to create a new CupidX account without requiring manual admin intervention.</li>
+            </ul>
+          </section>
+
+          {/* Section T: Contact & Grievance */}
+          <section className="space-y-3">
+            <div className="flex items-center gap-2 text-base font-bold text-white">
+              <Mail className="w-5 h-5 text-pink-400" />
+              <h2>I. Privacy Inquiries, Grievances &amp; Contact Channels</h2>
+            </div>
+            <p>
+              For privacy requests, data erasure inquiries, or grievances, reach out directly to our privacy desk:
+            </p>
+            <div className="p-4 rounded-2xl bg-black/40 border border-white/5 space-y-1 font-mono text-xs">
+              <div>Operator: <strong className="text-white">{OPERATOR_NAME}</strong></div>
+              <div>Privacy &amp; Data Rights: <strong className="text-pink-300">{PRIVACY_CONTACT_EMAIL}</strong></div>
+              <div>General Support: <strong className="text-pink-300">{SUPPORT_EMAIL}</strong></div>
+              <div>Operating Address: <span className="text-slate-400">{OPERATOR_ADDRESS_PLACEHOLDER}</span></div>
+            </div>
+          </section>
+
+          <div className="border-t border-pink-500/20 pt-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+            <span>© {new Date().getFullYear()} CupidX (cupidxchat.in) • Operated by {OPERATOR_NAME}</span>
+            <div className="flex flex-wrap gap-4">
+              <Link href="/terms" className="hover:text-pink-400 transition-colors">Terms of Service</Link>
+              <Link href="/refund" className="hover:text-pink-400 transition-colors">Refund Policy</Link>
+              <Link href="/community-guidelines" className="hover:text-pink-400 transition-colors">Guidelines</Link>
+              <Link href="/contact" className="hover:text-pink-400 transition-colors">Contact</Link>
             </div>
           </div>
         </div>

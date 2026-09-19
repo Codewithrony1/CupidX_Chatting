@@ -60,18 +60,75 @@ export async function POST(req: Request) {
     } = body;
 
     let user = await getCurrentUser(req);
+    let clerkEmail: string | null = null;
+
     if (!user) {
       try {
-        const { auth: clerkAuth } = await import('@clerk/nextjs/server');
+        const { auth: clerkAuth, currentUser: clerkCurrentUser } = await import('@clerk/nextjs/server');
         const clerkSession = await clerkAuth();
         if (clerkSession?.userId) {
-          user = await getOrCreateUserFromClerk(clerkSession.userId);
+          const cUser = await clerkCurrentUser().catch(() => null);
+          clerkEmail =
+            cUser?.primaryEmailAddress?.emailAddress ||
+            cUser?.emailAddresses?.[0]?.emailAddress ||
+            null;
+
+          const { getOrCreateUserFromClerk } = await import('@/lib/auth');
+          try {
+            user = await getOrCreateUserFromClerk(clerkSession.userId);
+          } catch (clerkErr: any) {
+            if (clerkErr?.isDeletionLocked) {
+              return NextResponse.json(
+                {
+                  error:
+                    'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
+                  isDeletionLocked: true,
+                  expiresAt: clerkErr.expiresAt,
+                  remainingHours: clerkErr.remainingHours,
+                },
+                { status: 403 }
+              );
+            }
+            throw clerkErr;
+          }
         }
-      } catch (e) {}
+      } catch (e: any) {
+        if (e?.isDeletionLocked) {
+          return NextResponse.json(
+            {
+              error:
+                'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
+              isDeletionLocked: true,
+              expiresAt: e.expiresAt,
+              remainingHours: e.remainingHours,
+            },
+            { status: 403 }
+          );
+        }
+      }
     }
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
+    }
+
+    // Check verified email against 48-hour deletion cooldown
+    const checkEmail = user.email || clerkEmail;
+    if (checkEmail) {
+      const { checkDeletionLock } = await import('@/lib/deletionLock');
+      const lockStatus = await checkDeletionLock(checkEmail);
+      if (lockStatus.isLocked) {
+        return NextResponse.json(
+          {
+            error:
+              'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
+            isDeletionLocked: true,
+            expiresAt: lockStatus.expiresAt,
+            remainingHours: lockStatus.remainingHours,
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const cleanDisplayName = (displayName || '').trim();

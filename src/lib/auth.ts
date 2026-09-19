@@ -149,6 +149,21 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
     clerkDetail?.emailAddresses?.[0]?.emailAddress ||
     null;
 
+  // Check 48-Hour Deletion Cooldown Lock (Anti-abuse protection)
+  if (email) {
+    const { checkDeletionLock } = await import('@/lib/deletionLock');
+    const lockStatus = await checkDeletionLock(email);
+    if (lockStatus.isLocked) {
+      const err: any = new Error(
+        'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.'
+      );
+      err.isDeletionLocked = true;
+      err.expiresAt = lockStatus.expiresAt;
+      err.remainingHours = lockStatus.remainingHours;
+      throw err;
+    }
+  }
+
   // Check if account already exists with this email address
   if (email) {
     const existingByEmail = await prisma.user.findFirst({

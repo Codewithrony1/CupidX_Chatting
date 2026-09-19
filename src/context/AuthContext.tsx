@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useUser, useClerk, useAuth as useClerkAuth } from '@clerk/nextjs';
+import { useUser, useClerk, useAuth as useClerkAuth, useSignIn, useSignUp } from '@clerk/nextjs';
 import {
   getOrCreateFirestoreUser,
   updateFirestoreUserProfile,
@@ -32,6 +32,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser();
   const clerk = useClerk();
   const { getToken } = useClerkAuth();
+  const { signIn } = useSignIn();
+  const { signUp } = useSignUp();
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -238,6 +240,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       '/terms',
       '/safety',
       '/community-guidelines',
+      '/refund',
+      '/contact',
       '/sso-callback',
       '/forgot-password',
     ];
@@ -292,46 +296,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── 3. Google 1-Click Sign-in via Clerk ────────────────────────────────────
   const loginWithGoogle = useCallback(async () => {
     console.log('[AUTH] Clerk Google login initiated');
-    const origin = typeof window !== 'undefined' && window.location.origin 
-      ? window.location.origin 
-      : 'https://www.cupidxchat.in';
 
-    const targetRedirectUrl = `${origin}/sso-callback`;
-    const targetDashboardUrl = `${origin}/dashboard`;
-
-    const client = (clerk as any)?.client;
-
-    // 1. Primary: Use client.signIn.authenticateWithRedirect with continueSignUp enabled
-    if (client?.signIn?.authenticateWithRedirect) {
+    // 1. Primary: Use signIn.sso() — Clerk v7 Future API
+    if (signIn?.sso) {
       try {
-        await client.signIn.authenticateWithRedirect({
+        const { error } = await signIn.sso({
           strategy: 'oauth_google',
-          redirectUrl: targetRedirectUrl,
-          redirectUrlComplete: targetDashboardUrl,
-          continueSignUp: true,
+          redirectUrl: '/dashboard',
+          redirectCallbackUrl: '/sso-callback',
         });
+        if (error) {
+          console.warn('[AUTH] signIn.sso error:', error);
+        }
+        // sso() triggers a browser redirect, so we won't reach here normally
         return;
-      } catch (signInErr: any) {
-        console.warn('[AUTH] client.signIn.authenticateWithRedirect notice:', signInErr);
+      } catch (ssoErr: any) {
+        console.warn('[AUTH] signIn.sso notice:', ssoErr);
       }
     }
 
-    // 2. Secondary: If signIn wasn't ready or threw, try client.signUp.authenticateWithRedirect with continueSignIn
-    if (client?.signUp?.authenticateWithRedirect) {
-      try {
-        await client.signUp.authenticateWithRedirect({
-          strategy: 'oauth_google',
-          redirectUrl: targetRedirectUrl,
-          redirectUrlComplete: targetDashboardUrl,
-          continueSignIn: true,
-        });
-        return;
-      } catch (signUpErr: any) {
-        console.warn('[AUTH] client.signUp.authenticateWithRedirect notice:', signUpErr);
-      }
-    }
-
-    // 3. Fallback: Open Clerk Sign-In modal
+    // 2. Fallback: Open Clerk Sign-In modal
     if (clerk?.openSignIn) {
       try {
         clerk.openSignIn({
@@ -344,53 +328,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 4. Fallback: clerk.redirectToSignIn
+    // 3. Last resort: clerk.redirectToSignIn
     if (clerk && typeof (clerk as any).redirectToSignIn === 'function') {
       await (clerk as any).redirectToSignIn({
         fallbackRedirectUrl: '/dashboard',
         signUpFallbackRedirectUrl: '/onboarding',
       });
     }
-  }, [clerk]);
+  }, [signIn, clerk]);
 
   const signUpWithGoogle = useCallback(async () => {
     console.log('[AUTH] Clerk Google signup initiated');
-    const origin = typeof window !== 'undefined' && window.location.origin 
-      ? window.location.origin 
-      : 'https://www.cupidxchat.in';
 
-    const targetRedirectUrl = `${origin}/sso-callback`;
-    const targetOnboardingUrl = `${origin}/onboarding`;
-
-    const client = (clerk as any)?.client;
-
-    // 1. Primary: Use client.signUp.authenticateWithRedirect with continueSignIn enabled
-    if (client?.signUp?.authenticateWithRedirect) {
+    // 1. Primary: Use signUp.sso() — Clerk v7 Future API
+    if (signUp?.sso) {
       try {
-        await client.signUp.authenticateWithRedirect({
+        const { error } = await signUp.sso({
           strategy: 'oauth_google',
-          redirectUrl: targetRedirectUrl,
-          redirectUrlComplete: targetOnboardingUrl,
-          continueSignIn: true,
+          redirectUrl: '/onboarding',
+          redirectCallbackUrl: '/sso-callback',
         });
+        if (error) {
+          console.warn('[AUTH] signUp.sso error:', error);
+        }
         return;
-      } catch (signUpErr: any) {
-        console.warn('[AUTH] client.signUp.authenticateWithRedirect notice:', signUpErr);
+      } catch (ssoErr: any) {
+        console.warn('[AUTH] signUp.sso notice:', ssoErr);
       }
     }
 
-    // 2. Secondary: Try client.signIn.authenticateWithRedirect with continueSignUp enabled
-    if (client?.signIn?.authenticateWithRedirect) {
+    // 2. Fallback: Try signIn.sso() (auto-transfers)
+    if (signIn?.sso) {
       try {
-        await client.signIn.authenticateWithRedirect({
+        const { error } = await signIn.sso({
           strategy: 'oauth_google',
-          redirectUrl: targetRedirectUrl,
-          redirectUrlComplete: targetOnboardingUrl,
-          continueSignUp: true,
+          redirectUrl: '/onboarding',
+          redirectCallbackUrl: '/sso-callback',
         });
+        if (error) {
+          console.warn('[AUTH] signIn.sso error:', error);
+        }
         return;
-      } catch (signInErr: any) {
-        console.warn('[AUTH] client.signIn.authenticateWithRedirect notice:', signInErr);
+      } catch (ssoErr: any) {
+        console.warn('[AUTH] signIn.sso notice:', ssoErr);
       }
     }
 
@@ -406,21 +386,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 4. Fallback: clerk.redirectToSignUp
+    // 4. Last resort: clerk.redirectToSignUp
     if (clerk && typeof (clerk as any).redirectToSignUp === 'function') {
       await (clerk as any).redirectToSignUp({
         fallbackRedirectUrl: '/onboarding',
       });
     }
-  }, [clerk]);
+  }, [signUp, signIn, clerk]);
 
   // ─── 4. Email / Password Login via Clerk ────────────────────────────────────
   const loginWithEmail = useCallback(async (emailOrUsername: string, pass: string) => {
     if (!clerk) {
       throw new Error('Sign-in service is initializing. Please try again.');
     }
-    const client = (clerk as any).client;
-    if (!client?.signIn) {
+
+    // If signIn hook isn't loaded yet, fall back to Clerk modal
+    if (!signIn) {
       clerk.openSignIn({
         fallbackRedirectUrl: '/dashboard',
         signUpFallbackRedirectUrl: '/onboarding',
@@ -432,18 +413,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const result = await client.signIn.create({
+      // Clerk v7: create() returns { error }, status is on signIn.status
+      const { error: createError } = await signIn.create({
         identifier: emailOrUsername.trim(),
         password: pass,
       });
 
-      if (result.status === 'complete') {
-        await clerk.setActive({ 
-          session: result.createdSessionId,
-          redirectUrl: '/dashboard',
-        });
+      if (createError) {
+        const msg = (createError as any)?.longMessage || (createError as any)?.message || 'Invalid email or password.';
+        throw new Error(msg);
+      }
+
+      if (signIn.status === 'complete') {
+        // Clerk v7: finalize() converts completed sign-in into active session
+        const { error: finalizeError } = await signIn.finalize();
+        if (finalizeError) {
+          console.warn('[AUTH] signIn.finalize error:', finalizeError);
+        }
+        // Navigate to dashboard after session is active
+        router.replace('/dashboard');
       } else {
-        console.warn('[AUTH] Incomplete sign-in status:', result.status);
+        console.warn('[AUTH] Incomplete sign-in status:', signIn.status);
         clerk.openSignIn({
           fallbackRedirectUrl: '/dashboard',
           signUpFallbackRedirectUrl: '/onboarding',
@@ -457,15 +447,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Invalid email or password.';
       throw new Error(msg);
     }
-  }, [clerk]);
+  }, [clerk, signIn, router]);
 
   // ─── 5. Email / Password Signup via Clerk ───────────────────────────────────
   const signUpWithEmail = useCallback(async (emailOrUsername: string, pass: string, name?: string) => {
     if (!clerk) {
       throw new Error('Sign-up service is initializing. Please try again.');
     }
-    const client = (clerk as any).client;
-    if (!client?.signUp) {
+
+    // If signUp hook isn't loaded yet, fall back to Clerk modal
+    if (!signUp) {
       clerk.openSignUp({
         fallbackRedirectUrl: '/onboarding',
         initialValues: {
@@ -478,20 +469,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const isEmail = emailOrUsername.includes('@');
-      const result = await client.signUp.create({
+      // Clerk v7: create() returns { error }, status on signUp.status
+      const { error: createError } = await signUp.create({
         emailAddress: isEmail ? emailOrUsername.trim() : undefined,
         username: !isEmail ? emailOrUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') : undefined,
         password: pass,
         firstName: name || undefined,
       });
 
-      if (result.status === 'complete') {
-        await clerk.setActive({ 
-          session: result.createdSessionId,
-          redirectUrl: '/onboarding',
-        });
+      if (createError) {
+        const msg = (createError as any)?.longMessage || (createError as any)?.message || 'Could not complete registration.';
+        throw new Error(msg);
+      }
+
+      if (signUp.status === 'complete') {
+        // Clerk v7: finalize() converts completed sign-up into active session
+        const { error: finalizeError } = await signUp.finalize();
+        if (finalizeError) {
+          console.warn('[AUTH] signUp.finalize error:', finalizeError);
+        }
+        // Navigate to onboarding after session is active
+        router.replace('/onboarding');
       } else {
-        console.warn('[AUTH] Sign-up requires additional verification:', result.status);
+        console.warn('[AUTH] Sign-up requires additional verification:', signUp.status);
         clerk.openSignUp({
           fallbackRedirectUrl: '/onboarding',
           initialValues: {
@@ -505,7 +505,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Could not complete registration.';
       throw new Error(msg);
     }
-  }, [clerk]);
+  }, [clerk, signUp, router]);
 
   // ─── 6. Logout via Clerk ───────────────────────────────────────────────────
   const logout = useCallback(async () => {

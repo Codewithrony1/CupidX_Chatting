@@ -490,5 +490,27 @@ model UserConsent {
   @@index([userId])
 }
 
+model DeletedAccountLock {
+  id        String   @id @default(uuid())
+  emailHash String   @unique
+  expiresAt DateTime
+  reason    String   @default("ACCOUNT_DELETION_COOLDOWN")
+  createdAt DateTime @default(now())
 
+  @@index([emailHash])
+  @@index([expiresAt])
+}
 
+model FinancialAuditRecord {
+  id              String   @id @default(uuid())
+  orderId         String?  // UTR / Payment ID / Order reference
+  amount          Float
+  currency        String   @default("INR")
+  plan            String
+  status          String
+  paymentMethod   String   @default("MANUAL_UPI")
+  transactionDate DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([orderId])
+}

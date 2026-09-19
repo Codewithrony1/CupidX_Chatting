@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
 import { calculateAge } from '@/lib/firestoreUser';
 import { validateDob, MIN_DOB_STRING, getTodayDateString } from '@/lib/validation/dob';
-import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2 } from 'lucide-react';
+import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2, Clock } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 export default function OnboardingPage() {
@@ -31,9 +31,34 @@ export default function OnboardingPage() {
   const [locationProcessingAcknowledged, setLocationProcessingAcknowledged] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
 
+  // 48-Hour Deletion Lock Cooldown State
+  const [isDeletionLocked, setIsDeletionLocked] = useState(false);
+  const [deletionLockRemainingHours, setDeletionLockRemainingHours] = useState<number | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [success, setSuccess] = useState(false);
+
+  // Check 48-Hour Deletion Lock on Mount
+  useEffect(() => {
+    async function checkLockStatus() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.status === 403) {
+          const data = await res.json().catch(() => ({}));
+          if (data?.isDeletionLocked) {
+            setIsDeletionLocked(true);
+            setDeletionLockRemainingHours(data.remainingHours || 48);
+            setErrorMsg(
+              data.error ||
+                'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.'
+            );
+          }
+        }
+      } catch (e) {}
+    }
+    checkLockStatus();
+  }, []);
 
   // Pre-fill existing data if available
   useEffect(() => {
@@ -145,6 +170,10 @@ export default function OnboardingPage() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (data?.isDeletionLocked) {
+          setIsDeletionLocked(true);
+          setDeletionLockRemainingHours(data.remainingHours || 48);
+        }
         setErrorMsg(data.error || 'Failed to complete profile setup. Please check your information and try again.');
         setSubmitting(false);
         return;
@@ -177,6 +206,24 @@ export default function OnboardingPage() {
           <h1 className="text-2xl font-black tracking-tight text-white">Let&apos;s set up your profile</h1>
           <p className="text-xs text-pink-200/80">Tell us a little about yourself before you start connecting.</p>
         </div>
+
+        {/* 48-Hour Deletion Cooldown Alert Banner */}
+        {isDeletionLocked && (
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-2 leading-relaxed animate-in fade-in">
+            <div className="flex items-center gap-2 font-bold text-amber-300">
+              <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Temporary 48-Hour Re-Registration Restriction</span>
+            </div>
+            <p>
+              Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.
+            </p>
+            {deletionLockRemainingHours && (
+              <p className="text-[11px] text-amber-300/80 font-mono">
+                Cooldown remaining: ~{deletionLockRemainingHours} hour{deletionLockRemainingHours > 1 ? 's' : ''}
+              </p>
+            )}
+          </div>
+        )}
 
         {success ? (
           <div className="py-12 text-center space-y-3">
@@ -415,6 +462,7 @@ export default function OnboardingPage() {
               type="submit"
               disabled={
                 submitting ||
+                isDeletionLocked ||
                 !displayName.trim() ||
                 !dateOfBirth ||
                 !termsAccepted ||

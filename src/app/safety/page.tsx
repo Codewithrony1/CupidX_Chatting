@@ -147,6 +147,12 @@ export default function SafetyPage() {
           <Link href="/terms" className="hover:text-pink-300 underline transition-colors">
             Terms of Service
           </Link>
+          <Link href="/refund" className="hover:text-pink-300 underline transition-colors">
+            Refund Policy
+          </Link>
+          <Link href="/contact" className="hover:text-pink-300 underline transition-colors">
+            Contact
+          </Link>
         </div>
       </main>
     </div>

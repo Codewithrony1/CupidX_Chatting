@@ -11,9 +11,38 @@ export async function GET(req: Request) {
         const clerkSession = await clerkAuth();
         if (clerkSession?.userId) {
           const { getOrCreateUserFromClerk } = await import('@/lib/auth');
-          user = await getOrCreateUserFromClerk(clerkSession.userId);
+          try {
+            user = await getOrCreateUserFromClerk(clerkSession.userId);
+          } catch (clerkErr: any) {
+            if (clerkErr?.isDeletionLocked) {
+              return NextResponse.json(
+                {
+                  error:
+                    'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
+                  isDeletionLocked: true,
+                  expiresAt: clerkErr.expiresAt,
+                  remainingHours: clerkErr.remainingHours,
+                },
+                { status: 403 }
+              );
+            }
+            throw clerkErr;
+          }
         }
-      } catch (e) {}
+      } catch (e: any) {
+        if (e?.isDeletionLocked) {
+          return NextResponse.json(
+            {
+              error:
+                'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
+              isDeletionLocked: true,
+              expiresAt: e.expiresAt,
+              remainingHours: e.remainingHours,
+            },
+            { status: 403 }
+          );
+        }
+      }
     }
 
     if (user) {

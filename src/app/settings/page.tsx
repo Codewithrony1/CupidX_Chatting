@@ -25,6 +25,9 @@ import {
   AlertTriangle,
   X,
   Loader2,
+  CreditCard,
+  Crown,
+  Clock,
 } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 import AppShell from '@/components/AppShell';
@@ -81,6 +84,10 @@ export default function SettingsPage() {
   const [loadingConsent, setLoadingConsent] = useState(true);
   const [updatingMarketing, setUpdatingMarketing] = useState(false);
 
+  // Payments & Subscription State
+  const [paymentHistory, setPaymentHistory] = useState<any[]>([]);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+
   // Account Deletion State
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
@@ -127,6 +134,22 @@ export default function SettingsPage() {
     }
   };
 
+  // Fetch user payment history
+  const fetchPaymentHistory = async () => {
+    try {
+      setLoadingPayments(true);
+      const res = await fetch('/api/payments/history');
+      if (res.ok) {
+        const data = await res.json();
+        setPaymentHistory(data.payments || []);
+      }
+    } catch (e) {
+      console.warn('Payment history fetch notice:', e);
+    } finally {
+      setLoadingPayments(false);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       setDisplayName(user.fullName || '');
@@ -134,6 +157,7 @@ export default function SettingsPage() {
       setTheme(user.profile?.themePreference || 'system');
       fetchPrivacyLists();
       fetchConsentRecords();
+      fetchPaymentHistory();
     }
   }, [user]);
 
@@ -519,7 +543,102 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Section 5: Appearance & Theme */}
+          {/* Section 5: Payments & Subscription */}
+          <div className="glass-romantic rounded-3xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-pink-400" />
+                <span>Payments &amp; Subscription</span>
+              </h3>
+              <span
+                className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                  isVIP
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 flex items-center gap-1'
+                    : 'bg-white/10 text-slate-300 border-white/20'
+                }`}
+              >
+                {isVIP ? (
+                  <>
+                    <Crown className="w-3 h-3 text-amber-400" /> VIP Active
+                  </>
+                ) : (
+                  'Free Member'
+                )}
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-black/40 border border-white/5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div>
+                  <div className="font-bold text-white">Current Plan: {isVIP ? (user?.subscription?.plan || 'VIP Membership') : 'Free Tier'}</div>
+                  <div className="text-[11px] text-slate-400">
+                    {isVIP ? (
+                      user?.vip_expires_at ? `Valid until ${new Date(user.vip_expires_at).toLocaleDateString()}` : 'Active VIP status'
+                    ) : (
+                      'Upgrade to VIP for image sharing, custom avatars, and enhanced profile badges.'
+                    )}
+                  </div>
+                </div>
+                <Link
+                  href="/premium"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white font-bold text-xs shadow-md shadow-pink-500/20 text-center transition-all cursor-pointer"
+                >
+                  {isVIP ? 'Manage VIP' : 'Upgrade to VIP (from ₹29)'}
+                </Link>
+              </div>
+            </div>
+
+            {/* Payment & UTR History */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-pink-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-pink-400" />
+                <span>Billing &amp; Payment History</span>
+              </h4>
+
+              {loadingPayments ? (
+                <div className="p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-pink-400" />
+                  <span>Loading billing records...</span>
+                </div>
+              ) : paymentHistory.length === 0 ? (
+                <p className="text-[11px] text-slate-400 bg-black/20 p-3 rounded-xl border border-white/5">
+                  No payment records found. Payments made via manual UPI QR verification will appear here once submitted.
+                </p>
+              ) : (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {paymentHistory.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between text-xs"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-white flex items-center gap-2">
+                          <span>{item.currency === 'INR' ? '₹' : '$'}{item.amount}</span>
+                          <span className="text-[10px] text-pink-300/80 font-normal uppercase">({item.plan})</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          Ref: {item.paymentId || item.requestId.slice(0, 8)} • {new Date(item.createdAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          item.status === 'approved' || item.status === 'APPROVED'
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : item.status === 'rejected' || item.status === 'REJECTED'
+                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                            : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        }`}
+                      >
+                        {item.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Section 6: Appearance & Theme */}
           <div className="glass-romantic rounded-3xl p-6 space-y-4">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Moon className="w-4 h-4 text-purple-400" />
@@ -643,15 +762,17 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            <div className="space-y-2 text-xs text-slate-300 bg-rose-500/10 p-4 rounded-2xl border border-rose-500/20 leading-relaxed">
+            <div className="space-y-2 text-xs text-slate-300 bg-rose-500/10 p-4 rounded-2xl border border-rose-500/20 leading-relaxed max-h-60 overflow-y-auto pr-1">
               <p className="font-bold text-rose-300">
                 This action is immediate, irreversible, and permanent:
               </p>
-              <ul className="list-disc pl-4 space-y-1 text-slate-300">
-                <li>Any active random chat session will immediately terminate.</li>
-                <li>Your profile, avatar, and @{user?.username} identity will be permanently deleted.</li>
-                <li>Friendships, friend requests, and direct chat threads will be erased.</li>
-                <li>Your Clerk authentication account will be removed from CupidX.</li>
+              <ul className="list-disc pl-4 space-y-1.5 text-slate-300">
+                <li><strong>Profile &amp; Identity:</strong> Your profile, avatar, and @{user?.username} identity will be permanently erased.</li>
+                <li><strong>Application Data:</strong> Friendships, friend requests, direct chat threads, and block lists will be deleted.</li>
+                <li><strong>Active Random Chat:</strong> Any live random chat session will immediately terminate and notify your partner.</li>
+                <li><strong>VIP &amp; Subscription:</strong> Active VIP access ends immediately without automatic refund, as outlined in the Refund Policy.</li>
+                <li><strong>Statutory Financial Records:</strong> Basic transaction references (UTR, amount, date) are retained without personal profile data for mandatory tax and accounting compliance.</li>
+                <li><strong>48-Hour Security Lock:</strong> A minimal, salted cryptographic hash (HMAC-SHA256) of your verified email will be held for 48 hours solely to prevent immediate re-registration abuse. Your raw email address is not stored for this purpose, and the restriction expires automatically after 48 hours.</li>
               </ul>
             </div>
 
@@ -696,7 +817,7 @@ export default function SettingsPage() {
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    <span>Permanently Delete</span>
+                    <span>Permanently Delete My Account</span>
                   </>
                 )}
               </button>

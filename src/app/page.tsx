@@ -310,10 +310,12 @@ export default function Home() {
         <span className="text-xs text-pink-300/60 font-medium">
           © {new Date().getFullYear()} Cupidx. Connect. Chat. Move on.
         </span>
-        <div className="flex items-center space-x-5 text-xs text-pink-200/80 font-semibold">
+        <div className="flex flex-wrap items-center gap-4 text-xs text-pink-200/80 font-semibold">
           <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
           <Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link>
-          <Link href="/settings" className="hover:text-white transition-colors">Settings</Link>
+          <Link href="/refund" className="hover:text-white transition-colors">Refund Policy</Link>
+          <Link href="/community-guidelines" className="hover:text-white transition-colors">Guidelines</Link>
+          <Link href="/contact" className="hover:text-white transition-colors">Contact</Link>
         </div>
       </footer>
     </div>
