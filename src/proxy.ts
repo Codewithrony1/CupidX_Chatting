@@ -15,6 +15,7 @@ const isPublicRoute = createRouteMatcher([
   '/refund(.*)',
   '/contact(.*)',
   '/sso-callback(.*)',
+  '/auth-callback(.*)',
   '/api/auth/login(.*)',
   '/api/auth/register(.*)',
   '/api/auth/logout(.*)',

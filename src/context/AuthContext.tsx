@@ -243,6 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       '/refund',
       '/contact',
       '/sso-callback',
+      '/auth-callback',
       '/forgot-password',
     ];
     const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
@@ -266,15 +267,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (pathname === '/login' || pathname === '/register' || pathname === '/signup') {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        const target = isComplete ? '/dashboard' : '/onboarding';
+        const target = isComplete ? '/dashboard' : '/setup-profile';
         console.log('[AUTH GUARD] Authenticated user on auth page -> redirecting to:', target);
         router.replace(target);
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // Already completed onboarding on /onboarding
-      if (pathname === '/onboarding' && isComplete) {
+      // Already completed onboarding on /setup-profile or /onboarding
+      if ((pathname === '/setup-profile' || pathname === '/onboarding') && isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
         router.replace('/dashboard');
@@ -283,10 +284,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Incomplete profile on protected route
-      if (!isPublic && pathname !== '/onboarding' && !isComplete) {
+      if (!isPublic && pathname !== '/setup-profile' && pathname !== '/onboarding' && !isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        router.replace('/onboarding');
+        router.replace('/setup-profile');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
@@ -302,25 +303,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { error } = await signIn.sso({
           strategy: 'oauth_google',
-          redirectUrl: '/onboarding',
+          redirectUrl: '/auth-callback',
           redirectCallbackUrl: '/sso-callback',
         });
         if (error) {
           console.warn('[AUTH] signIn.sso error:', error);
         }
-        // sso() triggers a browser redirect, so we won't reach here normally
         return;
       } catch (ssoErr: any) {
         console.warn('[AUTH] signIn.sso notice:', ssoErr);
       }
     }
 
-    // 2. Fallback: Open Clerk Sign-In modal
+    // 2. Fallback: clerk.authenticateWithRedirect
+    if (clerk && typeof (clerk as any).authenticateWithRedirect === 'function') {
+      try {
+        await (clerk as any).authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: '/sso-callback',
+          redirectUrlComplete: '/auth-callback',
+          continueSignUpUrl: '/setup-profile',
+        });
+        return;
+      } catch (authErr: any) {
+        console.warn('[AUTH] clerk.authenticateWithRedirect notice:', authErr);
+      }
+    }
+
+    // 3. Fallback: Open Clerk Sign-In modal
     if (clerk?.openSignIn) {
       try {
         clerk.openSignIn({
-          fallbackRedirectUrl: '/onboarding',
-          signUpFallbackRedirectUrl: '/onboarding',
+          fallbackRedirectUrl: '/auth-callback',
+          signUpFallbackRedirectUrl: '/auth-callback',
         });
         return;
       } catch (modalErr) {
@@ -328,11 +343,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 3. Last resort: clerk.redirectToSignIn
+    // 4. Last resort: clerk.redirectToSignIn
     if (clerk && typeof (clerk as any).redirectToSignIn === 'function') {
       await (clerk as any).redirectToSignIn({
-        fallbackRedirectUrl: '/onboarding',
-        signUpFallbackRedirectUrl: '/onboarding',
+        fallbackRedirectUrl: '/auth-callback',
+        signUpFallbackRedirectUrl: '/auth-callback',
       });
     }
   }, [signIn, clerk]);
@@ -345,7 +360,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { error } = await signUp.sso({
           strategy: 'oauth_google',
-          redirectUrl: '/onboarding',
+          redirectUrl: '/auth-callback',
           redirectCallbackUrl: '/sso-callback',
         });
         if (error) {
@@ -357,12 +372,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 2. Fallback: Try signIn.sso() (auto-transfers)
+    // 2. Secondary: Try signIn.sso() (auto-transfers)
     if (signIn?.sso) {
       try {
         const { error } = await signIn.sso({
           strategy: 'oauth_google',
-          redirectUrl: '/onboarding',
+          redirectUrl: '/auth-callback',
           redirectCallbackUrl: '/sso-callback',
         });
         if (error) {
@@ -374,11 +389,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 3. Fallback: Open Clerk Sign-Up modal
+    // 3. Fallback: clerk.authenticateWithRedirect
+    if (clerk && typeof (clerk as any).authenticateWithRedirect === 'function') {
+      try {
+        await (clerk as any).authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: '/sso-callback',
+          redirectUrlComplete: '/auth-callback',
+          continueSignUpUrl: '/setup-profile',
+        });
+        return;
+      } catch (authErr: any) {
+        console.warn('[AUTH] clerk.authenticateWithRedirect notice:', authErr);
+      }
+    }
+
+    // 4. Fallback: Open Clerk Sign-Up modal
     if (clerk?.openSignUp) {
       try {
         clerk.openSignUp({
-          fallbackRedirectUrl: '/onboarding',
+          fallbackRedirectUrl: '/auth-callback',
         });
         return;
       } catch (modalErr) {
@@ -386,10 +416,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 4. Last resort: clerk.redirectToSignUp
+    // 5. Last resort: clerk.redirectToSignUp
     if (clerk && typeof (clerk as any).redirectToSignUp === 'function') {
       await (clerk as any).redirectToSignUp({
-        fallbackRedirectUrl: '/onboarding',
+        fallbackRedirectUrl: '/auth-callback',
       });
     }
   }, [signUp, signIn, clerk]);
@@ -403,8 +433,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // If signIn hook isn't loaded yet, fall back to Clerk modal
     if (!signIn) {
       clerk.openSignIn({
-        fallbackRedirectUrl: '/onboarding',
-        signUpFallbackRedirectUrl: '/onboarding',
+        fallbackRedirectUrl: '/auth-callback',
+        signUpFallbackRedirectUrl: '/auth-callback',
         initialValues: {
           emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
         },
@@ -413,7 +443,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      // Clerk v7: create() returns { error }, status is on signIn.status
+      const isEmail = emailOrUsername.includes('@');
+      // Clerk v7: create() returns { error }, status on signIn.status
       const { error: createError } = await signIn.create({
         identifier: emailOrUsername.trim(),
         password: pass,
@@ -430,13 +461,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (finalizeError) {
           console.warn('[AUTH] signIn.finalize error:', finalizeError);
         }
-        // Navigate to onboarding — guard will bounce existing users to /dashboard
-        router.replace('/onboarding');
+        // Navigate to auth-callback router — evaluates profile state on server
+        router.replace('/auth-callback');
       } else {
         console.warn('[AUTH] Incomplete sign-in status:', signIn.status);
         clerk.openSignIn({
-          fallbackRedirectUrl: '/onboarding',
-          signUpFallbackRedirectUrl: '/onboarding',
+          fallbackRedirectUrl: '/auth-callback',
+          signUpFallbackRedirectUrl: '/auth-callback',
           initialValues: {
             emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
           },
@@ -458,7 +489,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // If signUp hook isn't loaded yet, fall back to Clerk modal
     if (!signUp) {
       clerk.openSignUp({
-        fallbackRedirectUrl: '/onboarding',
+        fallbackRedirectUrl: '/auth-callback',
         initialValues: {
           emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
           firstName: name || undefined,
@@ -488,12 +519,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (finalizeError) {
           console.warn('[AUTH] signUp.finalize error:', finalizeError);
         }
-        // Navigate to onboarding after session is active
-        router.replace('/onboarding');
+        // Navigate to setup-profile after session is active
+        router.replace('/setup-profile');
       } else {
         console.warn('[AUTH] Sign-up requires additional verification:', signUp.status);
         clerk.openSignUp({
-          fallbackRedirectUrl: '/onboarding',
+          fallbackRedirectUrl: '/auth-callback',
           initialValues: {
             emailAddress: isEmail ? emailOrUsername.trim() : undefined,
             firstName: name || undefined,

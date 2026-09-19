@@ -41,7 +41,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: '/(login|signup|register|dashboard|onboarding|sso-callback|chat/:path*|premium|api/:path*)',
+        source: '/(login|signup|register|dashboard|onboarding|setup-profile|sso-callback|auth-callback|chat/:path*|premium|api/:path*)',
         headers: [
           {
             key: 'Cache-Control',
@@ -90,13 +90,13 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       {
-        source: '/setup-profile',
-        destination: '/onboarding',
+        source: '/onboarding',
+        destination: '/setup-profile',
         permanent: false,
       },
       {
-        source: '/setup-profile/:path*',
-        destination: '/onboarding',
+        source: '/onboarding/:path*',
+        destination: '/setup-profile',
         permanent: false,
       },
     ];

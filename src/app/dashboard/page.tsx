@@ -82,7 +82,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!loading && user && !isProfileComplete) {
-      router.replace('/onboarding');
+      router.replace('/setup-profile');
     }
   }, [loading, user, isProfileComplete, router]);
 
