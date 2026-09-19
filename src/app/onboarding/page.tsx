@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
@@ -21,6 +22,14 @@ export default function OnboardingPage() {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say'>('male');
   const [selectedEmoji, setSelectedEmoji] = useState('😊');
+
+  // Consent & Privacy State
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [randomChatAcknowledged, setRandomChatAcknowledged] = useState(false);
+  const [locationProcessingAcknowledged, setLocationProcessingAcknowledged] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -94,6 +103,17 @@ export default function OnboardingPage() {
       return;
     }
 
+    if (
+      !termsAccepted ||
+      !privacyAcknowledged ||
+      !ageConfirmed ||
+      !randomChatAcknowledged ||
+      !locationProcessingAcknowledged
+    ) {
+      setErrorMsg('Please review and agree to all required terms, privacy, age, and consent items before continuing.');
+      return;
+    }
+
     setSubmitting(true);
     setErrorMsg('');
 
@@ -113,6 +133,12 @@ export default function OnboardingPage() {
           dob: dateOfBirth,
           gender,
           avatarEmoji: selectedEmoji,
+          termsAccepted,
+          privacyAcknowledged,
+          ageConfirmed,
+          randomChatAcknowledged,
+          locationProcessingAcknowledged,
+          marketingConsent,
         }),
       });
 
@@ -265,6 +291,119 @@ export default function OnboardingPage() {
               </div>
             </div>
 
+            {/* 5. Privacy & Consent Acknowledgements */}
+            <div className="space-y-3 pt-3 border-t border-pink-500/20 text-left">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-pink-200">
+                <ShieldCheck className="w-3.5 h-3.5 text-pink-400" />
+                <span>PRIVACY &amp; CONSENT</span>
+              </div>
+
+              <div className="space-y-2.5 text-[11px] sm:text-xs text-pink-100/90 leading-snug">
+                {/* 1. Terms & Conditions */}
+                <label className="flex items-start gap-2.5 cursor-pointer group select-none">
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-pink-500/40 bg-white/5 text-pink-600 focus:ring-pink-500 focus:ring-offset-0 transition-all cursor-pointer shrink-0"
+                  />
+                  <span>
+                    I agree to the{' '}
+                    <Link
+                      href="/terms"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-pink-300 underline font-semibold hover:text-white"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Terms &amp; Conditions
+                    </Link>
+                    . <span className="text-rose-400 font-bold">*</span>
+                  </span>
+                </label>
+
+                {/* 2. Privacy Policy */}
+                <label className="flex items-start gap-2.5 cursor-pointer group select-none">
+                  <input
+                    type="checkbox"
+                    checked={privacyAcknowledged}
+                    onChange={(e) => setPrivacyAcknowledged(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-pink-500/40 bg-white/5 text-pink-600 focus:ring-pink-500 focus:ring-offset-0 transition-all cursor-pointer shrink-0"
+                  />
+                  <span>
+                    I acknowledge that I have read and understood the{' '}
+                    <Link
+                      href="/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-pink-300 underline font-semibold hover:text-white"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Privacy Policy
+                    </Link>
+                    . <span className="text-rose-400 font-bold">*</span>
+                  </span>
+                </label>
+
+                {/* 3. Age Requirement */}
+                <label className="flex items-start gap-2.5 cursor-pointer group select-none">
+                  <input
+                    type="checkbox"
+                    checked={ageConfirmed}
+                    onChange={(e) => setAgeConfirmed(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-pink-500/40 bg-white/5 text-pink-600 focus:ring-pink-500 focus:ring-offset-0 transition-all cursor-pointer shrink-0"
+                  />
+                  <span>
+                    I confirm that I meet the minimum age requirement (18+) to use CupidX. <span className="text-rose-400 font-bold">*</span>
+                  </span>
+                </label>
+
+                {/* 4. Random Stranger Chat */}
+                <label className="flex items-start gap-2.5 cursor-pointer group select-none">
+                  <input
+                    type="checkbox"
+                    checked={randomChatAcknowledged}
+                    onChange={(e) => setRandomChatAcknowledged(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-pink-500/40 bg-white/5 text-pink-600 focus:ring-pink-500 focus:ring-offset-0 transition-all cursor-pointer shrink-0"
+                  />
+                  <span>
+                    I understand that CupidX is a random-chat service and that I may be connected with strangers. <span className="text-rose-400 font-bold">*</span>
+                  </span>
+                </label>
+
+                {/* 5. Technical & Country Processing */}
+                <label className="flex items-start gap-2.5 cursor-pointer group select-none">
+                  <input
+                    type="checkbox"
+                    checked={locationProcessingAcknowledged}
+                    onChange={(e) => setLocationProcessingAcknowledged(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-pink-500/40 bg-white/5 text-pink-600 focus:ring-pink-500 focus:ring-offset-0 transition-all cursor-pointer shrink-0"
+                  />
+                  <span>
+                    I understand that CupidX may process technical information such as IP-derived approximate country information to provide features such as country display, security, abuse prevention, and service operation, as described in the Privacy Policy. <span className="text-rose-400 font-bold">*</span>
+                  </span>
+                </label>
+
+                {/* Optional Marketing */}
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[10px] uppercase tracking-wider font-extrabold text-pink-300/60 mb-1">
+                    Optional
+                  </div>
+                  <label className="flex items-start gap-2.5 cursor-pointer group select-none">
+                    <input
+                      type="checkbox"
+                      checked={marketingConsent}
+                      onChange={(e) => setMarketingConsent(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-pink-500/40 bg-white/5 text-pink-600 focus:ring-pink-500 focus:ring-offset-0 transition-all cursor-pointer shrink-0"
+                    />
+                    <span className="text-pink-200/70 group-hover:text-pink-100 transition-colors">
+                      I would like to receive product updates / announcements from CupidX.
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
             {errorMsg && (
               <div className="p-3 rounded-2xl bg-rose-500/20 border border-rose-500/30 text-xs text-rose-300 font-bold text-center leading-relaxed">
                 {errorMsg}
@@ -274,7 +413,16 @@ export default function OnboardingPage() {
             {/* Primary Submit Button */}
             <button
               type="submit"
-              disabled={submitting || !displayName.trim() || !dateOfBirth}
+              disabled={
+                submitting ||
+                !displayName.trim() ||
+                !dateOfBirth ||
+                !termsAccepted ||
+                !privacyAcknowledged ||
+                !ageConfirmed ||
+                !randomChatAcknowledged ||
+                !locationProcessingAcknowledged
+              }
               className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-xl shadow-pink-500/30 flex items-center justify-center space-x-2 text-sm disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
             >
               {submitting ? (

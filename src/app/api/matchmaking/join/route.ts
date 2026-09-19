@@ -19,6 +19,8 @@ export async function POST(req: Request) {
     const preferredGender = body.preferredGender || userProfile?.preferredGender || 'auto';
     const language = body.language || userProfile?.language || 'english';
 
+    const userCountry = (await import('@/lib/countryDetection')).detectCountryFromHeaders(req.headers);
+
     // 1. Check if user already belongs to an active match (Requirement 6: ONE USER = ONE ACTIVE MATCH)
     const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
 
@@ -59,44 +61,17 @@ export async function POST(req: Request) {
               mood: partner.profile?.mood || '',
               bio: partner.profile?.bio || '',
               isVIP: partner.membershipTier === 'VIP' || partner.is_vip,
+              countryCode: userCountry.countryCode,
+              countryName: userCountry.countryName,
+              countryFlag: userCountry.countryFlag,
             },
           });
         } else {
-          // Check Firestore before marking as ended
-          let isActiveInCloud = false;
-          try {
-            const { getAdminDb } = await import('@/lib/firebaseAdmin');
-            const adminDb = getAdminDb();
-            if (adminDb) {
-              const snap = await adminDb.collection('matches').doc(existingSession.id).get();
-              if (snap.exists && snap.data()?.status === 'active') {
-                isActiveInCloud = true;
-              }
-            }
-          } catch (e) {}
-
-          if (isActiveInCloud) {
-            return NextResponse.json({
-              matched: true,
-              chatSessionId: existingSession.id,
-              partner: {
-                id: partner.id,
-                displayName: partner.displayName || partner.fullName || 'Stranger',
-                avatarUrl: partner.profile?.avatarUrl || null,
-                avatarEmoji: partner.profile?.avatarEmoji || '😊',
-                gender: partner.profile?.gender || partner.gender || 'unspecified',
-                mood: partner.profile?.mood || '',
-                bio: partner.profile?.bio || '',
-                isVIP: partner.membershipTier === 'VIP' || partner.is_vip,
-              },
-            });
-          } else {
-            // Only truly stale / abandoned sessions (>10m with no messages and not active in cloud) are cleaned up
-            await prisma.chatSession.update({
-              where: { id: existingSession.id },
-              data: { status: 'ENDED', endedAt: new Date() },
-            });
-          }
+          // Stale / abandoned session: mark ended and add anti-rematch
+          await prisma.chatSession.update({
+            where: { id: existingSession.id },
+            data: { status: 'ENDED', endedAt: new Date() },
+          });
         }
       }
     }
@@ -125,17 +100,10 @@ export async function POST(req: Request) {
         },
       });
 
+      const { addRematchExclusion } = await import('@/lib/antiRematch');
       for (const s of oldSessions) {
-        try {
-          const { getAdminDb } = await import('@/lib/firebaseAdmin');
-          const adminDb = getAdminDb();
-          if (adminDb) {
-            await adminDb.collection('matches').doc(s.id).set(
-              { status: 'ended', endedAt: Date.now(), endedBy: user.id },
-              { merge: true }
-            );
-          }
-        } catch (e) {}
+        const partnerId = userIds.includes(s.userAId) ? s.userBId : s.userAId;
+        await addRematchExclusion(user.id, partnerId, 60000);
       }
 
       await prisma.chatSession.updateMany({
@@ -147,7 +115,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. Clean up stale WAITING queue entries (>25s inactive)
+    // 3. Clean up stale WAITING queue entries (>25s inactive)
     const STALE_THRESHOLD = new Date(Date.now() - 25 * 1000);
     await prisma.matchmakingQueue.updateMany({
       where: {
@@ -157,17 +125,25 @@ export async function POST(req: Request) {
       data: { status: 'EXPIRED' },
     });
 
-    // 3. Find list of blocked user IDs + excludePartnerId
-    const blockedRelations = await prisma.block.findMany({
-      where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
-    });
+    // 4. Find list of blocked user IDs + 60-Second Anti-Rematch Excluded partner IDs
+    const [blockedRelations, antiRematchExcludedIds] = await Promise.all([
+      prisma.block.findMany({
+        where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
+      }),
+      (await import('@/lib/antiRematch')).getActiveExcludedPartnerIds(user.id),
+    ]);
     const blockedUserIds = blockedRelations.map((b) => (b.blockerId === user.id ? b.blockedId : b.blockerId));
 
     const excludeUserIds = Array.from(
-      new Set([user.id, ...blockedUserIds, ...(excludePartnerId ? [excludePartnerId] : [])])
+      new Set([
+        user.id,
+        ...blockedUserIds,
+        ...antiRematchExcludedIds,
+        ...(excludePartnerId ? [excludePartnerId] : []),
+      ])
     );
 
-    // 4. Find all active WAITING candidates currently on the website
+    // 5. Find all active WAITING candidates currently on the website
     const candidates = await prisma.matchmakingQueue.findMany({
       where: {
         status: 'WAITING',
@@ -177,10 +153,10 @@ export async function POST(req: Request) {
       take: 20,
     });
 
-    // Requirement 4: Randomly shuffle eligible candidates for unpredictable, genuine random matching
+    // Randomly shuffle eligible candidates for unpredictable, genuine random matching
     const candidatesToEvaluate = [...candidates].sort(() => Math.random() - 0.5);
 
-    // 5. Try to atomically match with an eligible candidate
+    // 6. Try to atomically match with an eligible candidate
     for (const candidate of candidatesToEvaluate) {
       const newChatSessionId = crypto.randomUUID();
 
@@ -214,6 +190,9 @@ export async function POST(req: Request) {
               gender,
               preferredGender,
               language,
+              countryCode: userCountry.countryCode,
+              countryName: userCountry.countryName,
+              countryFlag: userCountry.countryFlag,
               updatedAt: new Date(),
             },
             create: {
@@ -224,6 +203,9 @@ export async function POST(req: Request) {
               gender,
               preferredGender,
               language,
+              countryCode: userCountry.countryCode,
+              countryName: userCountry.countryName,
+              countryFlag: userCountry.countryFlag,
             },
           });
 
@@ -246,62 +228,12 @@ export async function POST(req: Request) {
             include: { profile: true },
           });
 
-          // Sync active match & queue docs to Firestore for sub-50ms push delivery
-          try {
-            const { getAdminDb } = await import('@/lib/firebaseAdmin');
-            const adminDb = getAdminDb();
-            if (adminDb) {
-              const matchNow = Date.now();
-              await adminDb.collection('matches').doc(newChatSessionId).set({
-                matchId: newChatSessionId,
-                user1Uid: user.id,
-                user2Uid: candidate.userId,
-                user1DisplayName: user.displayName || user.fullName || 'Stranger',
-                user2DisplayName: partnerUser?.displayName || partnerUser?.fullName || 'Stranger',
-                user1AvatarUrl: user.profile?.avatarUrl || null,
-                user2AvatarUrl: partnerUser?.profile?.avatarUrl || null,
-                user1AvatarEmoji: user.profile?.avatarEmoji || '😊',
-                user2AvatarEmoji: partnerUser?.profile?.avatarEmoji || '😊',
-                user1Gender: user.profile?.gender || user.gender || 'unspecified',
-                user2Gender: partnerUser?.profile?.gender || partnerUser?.gender || 'unspecified',
-                user1IsVIP: Boolean(user.membershipTier === 'VIP' || user.is_vip),
-                user2IsVIP: Boolean(partnerUser?.membershipTier === 'VIP' || partnerUser?.is_vip),
-                status: 'active',
-                createdAt: matchNow,
-              });
-
-              // Notify both queue docs in Firestore so listeners fire immediately
-              await adminDb.collection('matchmaking').doc(candidate.userId).set(
-                {
-                  status: 'matched',
-                  matchId: newChatSessionId,
-                  partnerUid: user.id,
-                  matchedAt: matchNow,
-                  updatedAt: matchNow,
-                },
-                { merge: true }
-              );
-
-              await adminDb.collection('matchmaking').doc(user.id).set(
-                {
-                  status: 'matched',
-                  matchId: newChatSessionId,
-                  partnerUid: candidate.userId,
-                  matchedAt: matchNow,
-                  updatedAt: matchNow,
-                },
-                { merge: true }
-              );
-            }
-          } catch (e) {
-            console.warn('Firestore match sync error:', e);
-          }
-
           console.log('[RANDOM_CHAT][MATCH]', {
             state: 'matched',
             matchId: newChatSessionId,
             user1Id: user.id,
             user2Id: candidate.userId,
+            partnerCountry: `${candidate.countryFlag || '🌐'} ${candidate.countryName || 'Global'}`,
             timestamp: new Date().toISOString(),
           });
 
@@ -318,6 +250,9 @@ export async function POST(req: Request) {
                   mood: partnerUser.profile?.mood || '',
                   bio: partnerUser.profile?.bio || '',
                   isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
+                  countryCode: candidate.countryCode || 'IN',
+                  countryName: candidate.countryName || 'India',
+                  countryFlag: candidate.countryFlag || '🇮🇳',
                 }
               : null,
           });
@@ -327,7 +262,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6. No immediate candidate available: Put user into WAITING queue (Requirement 5: One active queue entry)
+    // 7. No immediate candidate available: Put user into WAITING queue
     await prisma.matchmakingQueue.upsert({
       where: { userId: user.id },
       update: {
@@ -337,6 +272,9 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        countryCode: userCountry.countryCode,
+        countryName: userCountry.countryName,
+        countryFlag: userCountry.countryFlag,
         joinedAt: new Date(),
         updatedAt: new Date(),
       },
@@ -346,6 +284,9 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        countryCode: userCountry.countryCode,
+        countryName: userCountry.countryName,
+        countryFlag: userCountry.countryFlag,
         joinedAt: new Date(),
         updatedAt: new Date(),
       },

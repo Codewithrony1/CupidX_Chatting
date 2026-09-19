@@ -57,8 +57,102 @@ const activeMatches = new Map();
 const userActiveMatch = new Map();
 // reconnectGraceTimers: userId -> timeoutId (10-second grace period for transport reconnect)
 const reconnectGraceTimers = new Map();
-// recentPartners: userId -> Set<partnerUserId> (prevent immediate rematching upon skip)
-const recentPartners = new Map();
+// 60-second Anti-Rematch Exclusions: pairHash -> expiresAt (timestamp in ms)
+const rematchExclusions = new Map();
+
+function getRematchPairHash(u1, u2) {
+  const [first, second] = [String(u1), String(u2)].sort();
+  return `rematch:${first}::${second}`;
+}
+
+function addRematchExclusion(u1, u2, durationMs = 60000) {
+  if (!u1 || !u2 || u1 === u2) return;
+  const hash = getRematchPairHash(u1, u2);
+  const expiresAt = Date.now() + durationMs;
+  rematchExclusions.set(hash, expiresAt);
+  console.log(`[ANTI_REMATCH] Added 60s exclusion for pair: ${hash}`);
+
+  // Persist to database for cross-instance / serverless consistency
+  setImmediate(async () => {
+    try {
+      const [first, second] = [String(u1), String(u2)].sort();
+      await prisma.antiRematchExclusion.upsert({
+        where: { pairHash: hash },
+        update: { expiresAt: new Date(expiresAt) },
+        create: {
+          pairHash: hash,
+          user1Id: first,
+          user2Id: second,
+          expiresAt: new Date(expiresAt),
+        },
+      });
+    } catch {}
+  });
+}
+
+function isRematchExcluded(u1, u2) {
+  if (!u1 || !u2 || u1 === u2) return true;
+  const hash = getRematchPairHash(u1, u2);
+  const exp = rematchExclusions.get(hash);
+  if (exp) {
+    if (exp > Date.now()) return true;
+    rematchExclusions.delete(hash);
+  }
+  return false;
+}
+
+// Clean up expired exclusions every 30 seconds
+setInterval(() => {
+  const now = Date.now();
+  rematchExclusions.forEach((exp, hash) => {
+    if (exp <= now) rematchExclusions.delete(hash);
+  });
+}, 30000);
+
+// Country Flag helper
+function getCountryFlag(code) {
+  if (!code || code.length !== 2) return '🌐';
+  const clean = code.toUpperCase();
+  if (!/^[A-Z]{2}$/.test(clean)) return '🌐';
+  const codePoints = clean.split('').map((char) => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
+}
+
+const COUNTRY_NAMES = {
+  IN: 'India', US: 'United States', GB: 'United Kingdom', CA: 'Canada',
+  AU: 'Australia', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain',
+  BR: 'Brazil', RU: 'Russia', JP: 'Japan', KR: 'South Korea', CN: 'China',
+  ID: 'Indonesia', PK: 'Pakistan', BD: 'Bangladesh', NG: 'Nigeria',
+  ZA: 'South Africa', AE: 'United Arab Emirates', SA: 'Saudi Arabia',
+  SG: 'Singapore', MY: 'Malaysia', TH: 'Thailand', VN: 'Vietnam',
+  PH: 'Philippines', NL: 'Netherlands', SE: 'Sweden', NO: 'Norway',
+  DK: 'Denmark', FI: 'Finland', PL: 'Poland', TR: 'Turkey', MX: 'Mexico',
+};
+
+function detectCountryFromSocket(socket) {
+  if (socket.user?.countryCode && socket.user?.countryName) {
+    return {
+      countryCode: socket.user.countryCode,
+      countryName: socket.user.countryName,
+      countryFlag: socket.user.countryFlag || getCountryFlag(socket.user.countryCode),
+    };
+  }
+  const h = socket.handshake?.headers || {};
+  const rawCode = (h['x-vercel-ip-country'] || h['cf-ipcountry'] || h['x-country-code'] || '').trim().toUpperCase();
+  if (rawCode && rawCode.length === 2 && rawCode !== 'XX') {
+    return {
+      countryCode: rawCode,
+      countryName: COUNTRY_NAMES[rawCode] || rawCode,
+      countryFlag: getCountryFlag(rawCode),
+    };
+  }
+  return {
+    countryCode: 'IN',
+    countryName: 'India',
+    countryFlag: '🇮🇳',
+  };
+}
+
 // In-memory candidate queue
 let randomMatchQueue = [];
 // User profile cache (TTL 60 seconds) to avoid database hits in tight loops
@@ -305,12 +399,8 @@ function calculateMatchScore(candidateA, candidateB, now) {
     return { canMatch: false, score: -1 };
   }
 
-  const recentA = recentPartners.get(candidateA.userId);
-  if (recentA && recentA.has(candidateB.userId)) {
-    return { canMatch: false, score: -1 };
-  }
-  const recentB = recentPartners.get(candidateB.userId);
-  if (recentB && recentB.has(candidateA.userId)) {
+  // 60-Second Anti-Rematch Exclusion Guard
+  if (isRematchExcluded(candidateA.userId, candidateB.userId)) {
     return { canMatch: false, score: -1 };
   }
 
@@ -422,17 +512,7 @@ function processMatchQueue() {
     console.log(`[MATCH_SUCCESS] Matched ${candidateA.userId} (${candidateA.username}) <-> ${candidateB.userId} (${candidateB.username})`);
     console.log(`[SESSION_CREATED] Room: ${roomId} for Match: ${matchId}`);
 
-    // Track recent partners to avoid immediate rematch upon NEXT
-    if (!recentPartners.has(candidateA.userId)) recentPartners.set(candidateA.userId, new Set());
-    const rA = recentPartners.get(candidateA.userId);
-    rA.add(candidateB.userId);
-    if (rA.size > 5) rA.delete(rA.values().next().value);
-
-    if (!recentPartners.has(candidateB.userId)) recentPartners.set(candidateB.userId, new Set());
-    const rB = recentPartners.get(candidateB.userId);
-    rB.add(candidateA.userId);
-    if (rB.size > 5) rB.delete(rB.values().next().value);
-
+    // 60-second Anti-Rematch: Exclusion will be active upon session termination
     const socketsA = userSockets.get(candidateA.userId);
     if (socketsA) {
       socketsA.forEach((sId) => {
@@ -478,6 +558,9 @@ function processMatchQueue() {
             personalityPreferences: candidateB.personalityPreferences || '',
             isVIP: candidateB.isVIP,
             plan: candidateB.plan,
+            countryCode: candidateB.countryCode || 'IN',
+            countryName: candidateB.countryName || 'India',
+            countryFlag: candidateB.countryFlag || '🇮🇳',
           },
         });
       });
@@ -502,6 +585,9 @@ function processMatchQueue() {
             personalityPreferences: candidateA.personalityPreferences || '',
             isVIP: candidateA.isVIP,
             plan: candidateA.plan,
+            countryCode: candidateA.countryCode || 'IN',
+            countryName: candidateA.countryName || 'India',
+            countryFlag: candidateA.countryFlag || '🇮🇳',
           },
         });
       });
@@ -519,6 +605,9 @@ function teardownMatch(matchId, reason, triggeringUserId) {
   if (!match) return;
 
   const { roomId, userA, userB } = match;
+
+  // Enforce 60-Second Server-Side Anti-Rematch Exclusion
+  addRematchExclusion(userA.userId, userB.userId, 60000);
 
   io.to(roomId).emit('partner_left', {
     reason: reason || 'chat_ended',
@@ -621,6 +710,9 @@ io.on('connection', async (socket) => {
           gender: partner.gender,
           isVIP: partner.isVIP,
           plan: partner.plan,
+          countryCode: partner.countryCode || 'IN',
+          countryName: partner.countryName || 'India',
+          countryFlag: partner.countryFlag || '🇮🇳',
         },
         reconnected: true,
       });
@@ -657,6 +749,8 @@ io.on('connection', async (socket) => {
     if (!userSockets.has(userId)) return;
     if (userActiveMatch.has(userId)) return;
 
+    const country = detectCountryFromSocket(socket);
+
     const candidate = {
       socketId: socket.id,
       userId,
@@ -671,6 +765,9 @@ io.on('connection', async (socket) => {
       language: preferences.language || userData.language || 'english',
       plan: userData.plan,
       isVIP: userData.isVIP,
+      countryCode: country.countryCode,
+      countryName: country.countryName,
+      countryFlag: country.countryFlag,
       joinTime: Date.now(),
     };
 
@@ -680,7 +777,7 @@ io.on('connection', async (socket) => {
     } else {
       randomMatchQueue.push(candidate);
     }
-    console.log(`[QUEUE_JOIN] User ${userId} (${candidate.username}) joined queue. Total in queue: ${randomMatchQueue.length}`);
+    console.log(`[QUEUE_JOIN] User ${userId} (${candidate.username}, ${candidate.countryFlag} ${candidate.countryName}) joined queue. Total in queue: ${randomMatchQueue.length}`);
     socket.emit('queue_joined', { status: 'searching', isVIP: candidate.isVIP, plan: candidate.plan });
 
     processMatchQueue();
@@ -697,19 +794,25 @@ io.on('connection', async (socket) => {
   socket.on('send_random_message', (data, callback) => {
     const matchId = userActiveMatch.get(userId);
     if (!matchId) {
-      if (typeof callback === 'function') callback({ error: 'No active chat session found.' });
+      if (typeof callback === 'function') callback({ error: 'No active chat session found.', code: 'SESSION_EXPIRED' });
+      return;
+    }
+
+    // Strict Crossover Check: Reject late messages belonging to prior sessions
+    if (data?.chatSessionId && data.chatSessionId !== matchId) {
+      if (typeof callback === 'function') callback({ error: 'Message belongs to an inactive or expired session.', code: 'SESSION_MISMATCH' });
       return;
     }
 
     const match = activeMatches.get(matchId);
     if (!match) {
-      if (typeof callback === 'function') callback({ error: 'Chat session has expired.' });
+      if (typeof callback === 'function') callback({ error: 'Chat session has expired.', code: 'SESSION_EXPIRED' });
       return;
     }
 
-    // Requirement 9: Strict Server-Side Room Participant Authorization
+    // Strict Server-Side Room Participant Authorization
     if (match.userA.userId !== userId && match.userB.userId !== userId) {
-      if (typeof callback === 'function') callback({ error: 'Unauthorized to post in this room.' });
+      if (typeof callback === 'function') callback({ error: 'Unauthorized to post in this room.', code: 'UNAUTHORIZED' });
       return;
     }
 
@@ -719,12 +822,15 @@ io.on('connection', async (socket) => {
       return;
     }
 
+    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+
     const messageObj = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       clientMessageId: clientMessageId || null,
       chatSessionId: matchId,
       matchId,
       senderId: userId,
+      recipientId: partnerId,
       senderUsername: username,
       content: (content || '').trim(),
       imageUrl: imageUrl || null,
@@ -733,11 +839,27 @@ io.on('connection', async (socket) => {
     };
 
     io.to(match.roomId).emit('receive_random_message', messageObj);
-    console.log(`[MESSAGE_SENT] User ${userId} in room ${match.roomId}`);
+    console.log(`[MESSAGE_SENT] User ${userId} in room ${match.roomId} (Session: ${matchId})`);
 
     if (typeof callback === 'function') {
       callback({ success: true, message: messageObj });
     }
+  });
+
+  // ── Event: Message Delivery Acknowledgement (Client B -> Server -> Client A) ─
+  socket.on('ack_random_message_delivered', ({ messageId, clientMessageId, chatSessionId }) => {
+    if (!chatSessionId || !messageId) return;
+    const match = activeMatches.get(chatSessionId);
+    if (!match) return;
+    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+
+    socket.to(match.roomId).emit('random_message_delivered', {
+      messageId,
+      clientMessageId,
+      chatSessionId,
+      deliveredAt: new Date().toISOString(),
+    });
+    console.log(`[MESSAGE_DELIVERED] ${messageId} confirmed by recipient ${userId}`);
   });
 
   // ── Event: Ephemeral Typing Indicator (Zero DB hit, zero reconnect) ────────
@@ -754,7 +876,7 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // ── Event: Next Partner (Instant skip & re-queue) ──────────────────────────
+  // ── Event: Next Partner (Instant skip & re-queue with 60s anti-rematch) ────
   socket.on('next_partner', async (preferences = {}) => {
     const currentMatchId = userActiveMatch.get(userId);
     if (currentMatchId) {
@@ -773,6 +895,8 @@ io.on('connection', async (socket) => {
       teardownMatch(userActiveMatch.get(userId), 'partner_skipped', userId);
     }
 
+    const country = detectCountryFromSocket(socket);
+
     const candidate = {
       socketId: socket.id,
       userId,
@@ -787,6 +911,9 @@ io.on('connection', async (socket) => {
       language: preferences.language || userData.language || 'english',
       plan: userData.plan,
       isVIP: userData.isVIP,
+      countryCode: country.countryCode,
+      countryName: country.countryName,
+      countryFlag: country.countryFlag,
       joinTime: Date.now(),
     };
 

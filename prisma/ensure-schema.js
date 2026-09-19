@@ -241,6 +241,81 @@ function ensureDatabaseSchema(targetDbPath) {
         CREATE INDEX IF NOT EXISTS "CallSession_conversationId_idx" ON "CallSession"("conversationId");
       `);
     }
+
+    // 9. Inspect and ensure AntiRematchExclusion table
+    const antiRematchTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='AntiRematchExclusion'").get();
+    if (!antiRematchTable) {
+      console.log(`[SCHEMA SYNC] Creating AntiRematchExclusion table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "AntiRematchExclusion" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "pairHash" TEXT NOT NULL UNIQUE,
+          "user1Id" TEXT NOT NULL,
+          "user2Id" TEXT NOT NULL,
+          "expiresAt" DATETIME NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "AntiRematchExclusion_pairHash_key" ON "AntiRematchExclusion"("pairHash");
+        CREATE INDEX IF NOT EXISTS "AntiRematchExclusion_expiresAt_idx" ON "AntiRematchExclusion"("expiresAt");
+        CREATE INDEX IF NOT EXISTS "AntiRematchExclusion_user1Id_user2Id_idx" ON "AntiRematchExclusion"("user1Id", "user2Id");
+      `);
+    }
+
+    // 10. Inspect and ensure MatchmakingQueue country columns
+    const queueTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='MatchmakingQueue'").get();
+    if (queueTable) {
+      const queueCols = db.pragma('table_info("MatchmakingQueue")').map((c) => c.name);
+      if (!queueCols.includes('countryCode')) {
+        db.exec('ALTER TABLE "MatchmakingQueue" ADD COLUMN countryCode TEXT;');
+      }
+      if (!queueCols.includes('countryName')) {
+        db.exec('ALTER TABLE "MatchmakingQueue" ADD COLUMN countryName TEXT;');
+      }
+      if (!queueCols.includes('countryFlag')) {
+        db.exec('ALTER TABLE "MatchmakingQueue" ADD COLUMN countryFlag TEXT;');
+      }
+    }
+
+    // 11. Inspect and ensure Message deliveredAt column
+    const messageTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='Message'").get();
+    if (messageTable) {
+      const msgCols = db.pragma('table_info("Message")').map((c) => c.name);
+      if (!msgCols.includes('deliveredAt')) {
+        db.exec('ALTER TABLE "Message" ADD COLUMN deliveredAt DATETIME;');
+      }
+    }
+
+    // 12. Inspect and ensure UserConsent table
+    const consentTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='UserConsent'").get();
+    if (!consentTable) {
+      console.log(`[SCHEMA SYNC] Creating UserConsent table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "UserConsent" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "userId" TEXT NOT NULL UNIQUE,
+          "termsAccepted" BOOLEAN NOT NULL DEFAULT 0,
+          "termsAcceptedAt" DATETIME,
+          "privacyAcknowledged" BOOLEAN NOT NULL DEFAULT 0,
+          "privacyAcknowledgedAt" DATETIME,
+          "ageConfirmed" BOOLEAN NOT NULL DEFAULT 0,
+          "ageConfirmedAt" DATETIME,
+          "randomChatAcknowledged" BOOLEAN NOT NULL DEFAULT 0,
+          "randomChatAcknowledgedAt" DATETIME,
+          "locationProcessingAcknowledged" BOOLEAN NOT NULL DEFAULT 0,
+          "locationProcessingAcknowledgedAt" DATETIME,
+          "marketingConsent" BOOLEAN NOT NULL DEFAULT 0,
+          "marketingConsentUpdatedAt" DATETIME,
+          "termsVersion" TEXT NOT NULL DEFAULT '2026-09-01',
+          "privacyVersion" TEXT NOT NULL DEFAULT '2026-09-01',
+          "consentTimestamp" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "UserConsent_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "UserConsent_userId_key" ON "UserConsent"("userId");
+        CREATE INDEX IF NOT EXISTS "UserConsent_userId_idx" ON "UserConsent"("userId");
+      `);
+    }
   } catch (err) {
     console.warn(`[SCHEMA SYNC WARNING] ${targetDbPath}:`, err.message);
   } finally {

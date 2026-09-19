@@ -13,13 +13,22 @@ export async function comparePassword(password: string, hash: string): Promise<b
   return bcrypt.compare(password, hash);
 }
 
-export function signToken(payload: { userId: string; username: string; role: string }): string {
+export interface TokenPayload {
+  userId: string;
+  username: string;
+  role: string;
+  countryCode?: string;
+  countryName?: string;
+  countryFlag?: string;
+}
+
+export function signToken(payload: TokenPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
 }
 
-export function verifyToken(token: string): { userId: string; username: string; role: string } | null {
+export function verifyToken(token: string): TokenPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as { userId: string; username: string; role: string };
+    return jwt.verify(token, JWT_SECRET) as TokenPayload;
   } catch (e) {
     return null;
   }

@@ -41,11 +41,23 @@ export async function GET(req: Request) {
 
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { validateDob } from '@/lib/validation/dob';
+import { MINIMUM_LEGAL_AGE, CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION } from '@/lib/config/policy';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { displayName, dob, gender, avatarEmoji } = body;
+    const {
+      displayName,
+      dob,
+      gender,
+      avatarEmoji,
+      termsAccepted,
+      privacyAcknowledged,
+      ageConfirmed,
+      randomChatAcknowledged,
+      locationProcessingAcknowledged,
+      marketingConsent,
+    } = body;
 
     let user = await getCurrentUser(req);
     if (!user) {
@@ -70,6 +82,38 @@ export async function POST(req: Request) {
       );
     }
 
+    // Authoritative Server-side Consent Validation
+    if (!termsAccepted) {
+      return NextResponse.json(
+        { error: 'You must review and agree to the Terms & Conditions.' },
+        { status: 400 }
+      );
+    }
+    if (!privacyAcknowledged) {
+      return NextResponse.json(
+        { error: 'You must acknowledge that you have read and understood the Privacy Policy.' },
+        { status: 400 }
+      );
+    }
+    if (!ageConfirmed) {
+      return NextResponse.json(
+        { error: `You must confirm that you meet the minimum age requirement (${MINIMUM_LEGAL_AGE}+) to use CupidX.` },
+        { status: 400 }
+      );
+    }
+    if (!randomChatAcknowledged) {
+      return NextResponse.json(
+        { error: 'You must acknowledge that CupidX connects you with strangers for random chat.' },
+        { status: 400 }
+      );
+    }
+    if (!locationProcessingAcknowledged) {
+      return NextResponse.json(
+        { error: 'You must acknowledge technical processing of approximate country information as described in the Privacy Policy.' },
+        { status: 400 }
+      );
+    }
+
     // Authoritative Server-side DOB & 18+ Age Validation
     const dobValidation = validateDob(dob);
     if (!dobValidation.valid) {
@@ -82,17 +126,24 @@ export async function POST(req: Request) {
     const parsedDob = dobValidation.dob!;
     const calculatedAge = dobValidation.age!;
 
+    if (calculatedAge < MINIMUM_LEGAL_AGE) {
+      return NextResponse.json(
+        { error: `You must be at least ${MINIMUM_LEGAL_AGE} years old to use CupidX.` },
+        { status: 400 }
+      );
+    }
+
     const validGenders = ['male', 'female', 'other', 'prefer_not_to_say'];
     const cleanGender = gender && validGenders.includes(gender.toString().trim().toLowerCase())
       ? gender.toString().trim().toLowerCase()
       : 'male';
 
     const selectedEmoji = avatarEmoji || '😊';
+    const consentNow = new Date();
 
-    // 1. Update User & Profile in Prisma DB with Permanent Lock
-    let updatedUser: any = null;
-    try {
-      updatedUser = await prisma.user.update({
+    // 1. Atomic Transaction: Update User, Upsert Profile, Upsert UserConsent
+    const [updatedUser] = await prisma.$transaction([
+      prisma.user.update({
         where: { id: user.id },
         data: {
           fullName: cleanDisplayName,
@@ -102,95 +153,73 @@ export async function POST(req: Request) {
           genderDobLocked: true, // Permanent lock for identity
           profileCompleted: true,
           profileLocked: true,
-          profile: {
-            upsert: {
-              update: {
-                avatarType: 'EMOJI',
-                avatarEmoji: selectedEmoji,
-                age: calculatedAge,
-                gender: cleanGender,
-                dob: parsedDob,
-                ageGenderConfirmed: true, // Permanent lock
-                profileCompleted: true,
-                profileLocked: true,
-              },
-              create: {
-                avatarType: 'EMOJI',
-                avatarEmoji: selectedEmoji,
-                age: calculatedAge,
-                gender: cleanGender,
-                dob: parsedDob,
-                ageGenderConfirmed: true, // Permanent lock
-                profileCompleted: true,
-                profileLocked: true,
-                bio: 'Hey there! I am using CupidX.',
-              },
-            },
-          },
         },
-        include: { profile: true, subscription: true },
-      });
-    } catch (prismaErr) {
-      console.warn('Prisma nested update notice, attempting fallback update:', prismaErr);
-      try {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            fullName: cleanDisplayName,
-            displayName: cleanDisplayName,
-            gender: cleanGender,
-            dob: parsedDob,
-            genderDobLocked: true,
-            profileCompleted: true,
-            profileLocked: true,
-          },
-        });
-        await prisma.profile.upsert({
-          where: { userId: user.id },
-          update: {
-            avatarType: 'EMOJI',
-            avatarEmoji: selectedEmoji,
-            age: calculatedAge,
-            gender: cleanGender,
-            dob: parsedDob,
-            ageGenderConfirmed: true,
-            profileCompleted: true,
-            profileLocked: true,
-          },
-          create: {
-            userId: user.id,
-            avatarType: 'EMOJI',
-            avatarEmoji: selectedEmoji,
-            age: calculatedAge,
-            gender: cleanGender,
-            dob: parsedDob,
-            ageGenderConfirmed: true,
-            profileCompleted: true,
-            profileLocked: true,
-            bio: 'Hey there! I am using CupidX.',
-          },
-        });
-        updatedUser = await prisma.user.findUnique({
-          where: { id: user.id },
-          include: { profile: true, subscription: true },
-        });
-      } catch (innerErr) {
-        console.warn('Prisma fallback notice:', innerErr);
-      }
-    }
-
-    if (!updatedUser) {
-      updatedUser = {
-        ...user,
-        fullName: cleanDisplayName,
-        displayName: cleanDisplayName,
-        gender: cleanGender,
-        dob: parsedDob,
-        genderDobLocked: true,
-        profileCompleted: true,
-        profileLocked: true,
-      };
-    }
+        include: { profile: true, subscription: true, consent: true },
+      }),
+      prisma.profile.upsert({
+        where: { userId: user.id },
+        update: {
+          avatarType: 'EMOJI',
+          avatarEmoji: selectedEmoji,
+          age: calculatedAge,
+          gender: cleanGender,
+          dob: parsedDob,
+          ageGenderConfirmed: true, // Permanent lock
+          profileCompleted: true,
+          profileLocked: true,
+        },
+        create: {
+          userId: user.id,
+          avatarType: 'EMOJI',
+          avatarEmoji: selectedEmoji,
+          age: calculatedAge,
+          gender: cleanGender,
+          dob: parsedDob,
+          ageGenderConfirmed: true, // Permanent lock
+          profileCompleted: true,
+          profileLocked: true,
+          bio: 'Hey there! I am using CupidX.',
+        },
+      }),
+      prisma.userConsent.upsert({
+        where: { userId: user.id },
+        update: {
+          termsAccepted: true,
+          termsAcceptedAt: consentNow,
+          privacyAcknowledged: true,
+          privacyAcknowledgedAt: consentNow,
+          ageConfirmed: true,
+          ageConfirmedAt: consentNow,
+          randomChatAcknowledged: true,
+          randomChatAcknowledgedAt: consentNow,
+          locationProcessingAcknowledged: true,
+          locationProcessingAcknowledgedAt: consentNow,
+          marketingConsent: Boolean(marketingConsent),
+          marketingConsentUpdatedAt: marketingConsent ? consentNow : null,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          consentTimestamp: consentNow,
+        },
+        create: {
+          userId: user.id,
+          termsAccepted: true,
+          termsAcceptedAt: consentNow,
+          privacyAcknowledged: true,
+          privacyAcknowledgedAt: consentNow,
+          ageConfirmed: true,
+          ageConfirmedAt: consentNow,
+          randomChatAcknowledged: true,
+          randomChatAcknowledgedAt: consentNow,
+          locationProcessingAcknowledged: true,
+          locationProcessingAcknowledgedAt: consentNow,
+          marketingConsent: Boolean(marketingConsent),
+          marketingConsentUpdatedAt: marketingConsent ? consentNow : null,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          consentTimestamp: consentNow,
+        },
+      }),
+    ]);
 
     const isVIP = updatedUser.membershipTier === 'VIP' || (updatedUser.subscription?.isActive === true && updatedUser.subscription?.plan === 'VIP');
 
@@ -243,6 +272,8 @@ export async function POST(req: Request) {
             fullName: cleanDisplayName,
             displayName: cleanDisplayName,
             avatarEmoji: selectedEmoji,
+            termsVersion: CURRENT_TERMS_VERSION,
+            privacyVersion: CURRENT_PRIVACY_VERSION,
           },
         });
       }
@@ -273,6 +304,7 @@ export async function POST(req: Request) {
         profileLocked: true,
         profile: updatedUser.profile,
         subscription: updatedUser.subscription,
+        consent: updatedUser.consent,
       },
     });
 

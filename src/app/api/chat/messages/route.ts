@@ -447,6 +447,8 @@ export async function GET(req: Request) {
         senderUsername: m.sender.displayName || m.sender.fullName || m.sender.username || 'Stranger',
         content: m.content,
         imageUrl: m.imageUrl,
+        status: m.deliveredAt ? 'DELIVERED' : m.status,
+        deliveredAt: m.deliveredAt ? m.deliveredAt.toISOString() : null,
         createdAt: m.createdAt.toISOString(),
       })),
     });

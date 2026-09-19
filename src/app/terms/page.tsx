@@ -22,7 +22,10 @@ export default function TermsPage() {
             </Link>
             <div className="flex items-center space-x-2">
               <FileText className="w-6 h-6 text-pink-400" />
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">Terms of Service</h1>
+              <div>
+                <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">Terms of Service</h1>
+                <p className="text-[11px] text-pink-300/70 font-mono">Version 2026-09-01 • Effective: September 1, 2026</p>
+              </div>
             </div>
           </div>
           <Link href="/" className="flex items-center space-x-1.5 text-sm font-bold text-pink-300">
@@ -36,10 +39,10 @@ export default function TermsPage() {
           <section className="space-y-2">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <Shield className="w-4 h-4 text-pink-400" />
-              1. Eligibility & Account Responsibility
+              1. Eligibility &amp; Random Stranger Chat Nature
             </h2>
             <p>
-              You must be at least 18 years of age (or the age of legal majority in your jurisdiction) to use CupidX (cupidxchat.in). By creating an account or accessing the platform, you represent and warrant that you meet this age requirement and have the legal capacity to enter into these Terms. You are solely responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account.
+              You must be at least 18 years of age (or the legal age of majority in your jurisdiction) to access or use CupidX (cupidxchat.in). By creating an account or completing profile setup, you affirm and warrant that you are at least 18 years old and legally competent. You understand and acknowledge that CupidX connects you with unacquainted strangers in real time for ephemeral social interactions. You are solely responsible for maintaining the confidentiality of your account credentials and for all communications occurring under your account.
             </p>
           </section>
 
@@ -93,11 +96,21 @@ export default function TermsPage() {
 
           <section className="space-y-2">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <FileText className="w-4 h-4 text-pink-400" />
-              6. Changes to Terms & Contact
+              <Shield className="w-4 h-4 text-rose-400" />
+              6. Account Deletion &amp; Data Rights
             </h2>
             <p>
-              We may update these Terms periodically. Continued use of CupidX after changes are posted constitutes your acceptance of the revised Terms. For questions or support inquiries, contact us at <strong>support@cupidxchat.in</strong>.
+              You maintain full autonomy over your account. You may request permanent deletion of your account and all associated profile, connection, and credential data at any time via Settings &gt; Account Management. Deletion terminates any active random chat sessions, erases your public profile, and permanently removes your authentication record from CupidX.
+            </p>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <FileText className="w-4 h-4 text-pink-400" />
+              7. Changes to Terms &amp; Contact
+            </h2>
+            <p>
+              We may update these Terms periodically. When significant modifications occur, you may be requested to review and re-accept updated versions. Continued use of CupidX after revisions are published constitutes your binding acceptance of the revised Terms. For legal or support inquiries, contact us at <strong>support@cupidxchat.in</strong>.
             </p>
           </section>
 

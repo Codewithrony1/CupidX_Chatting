@@ -39,9 +39,19 @@ const ProfilePreviewSheet = nextDynamic(() => import('@/components/chat/ProfileP
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type ConnectionState =
+  | 'IDLE'
+  | 'SEARCHING'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'DISCONNECTING'
+  | 'DISCONNECTED'
+  | 'ERROR';
+
 interface RandomPartner {
   id: string;
   username?: string;
+  vipUsername?: string | null;
   fullName: string;
   displayName?: string;
   avatarType?: string;
@@ -53,17 +63,22 @@ interface RandomPartner {
   bio?: string;
   isVIP: boolean;
   plan?: string;
+  countryCode?: string;
+  countryName?: string;
+  countryFlag?: string;
 }
 
 interface RandomMessage {
   id: string;
   clientMessageId?: string | null;
+  chatSessionId?: string;
   senderId: string;
   senderUsername: string;
   content: string;
   imageUrl: string | null;
   createdAt: string;
-  status?: 'SENDING' | 'SENT' | 'FAILED';
+  status?: 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED';
+  deliveredAt?: string | null;
 }
 
 // ─── Memoized Message Bubble Item (Zero Re-render on Typing) ─────────────────
@@ -124,9 +139,13 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
           <span>{formattedTime}</span>
           {isMine &&
             (msg.status === 'FAILED' ? (
-              <span className="text-rose-300">!</span>
+              <span className="text-rose-300 font-bold" title="Failed">!</span>
+            ) : msg.status === 'DELIVERED' ? (
+              <span title="Delivered"><CheckCheck className="w-3.5 h-3.5 text-pink-300" /></span>
+            ) : msg.status === 'SENT' ? (
+              <span title="Sent"><CheckCheck className="w-3 h-3 text-white/80" /></span>
             ) : (
-              <CheckCheck className="w-3 h-3 text-white" />
+              <span className="text-[9px] text-white/60" title="Sending...">🕒</span>
             ))}
         </div>
       </div>
@@ -216,6 +235,7 @@ export default function KnotChatRandomPage() {
 
   // ── Core state ──
   const [matchStatus, setMatchStatus] = useState<'idle' | 'searching' | 'connected' | 'ended'>('idle');
+  const [connectionState, setConnectionState] = useState<ConnectionState>('IDLE');
   const [partner, setPartner] = useState<RandomPartner | null>(null);
   const [matchId, setMatchId] = useState<string | null>(null);
   const [messages, setMessages] = useState<RandomMessage[]>([]);
@@ -327,6 +347,7 @@ export default function KnotChatRandomPage() {
     if (!socket) return;
 
     const handleQueueJoined = () => {
+      setConnectionState('SEARCHING');
       setMatchStatus('searching');
       setSearchError(null);
       setReconnecting(false);
@@ -343,10 +364,12 @@ export default function KnotChatRandomPage() {
         clearInterval(serverlessPollIntervalRef.current);
         serverlessPollIntervalRef.current = null;
       }
+      setConnectionState('CONNECTING');
       activeMatchIdRef.current = data.matchId;
       setMatchId(data.matchId);
       setPartner(data.partner);
       setMatchStatus('connected');
+      setConnectionState('CONNECTED');
       setReconnecting(false);
       if (!data.reconnected) {
         setMessages([]);
@@ -354,20 +377,73 @@ export default function KnotChatRandomPage() {
     };
 
     const handleReceiveRandomMessage = (message: RandomMessage) => {
+      // 1. Session ID crossover prevention: Drop messages belonging to older/other sessions
+      const currentMid = activeMatchIdRef.current;
+      if (!currentMid) return;
+      if (message.chatSessionId && message.chatSessionId !== currentMid) {
+        console.warn('[RANDOM_CHAT] Dropped message from mismatched session:', message.chatSessionId, 'Expected:', currentMid);
+        return;
+      }
+
       setMessages((prev) => {
         if (message.clientMessageId) {
           const exists = prev.some((m) => m.clientMessageId === message.clientMessageId);
           if (exists) {
             return prev.map((m) =>
-              m.clientMessageId === message.clientMessageId ? { ...message, status: 'SENT' } : m
+              m.clientMessageId === message.clientMessageId ? { ...message, status: message.status || 'SENT' } : m
             );
           }
         }
         if (prev.some((m) => m.id === message.id)) {
           return prev;
         }
-        return [...prev, { ...message, status: 'SENT' }];
+        return [...prev, { ...message, status: message.status || 'SENT' }];
       });
+
+      // 2. Send Delivery Acknowledgement to sender if message is from partner
+      const isFromPartner = message.senderId !== currentUidRef.current;
+      if (isFromPartner) {
+        if (socket && socket.connected) {
+          socket.emit('ack_random_message_delivered', {
+            messageId: message.id,
+            clientMessageId: message.clientMessageId,
+            chatSessionId: currentMid,
+          });
+        }
+        fetch('/api/chat/messages/ack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messageId: message.id,
+            clientMessageId: message.clientMessageId,
+            chatSessionId: currentMid,
+          }),
+        }).catch(() => {});
+      }
+    };
+
+    const handleMessageDelivered = (data: {
+      messageId?: string;
+      clientMessageId?: string;
+      chatSessionId?: string;
+      deliveredAt?: string;
+    }) => {
+      if (data.chatSessionId && data.chatSessionId !== activeMatchIdRef.current) return;
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (
+            (data.messageId && m.id === data.messageId) ||
+            (data.clientMessageId && m.clientMessageId === data.clientMessageId)
+          ) {
+            return {
+              ...m,
+              status: 'DELIVERED',
+              deliveredAt: data.deliveredAt || new Date().toISOString(),
+            };
+          }
+          return m;
+        })
+      );
     };
 
     const handlePartnerTyping = (data: { isTyping: boolean }) => {
@@ -380,6 +456,7 @@ export default function KnotChatRandomPage() {
       setMatchId(null);
       setPartner(null);
       setMessages([]);
+      setConnectionState('DISCONNECTED');
       setMatchStatus('ended');
       setPartnerTyping(false);
       setInputText('');
@@ -397,6 +474,7 @@ export default function KnotChatRandomPage() {
       setMatchId(null);
       setPartner(null);
       setMessages([]);
+      setConnectionState('DISCONNECTED');
       setMatchStatus('ended');
       setPartnerTyping(false);
       setInputText('');
@@ -410,6 +488,7 @@ export default function KnotChatRandomPage() {
     };
 
     const handleDisconnect = () => {
+      setConnectionState('DISCONNECTED');
       if (activeMatchIdRef.current) {
         setReconnecting(true);
       }
@@ -417,11 +496,17 @@ export default function KnotChatRandomPage() {
 
     const handleConnect = () => {
       setReconnecting(false);
+      if (activeMatchIdRef.current) {
+        setConnectionState('CONNECTED');
+      } else {
+        setConnectionState('IDLE');
+      }
     };
 
     socket.on('queue_joined', handleQueueJoined);
     socket.on('random_match_found', handleRandomMatchFound);
     socket.on('receive_random_message', handleReceiveRandomMessage);
+    socket.on('random_message_delivered', handleMessageDelivered);
     socket.on('partner_typing_status', handlePartnerTyping);
     socket.on('partner_left', handlePartnerLeft);
     socket.on('chat_ended_confirm', handleChatEndedConfirm);
@@ -432,6 +517,7 @@ export default function KnotChatRandomPage() {
       socket.off('queue_joined', handleQueueJoined);
       socket.off('random_match_found', handleRandomMatchFound);
       socket.off('receive_random_message', handleReceiveRandomMessage);
+      socket.off('random_message_delivered', handleMessageDelivered);
       socket.off('partner_typing_status', handlePartnerTyping);
       socket.off('partner_left', handlePartnerLeft);
       socket.off('chat_ended_confirm', handleChatEndedConfirm);
@@ -465,6 +551,7 @@ export default function KnotChatRandomPage() {
   // ─── START MATCHMAKING (Dual-Transport Resilient) ──────────────────────────
   const handleStartMatch = useCallback(
     async (skipCurrent = false) => {
+      setConnectionState('SEARCHING');
       setMatchStatus('searching');
       setPartner(null);
       setMessages([]);
@@ -513,6 +600,7 @@ export default function KnotChatRandomPage() {
           if (res.status === 503 || errData.disabled) {
             setRandomChatDisabled(true);
             setSearchError('Random Chat is currently unavailable. Please try again later.');
+            setConnectionState('ERROR');
             setMatchStatus('idle');
             return;
           }
@@ -523,10 +611,12 @@ export default function KnotChatRandomPage() {
               clearInterval(serverlessPollIntervalRef.current);
               serverlessPollIntervalRef.current = null;
             }
+            setConnectionState('CONNECTING');
             activeMatchIdRef.current = data.chatSessionId;
             setMatchId(data.chatSessionId);
             setPartner(data.partner);
             setMatchStatus('connected');
+            setConnectionState('CONNECTED');
             setReconnecting(false);
             setMessages([]);
             return;
@@ -560,10 +650,12 @@ export default function KnotChatRandomPage() {
                   clearInterval(serverlessPollIntervalRef.current);
                   serverlessPollIntervalRef.current = null;
                 }
+                setConnectionState('CONNECTING');
                 activeMatchIdRef.current = statusData.chatSessionId;
                 setMatchId(statusData.chatSessionId);
                 setPartner(statusData.partner);
                 setMatchStatus('connected');
+                setConnectionState('CONNECTED');
                 setReconnecting(false);
                 setMessages([]);
               }
@@ -588,6 +680,7 @@ export default function KnotChatRandomPage() {
           if (data && data.enabled === false) {
             setRandomChatDisabled(true);
             setSearchError('Random Chat is currently unavailable. Please try again later.');
+            setConnectionState('ERROR');
             setMatchStatus('idle');
           } else {
             setRandomChatDisabled(false);
@@ -614,6 +707,7 @@ export default function KnotChatRandomPage() {
   // ─── CANCEL SEARCH ─────────────────────────────────────────────────────────
   const handleCancelSearch = () => {
     activeMatchIdRef.current = null;
+    setConnectionState('IDLE');
     setMatchStatus('idle');
     if (serverlessPollIntervalRef.current) {
       clearInterval(serverlessPollIntervalRef.current);
@@ -653,7 +747,7 @@ export default function KnotChatRandomPage() {
       typingTimeoutRef.current = null;
     }
     isCurrentlyTypingRef.current = false;
-    setMatchStatus('searching');
+    setConnectionState('DISCONNECTING');
 
     if (serverlessPollIntervalRef.current) {
       clearInterval(serverlessPollIntervalRef.current);
@@ -670,6 +764,9 @@ export default function KnotChatRandomPage() {
         },
       }).catch(() => {});
     }
+
+    setConnectionState('SEARCHING');
+    setMatchStatus('searching');
 
     if (socket && socket.connected) {
       socket.emit('next_partner', {
@@ -697,6 +794,7 @@ export default function KnotChatRandomPage() {
       typingTimeoutRef.current = null;
     }
     isCurrentlyTypingRef.current = false;
+    setConnectionState('DISCONNECTING');
 
     if (serverlessPollIntervalRef.current) {
       clearInterval(serverlessPollIntervalRef.current);
@@ -716,6 +814,7 @@ export default function KnotChatRandomPage() {
         },
       }).catch(() => {});
     }
+    setConnectionState('DISCONNECTED');
     setMatchStatus('ended');
   };
 
@@ -798,6 +897,7 @@ export default function KnotChatRandomPage() {
 
         if (socket && socket.connected) {
           socket.emit('send_random_message', {
+            chatSessionId: activeMid,
             content: textToSend,
             imageUrl: uploadData.imageUrl || null,
             clientMessageId: tempId,
@@ -808,6 +908,7 @@ export default function KnotChatRandomPage() {
           socket.emit(
             'send_random_message',
             {
+              chatSessionId: activeMid,
               content: textToSend,
               clientMessageId: tempId,
             },
@@ -883,29 +984,63 @@ export default function KnotChatRandomPage() {
             setMatchId(null);
             setPartner(null);
             setMessages([]);
+            setConnectionState('DISCONNECTED');
             setMatchStatus('ended');
             setPartnerTyping(false);
             return;
           }
           if (Array.isArray(data.messages)) {
             setMessages((prev) => {
-              const existingIds = new Set(prev.map((m) => m.id));
-              const existingClientIds = new Set(prev.map((m) => m.clientMessageId).filter(Boolean));
+              const incomingMap = new Map<string, any>(data.messages.map((m: any) => [m.id, m]));
+              const incomingByClient = new Map<string, any>(
+                data.messages.filter((m: any) => m.clientMessageId).map((m: any) => [m.clientMessageId, m])
+              );
+
+              // 1. Update existing messages with any status updates (e.g. DELIVERED)
+              const updated = prev.map((m) => {
+                const inc: any = incomingMap.get(m.id) || (m.clientMessageId ? incomingByClient.get(m.clientMessageId) : null);
+                if (inc && inc.status && inc.status !== m.status) {
+                  return { ...m, status: inc.status, deliveredAt: inc.deliveredAt || m.deliveredAt };
+                }
+                return m;
+              });
+
+              // 2. Append newly arrived messages
+              const existingIds = new Set(updated.map((m) => m.id));
+              const existingClientIds = new Set(updated.map((m) => m.clientMessageId).filter(Boolean));
               const newMsgs = data.messages.filter(
                 (m: any) => !existingIds.has(m.id) && (!m.clientMessageId || !existingClientIds.has(m.clientMessageId))
               );
-              if (newMsgs.length === 0) return prev;
+
+              if (newMsgs.length === 0) return updated;
+
+              // Acknowledge receipt of partner messages
+              const partnerMsgs = newMsgs.filter((m: any) => m.senderId !== currentUidRef.current);
+              partnerMsgs.forEach((pm: any) => {
+                fetch('/api/chat/messages/ack', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    messageId: pm.id,
+                    clientMessageId: pm.clientMessageId,
+                    chatSessionId: currentMid,
+                  }),
+                }).catch(() => {});
+              });
+
               return [
-                ...prev,
+                ...updated,
                 ...newMsgs.map((m: any) => ({
                   id: m.id,
                   clientMessageId: m.clientMessageId,
+                  chatSessionId: m.chatSessionId || currentMid,
                   senderId: m.senderId,
                   senderUsername: m.senderUsername || 'Stranger',
                   content: m.content,
                   imageUrl: m.imageUrl,
                   createdAt: m.createdAt,
-                  status: 'SENT' as const,
+                  status: (m.status || 'SENT') as any,
+                  deliveredAt: m.deliveredAt,
                 })),
               ];
             });
@@ -1200,6 +1335,11 @@ export default function KnotChatRandomPage() {
                     <h3 className="text-sm font-black text-white truncate max-w-[140px] sm:max-w-[200px]">
                       {partner?.displayName || partner?.fullName || 'Stranger'}
                     </h3>
+                    {partner?.countryFlag && (
+                      <span className="text-xs shrink-0 select-none" title={partner?.countryName || undefined}>
+                        {partner.countryFlag}
+                      </span>
+                    )}
                     {partner?.isVIP && (
                       <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current shrink-0" />
                     )}
@@ -1207,9 +1347,14 @@ export default function KnotChatRandomPage() {
                   <div className="flex items-center space-x-1.5 text-[10px]">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
                     <span className="text-emerald-400 font-bold">
-                      {partnerTyping ? 'typing...' : 'Connected'}
+                      {partnerTyping ? 'typing...' : connectionState === 'CONNECTING' ? 'Connecting...' : 'Connected'}
                     </span>
-                    {reconnecting && (
+                    {partner?.countryName && (
+                      <span className="text-slate-400 font-medium hidden sm:inline">
+                        • {partner.countryName}
+                      </span>
+                    )}
+                    {(reconnecting || connectionState === 'DISCONNECTED') && (
                       <span className="text-amber-400 font-bold">(reconnecting...)</span>
                     )}
                   </div>

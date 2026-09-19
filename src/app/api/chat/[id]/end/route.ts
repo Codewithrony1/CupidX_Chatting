@@ -31,6 +31,11 @@ export async function POST(
       return NextResponse.json({ message: 'Session already ended' }, { status: 200 });
     }
 
+    // Enforce 60-Second Anti-Rematch Exclusion
+    const partnerId = session.userAId === user.id ? session.userBId : session.userAId;
+    const { addRematchExclusion } = await import('@/lib/antiRematch');
+    await addRematchExclusion(user.id, partnerId, 60000);
+
     await prisma.$transaction([
       prisma.chatSession.update({
         where: { id: chatSessionId },

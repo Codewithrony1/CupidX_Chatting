@@ -34,6 +34,7 @@ model User {
 
   profile           Profile?
   subscription      Subscription?
+  consent           UserConsent?
   payments          Payment[]
   manualUpiPayments ManualUpiPayment[]
   vipRequests       VipRequest[]
@@ -120,6 +121,9 @@ model MatchmakingQueue {
   gender          String   @default("unspecified")
   preferredGender String   @default("auto")
   language        String   @default("english")
+  countryCode     String?
+  countryName     String?
+  countryFlag     String?
   status          String   @default("WAITING") // WAITING, MATCHED, CANCELLED
   chatSessionId   String?
   partnerUserId   String?
@@ -157,6 +161,7 @@ model Message {
   content         String
   imageUrl        String?
   status          String   @default("SENT") // SENDING, SENT, FAILED
+  deliveredAt     DateTime?
   createdAt       DateTime @default(now())
 
   chatSession ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
@@ -165,6 +170,18 @@ model Message {
 
   @@index([chatSessionId, createdAt])
   @@index([clientMessageId])
+}
+
+model AntiRematchExclusion {
+  id        String   @id @default(uuid())
+  pairHash  String   @unique
+  user1Id   String
+  user2Id   String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([user1Id, user2Id])
 }
 
 model Block {
@@ -446,6 +463,31 @@ model CallSession {
   @@index([receiverId, status])
   @@index([callerId, status])
   @@index([conversationId])
+}
+
+model UserConsent {
+  id                               String    @id @default(uuid())
+  userId                           String    @unique
+  user                             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  termsAccepted                    Boolean   @default(false)
+  termsAcceptedAt                  DateTime?
+  privacyAcknowledged              Boolean   @default(false)
+  privacyAcknowledgedAt            DateTime?
+  ageConfirmed                     Boolean   @default(false)
+  ageConfirmedAt                   DateTime?
+  randomChatAcknowledged           Boolean   @default(false)
+  randomChatAcknowledgedAt         DateTime?
+  locationProcessingAcknowledged   Boolean   @default(false)
+  locationProcessingAcknowledgedAt DateTime?
+  marketingConsent                 Boolean   @default(false)
+  marketingConsentUpdatedAt        DateTime?
+  termsVersion                     String    @default("2026-09-01")
+  privacyVersion                   String    @default("2026-09-01")
+  consentTimestamp                 DateTime  @default(now())
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
+
+  @@index([userId])
 }
 
 

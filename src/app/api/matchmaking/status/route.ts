@@ -139,10 +139,16 @@ export async function GET(req: Request) {
         const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
         const partnerId = userIds.includes(session.userAId) ? session.userBId : session.userAId;
 
-        const partnerUser = await prisma.user.findUnique({
-          where: { id: partnerId },
-          include: { profile: true },
-        });
+        const [partnerUser, partnerQueue] = await Promise.all([
+          prisma.user.findUnique({
+            where: { id: partnerId },
+            include: { profile: true },
+          }),
+          prisma.matchmakingQueue.findUnique({
+            where: { userId: partnerId },
+            select: { countryCode: true, countryName: true, countryFlag: true },
+          }),
+        ]);
 
         return NextResponse.json({
           matched: true,
@@ -157,6 +163,9 @@ export async function GET(req: Request) {
                 mood: partnerUser.profile?.mood || '',
                 bio: partnerUser.profile?.bio || '',
                 isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
+                countryCode: partnerQueue?.countryCode || 'IN',
+                countryName: partnerQueue?.countryName || 'India',
+                countryFlag: partnerQueue?.countryFlag || '🇮🇳',
               }
             : null,
         });

@@ -19,6 +19,9 @@ interface PartnerProfile {
   personalityPreferences?: string;
   bio?: string;
   isVIP: boolean;
+  countryCode?: string;
+  countryName?: string;
+  countryFlag?: string;
 }
 
 interface ProfilePreviewSheetProps {
@@ -122,6 +125,12 @@ export default function ProfilePreviewSheet({
                 <span className="text-[10px] font-black text-yellow-300 bg-yellow-500/20 px-2 py-0.5 rounded-full border border-yellow-500/30 flex items-center gap-1">
                   <Crown className="w-3 h-3 fill-current" /> 💎 VIP
                 </span>
+              </div>
+            )}
+            {partner.countryFlag && (
+              <div className="flex items-center justify-center space-x-1.5 mt-1.5 text-xs text-slate-300">
+                <span className="text-sm">{partner.countryFlag}</span>
+                <span className="font-semibold">{partner.countryName || 'Global'}</span>
               </div>
             )}
           </div>
