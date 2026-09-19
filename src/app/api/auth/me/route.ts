@@ -56,6 +56,14 @@ export async function GET(req: Request) {
         (user.dob && user.gender && user.gender !== 'unspecified' && user.fullName)
       );
 
+      console.log('[AUTH_FLOW] /api/auth/me:', {
+        userIdExists: Boolean(user.id),
+        clerkUserIdExists: Boolean(user.clerkUserId),
+        profileExists: Boolean(user.profile),
+        onboardingCompleted: isProfileDone,
+        routingTarget: isProfileDone ? '/dashboard' : '/onboarding',
+      });
+
       const token = signToken({
         userId: user.id,
         username: user.username,

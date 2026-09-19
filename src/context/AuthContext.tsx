@@ -302,7 +302,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { error } = await signIn.sso({
           strategy: 'oauth_google',
-          redirectUrl: '/dashboard',
+          redirectUrl: '/onboarding',
           redirectCallbackUrl: '/sso-callback',
         });
         if (error) {
@@ -319,7 +319,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (clerk?.openSignIn) {
       try {
         clerk.openSignIn({
-          fallbackRedirectUrl: '/dashboard',
+          fallbackRedirectUrl: '/onboarding',
           signUpFallbackRedirectUrl: '/onboarding',
         });
         return;
@@ -331,7 +331,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // 3. Last resort: clerk.redirectToSignIn
     if (clerk && typeof (clerk as any).redirectToSignIn === 'function') {
       await (clerk as any).redirectToSignIn({
-        fallbackRedirectUrl: '/dashboard',
+        fallbackRedirectUrl: '/onboarding',
         signUpFallbackRedirectUrl: '/onboarding',
       });
     }
@@ -403,7 +403,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // If signIn hook isn't loaded yet, fall back to Clerk modal
     if (!signIn) {
       clerk.openSignIn({
-        fallbackRedirectUrl: '/dashboard',
+        fallbackRedirectUrl: '/onboarding',
         signUpFallbackRedirectUrl: '/onboarding',
         initialValues: {
           emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
@@ -430,12 +430,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (finalizeError) {
           console.warn('[AUTH] signIn.finalize error:', finalizeError);
         }
-        // Navigate to dashboard after session is active
-        router.replace('/dashboard');
+        // Navigate to onboarding — guard will bounce existing users to /dashboard
+        router.replace('/onboarding');
       } else {
         console.warn('[AUTH] Incomplete sign-in status:', signIn.status);
         clerk.openSignIn({
-          fallbackRedirectUrl: '/dashboard',
+          fallbackRedirectUrl: '/onboarding',
           signUpFallbackRedirectUrl: '/onboarding',
           initialValues: {
             emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,

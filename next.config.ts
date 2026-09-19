@@ -89,6 +89,16 @@ const nextConfig: NextConfig = {
         destination: '/signup',
         permanent: false,
       },
+      {
+        source: '/setup-profile',
+        destination: '/onboarding',
+        permanent: false,
+      },
+      {
+        source: '/setup-profile/:path*',
+        destination: '/onboarding',
+        permanent: false,
+      },
     ];
   },
 };

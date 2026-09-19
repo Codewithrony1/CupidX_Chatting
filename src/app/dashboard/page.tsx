@@ -72,6 +72,20 @@ export default function DashboardPage() {
 
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
+  const isProfileComplete = Boolean(
+    user?.profileCompleted ||
+    user?.profileLocked ||
+    user?.genderDobLocked ||
+    user?.profile?.ageGenderConfirmed ||
+    ((user?.dateOfBirth || user?.profile?.dateOfBirth) && user?.gender && user?.gender !== 'unspecified' && (user?.fullName || user?.displayName))
+  );
+
+  useEffect(() => {
+    if (!loading && user && !isProfileComplete) {
+      router.replace('/onboarding');
+    }
+  }, [loading, user, isProfileComplete, router]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [searching, setSearching] = useState(false);
@@ -185,7 +199,7 @@ export default function DashboardPage() {
     }
   };
 
-  if (loading) {
+  if (loading || !user || !isProfileComplete) {
     return (
       <AppShell>
         <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4">

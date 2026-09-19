@@ -42,7 +42,7 @@ export default function RootLayout({
       publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_Y2xlYW4td2hpcHBldC04OS5jbGVyay5hY2NvdW50cy5kZXYk'}
       signInUrl="/login"
       signUpUrl="/signup"
-      signInFallbackRedirectUrl="/dashboard"
+      signInFallbackRedirectUrl="/onboarding"
       signUpFallbackRedirectUrl="/onboarding"
     >
       <html lang="en" className={`${outfit.variable} dark h-full antialiased`}>

@@ -91,20 +91,28 @@ export default function OnboardingPage() {
     }
   }, [user, directClerkUser, clerkUser]);
 
+  const isProfileComplete = Boolean(
+    user?.profileCompleted ||
+    (user as any)?.genderDobLocked ||
+    user?.profile?.ageGenderConfirmed ||
+    ((user?.dateOfBirth || user?.profile?.dateOfBirth) && user?.gender && user?.gender !== 'unspecified' && (user?.fullName || user?.displayName))
+  );
+
+  // If not authenticated, redirect to login
+  useEffect(() => {
+    if (!authLoading && !user && !directClerkUser) {
+      router.replace('/login');
+    }
+  }, [authLoading, user, directClerkUser, router]);
+
   // If already complete, redirect to dashboard
   useEffect(() => {
     if (!authLoading && user) {
-      const isComplete = Boolean(
-        user.profileCompleted ||
-        (user as any).genderDobLocked ||
-        user.profile?.ageGenderConfirmed ||
-        ((user.dateOfBirth || user.profile?.dateOfBirth) && user.gender && user.gender !== 'unspecified' && (user.fullName || user.displayName))
-      );
-      if (isComplete && !submitting && !success) {
+      if (isProfileComplete && !submitting && !success) {
         router.replace('/dashboard');
       }
     }
-  }, [user, authLoading, submitting, success, router]);
+  }, [user, authLoading, isProfileComplete, submitting, success, router]);
 
   // Calculated dynamic age
   const dynamicAge = dateOfBirth ? calculateAge(dateOfBirth) : null;
@@ -191,6 +199,21 @@ export default function OnboardingPage() {
       setSubmitting(false);
     }
   };
+
+  if (authLoading || (user && isProfileComplete && !success)) {
+    return (
+      <div className="min-h-screen bg-[#0d0014] text-white flex flex-col justify-center items-center p-4 relative overflow-hidden">
+        <FloatingHearts />
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-pink-600 via-rose-500 to-fuchsia-500 flex items-center justify-center shadow-xl shadow-pink-500/40 animate-pulse z-10">
+          <Heart className="w-7 h-7 text-white fill-white" />
+        </div>
+        <div className="flex items-center space-x-2 text-pink-300 text-xs font-bold mt-4 z-10">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>{isProfileComplete ? 'Opening dashboard...' : 'Loading CupidX...'}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0d0014] text-white flex flex-col justify-center items-center p-4 relative overflow-x-hidden selection:bg-pink-500 selection:text-white">

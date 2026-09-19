@@ -11,11 +11,8 @@ export default function SSOCallbackPage() {
       <FloatingHearts />
       <div className="text-center space-y-3 z-10">
         <AuthenticateWithRedirectCallback
-          signInForceRedirectUrl="/dashboard"
-          signUpForceRedirectUrl="/onboarding"
-          signInFallbackRedirectUrl="/dashboard"
+          signInFallbackRedirectUrl="/onboarding"
           signUpFallbackRedirectUrl="/onboarding"
-          continueSignUpUrl="/onboarding"
         />
         <p className="text-xs font-bold text-pink-300">Completing sign in to CupidX...</p>
       </div>
