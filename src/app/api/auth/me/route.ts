@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser, signToken } from '@/lib/auth';
+import { getCurrentUser, signToken, getAuthCookieOptions } from '@/lib/auth';
 import { isUserVip } from '@/lib/vipAuth';
 
 export async function GET(req: Request) {
   try {
-    const user: any = await getCurrentUser(req);
+    let user: any = await getCurrentUser(req);
+    if (!user) {
+      try {
+        const { auth: clerkAuth } = await import('@clerk/nextjs/server');
+        const clerkSession = await clerkAuth();
+        if (clerkSession?.userId) {
+          const { getOrCreateUserFromClerk } = await import('@/lib/auth');
+          user = await getOrCreateUserFromClerk(clerkSession.userId);
+        }
+      } catch (e) {}
+    }
 
     if (user) {
       const isVIP = isUserVip(user);
@@ -48,13 +58,7 @@ export async function GET(req: Request) {
         },
       });
 
-      response.cookies.set('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60,
-        path: '/',
-      });
+      response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
 
       return response;
     }

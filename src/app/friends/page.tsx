@@ -521,7 +521,11 @@ export default function FriendsHubPage() {
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-pink-600 to-purple-600 p-0.5 shadow-md shadow-pink-500/20">
                   <div className="w-full h-full rounded-2xl bg-slate-950 overflow-hidden flex items-center justify-center">
                     {user?.profile?.avatarUrl ? (
-                      <img src={user.profile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                      <img
+                        src={user.profile.avatarUrl}
+                        alt={`Profile picture for ${user.displayName || user.username || 'me'}`}
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
                       <span className="text-2xl">{user?.profile?.avatarEmoji || '😊'}</span>
                     )}
@@ -640,7 +644,11 @@ export default function FriendsHubPage() {
                       <div className="flex items-center space-x-3 overflow-hidden">
                         <div className="relative w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
                           {item.friend.avatarUrl ? (
-                            <img src={item.friend.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                            <img
+                              src={item.friend.avatarUrl}
+                              alt={`Profile picture for ${item.friend.displayName || item.friend.username}`}
+                              className="w-full h-full object-cover"
+                            />
                           ) : (
                             <span className="text-xl">{item.friend.avatarEmoji}</span>
                           )}
@@ -719,7 +727,11 @@ export default function FriendsHubPage() {
                       <div className="flex items-center space-x-3 overflow-hidden">
                         <div className="w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
                           {conv.partner.avatarUrl ? (
-                            <img src={conv.partner.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                            <img
+                              src={conv.partner.avatarUrl}
+                              alt={`Profile picture for ${conv.partner.displayName || conv.partner.username}`}
+                              className="w-full h-full object-cover"
+                            />
                           ) : (
                             <span className="text-xl">{conv.partner.avatarEmoji}</span>
                           )}
@@ -774,7 +786,11 @@ export default function FriendsHubPage() {
                         <div className="flex items-center space-x-3 overflow-hidden">
                           <div className="w-10 h-10 rounded-2xl overflow-hidden bg-slate-900 shrink-0 flex items-center justify-center">
                             {req.user.avatarUrl ? (
-                              <img src={req.user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                              <img
+                                src={req.user.avatarUrl}
+                                alt={`Profile picture for ${req.user.displayName || req.user.username}`}
+                                className="w-full h-full object-cover"
+                              />
                             ) : (
                               <span className="text-lg">{req.user.avatarEmoji}</span>
                             )}
@@ -827,7 +843,11 @@ export default function FriendsHubPage() {
                         <div className="flex items-center space-x-3 overflow-hidden">
                           <div className="w-10 h-10 rounded-2xl overflow-hidden bg-slate-900 shrink-0 flex items-center justify-center">
                             {req.user.avatarUrl ? (
-                              <img src={req.user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                              <img
+                                src={req.user.avatarUrl}
+                                alt={`Profile picture for ${req.user.displayName || req.user.username}`}
+                                className="w-full h-full object-cover"
+                              />
                             ) : (
                               <span className="text-lg">{req.user.avatarEmoji}</span>
                             )}
@@ -904,7 +924,11 @@ export default function FriendsHubPage() {
                         <div className="flex items-center space-x-3 overflow-hidden">
                           <div className="w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
                             {target.avatarUrl ? (
-                              <img src={target.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                              <img
+                                src={target.avatarUrl}
+                                alt={`Profile picture for ${target.displayName || target.username}`}
+                                className="w-full h-full object-cover"
+                              />
                             ) : (
                               <span className="text-xl">{target.avatarEmoji}</span>
                             )}

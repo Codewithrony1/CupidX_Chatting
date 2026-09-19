@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, getAuthCookieOptions } from '@/lib/auth';
 
 export async function DELETE(req: Request) {
   try {
@@ -11,32 +11,40 @@ export async function DELETE(req: Request) {
 
     const userId = user.id;
 
-    // Permanently delete all associated records
+    // Delete associated resources
     await prisma.$transaction([
-      // Delete user's active/ended chat sessions & messages
+      prisma.matchmakingQueue.deleteMany({ where: { userId } }),
       prisma.message.deleteMany({
         where: { senderId: userId },
       }),
-      prisma.chatSession.deleteMany({
+      prisma.privateMessage.deleteMany({
+        where: { senderId: userId },
+      }),
+      prisma.callSession.deleteMany({
         where: {
-          OR: [{ userAId: userId }, { userBId: userId }],
+          OR: [{ callerId: userId }, { receiverId: userId }],
         },
       }),
-      // Delete block records
+      prisma.friendship.deleteMany({
+        where: {
+          OR: [{ user1Id: userId }, { user2Id: userId }],
+        },
+      }),
+      prisma.friendRequest.deleteMany({
+        where: {
+          OR: [{ senderId: userId }, { receiverId: userId }],
+        },
+      }),
       prisma.block.deleteMany({
         where: {
           OR: [{ blockerId: userId }, { blockedId: userId }],
         },
       }),
-      // Delete report records
       prisma.report.deleteMany({
         where: {
           OR: [{ reporterId: userId }, { reportedUserId: userId }],
         },
       }),
-      // Delete user notifications & subscription
-      prisma.notification.deleteMany({ where: { userId } }),
-      prisma.payment.deleteMany({ where: { userId } }),
       prisma.subscription.deleteMany({ where: { userId } }),
       prisma.profile.deleteMany({ where: { userId } }),
       // Delete User record
@@ -49,9 +57,9 @@ export async function DELETE(req: Request) {
     });
 
     res.cookies.set('token', '', {
-      httpOnly: true,
+      ...getAuthCookieOptions(req, 0),
       expires: new Date(0),
-      path: '/',
+      maxAge: 0,
     });
 
     return res;

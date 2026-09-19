@@ -98,7 +98,6 @@ export default function OnboardingPage() {
     setErrorMsg('');
 
     try {
-      const effectiveClerkId = directClerkUser?.id || clerkUser?.id || user?.clerkUserId || user?.id || user?.uid;
       const token = await getToken().catch(() => null);
 
       // Direct authoritative API call to complete onboarding and permanently lock identity
@@ -107,11 +106,9 @@ export default function OnboardingPage() {
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
         },
         credentials: 'include',
         body: JSON.stringify({
-          clerkUserId: effectiveClerkId,
           displayName: displayName.trim(),
           dob: dateOfBirth,
           gender,

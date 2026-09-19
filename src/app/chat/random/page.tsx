@@ -31,6 +31,9 @@ import {
   Lock,
 } from 'lucide-react';
 import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
+import { useChatViewport } from '@/hooks/useChatViewport';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
+import { sanitizeChatText } from '@/lib/sanitizeChatText';
 
 const ProfilePreviewSheet = nextDynamic(() => import('@/components/chat/ProfilePreviewSheet'), { ssr: false });
 
@@ -101,7 +104,7 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
           >
             <img
               src={msg.imageUrl}
-              alt="Chat Attachment"
+              alt={`Attachment from ${isMine ? 'you' : 'partner'}`}
               className="max-h-60 w-full object-cover group-hover:scale-105 transition-transform"
               loading="lazy"
             />
@@ -111,7 +114,11 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
           </div>
         )}
 
-        {msg.content && <p className="text-xs leading-relaxed">{msg.content}</p>}
+        {msg.content && (
+          <bdi className="block break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap text-xs leading-relaxed">
+            {sanitizeChatText(msg.content)}
+          </bdi>
+        )}
 
         <div className="flex items-center justify-end space-x-1 mt-1 text-[9px] opacity-70">
           <span>{formattedTime}</span>
@@ -243,6 +250,16 @@ export default function KnotChatRandomPage() {
 
   // ── Refs ──
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Dynamic mobile keyboard & visual viewport adaptation (BUG-001)
+  const { containerStyle } = useChatViewport({ scrollRef: messagesEndRef });
+
+  // Modal focus traps (BUG-007)
+  const introModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(introModalRef, showIntroModal, () => setShowIntroModal(false));
+
+  const reportModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(reportModalRef, showReportModal, () => setShowReportModal(false));
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
   const lastMessageSentTimeRef = useRef<number>(0);
@@ -1031,7 +1048,10 @@ export default function KnotChatRandomPage() {
 
   return (
     <AppShell showNav={matchStatus === 'idle'}>
-      <div className="flex-1 flex flex-col h-[100dvh] max-h-[100dvh] bg-[#07000e] text-white overflow-hidden relative font-sans">
+      <div
+        style={containerStyle}
+        className="flex-1 flex flex-col bg-[#07000e] text-white overflow-hidden relative font-sans"
+      >
         {/* ================================================================= */}
         {/* 1. IDLE / START SCREEN                                            */}
         {/* ================================================================= */}
@@ -1161,8 +1181,16 @@ export default function KnotChatRandomPage() {
             <header className="px-4 py-3 bg-[#0d0119]/95 backdrop-blur-xl border-b border-pink-500/20 flex items-center justify-between z-30 shrink-0 shadow-md">
               <div className="flex items-center space-x-3">
                 <div onClick={() => setShowProfileSheet(true)} className="relative cursor-pointer">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 flex items-center justify-center text-white font-black text-sm border-2 border-pink-400/50 shadow-md">
-                    {partner?.avatarEmoji || (partner?.displayName ? partner.displayName.substring(0, 2).toUpperCase() : '👤')}
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 flex items-center justify-center text-white font-black text-sm border-2 border-pink-400/50 shadow-md overflow-hidden">
+                    {partner?.avatarUrl ? (
+                      <img
+                        src={partner.avatarUrl}
+                        alt={`Profile picture of ${partner?.displayName || partner?.fullName || 'Stranger'}`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      partner?.avatarEmoji || (partner?.displayName ? partner.displayName.substring(0, 2).toUpperCase() : '👤')
+                    )}
                   </div>
                   <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#0d0119]" />
                 </div>
@@ -1263,7 +1291,7 @@ export default function KnotChatRandomPage() {
                 <div className="flex items-center space-x-3">
                   <img
                     src={imagePreview}
-                    alt="Preview"
+                    alt="Photo upload preview"
                     className="w-12 h-12 rounded-xl object-cover border border-white/20"
                   />
                   <span className="text-xs font-bold text-pink-300">Ready to send photo</span>
@@ -1384,6 +1412,11 @@ export default function KnotChatRandomPage() {
       {showIntroModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <motion.div
+            ref={introModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="How CupidX Chat Works"
+            tabIndex={-1}
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="w-full max-w-md rounded-3xl bg-[#120021] border border-pink-500/30 p-6 space-y-5 shadow-2xl"
@@ -1436,7 +1469,14 @@ export default function KnotChatRandomPage() {
       {/* REPORT MODAL */}
       {showReportModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-3xl bg-[#120021] border border-rose-500/30 p-6 space-y-4 shadow-2xl">
+          <div
+            ref={reportModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report Partner"
+            tabIndex={-1}
+            className="w-full max-w-md rounded-3xl bg-[#120021] border border-rose-500/30 p-6 space-y-4 shadow-2xl"
+          >
             <h4 className="text-sm font-black text-white flex items-center gap-2">
               <Flag className="w-4 h-4 text-rose-400" />
               <span>Report @{partner?.username}</span>
@@ -1481,12 +1521,15 @@ export default function KnotChatRandomPage() {
       {/* LIGHTBOX */}
       {selectedFullImage && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Enlarged photo attachment"
           onClick={() => setSelectedFullImage(null)}
           className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <img
             src={selectedFullImage}
-            alt="Attachment"
+            alt="Full size attachment preview"
             className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl"
           />
         </div>

@@ -94,7 +94,7 @@ export default function ProfilePreviewSheet({
             {isImageAvatar ? (
               <img
                 src={partner.avatarUrl!}
-                alt={displayName}
+                alt={`Profile picture for ${displayName}`}
                 className="w-24 h-24 rounded-3xl object-cover border-2 border-pink-500/40 shadow-xl shadow-pink-500/20"
               />
             ) : (

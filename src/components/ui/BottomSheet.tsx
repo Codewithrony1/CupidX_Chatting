@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -16,6 +17,11 @@ export default function BottomSheet({
   title,
   children,
 }: BottomSheetProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Trap keyboard focus & enable Escape key dismissal (BUG-007)
+  useFocusTrap(containerRef, isOpen, onClose);
+
   // Lock body scrolling when bottom sheet is open
   useEffect(() => {
     if (isOpen) {
@@ -31,7 +37,12 @@ export default function BottomSheet({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title || 'Dialog'}
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+    >
       {/* Backdrop */}
       <div
         onClick={onClose}
@@ -39,7 +50,10 @@ export default function BottomSheet({
       />
 
       {/* Sheet Container */}
-      <div className="relative w-full max-w-lg bg-[#180026] text-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border-t sm:border border-pink-500/20 z-10 animate-in slide-in-from-bottom duration-300 max-h-[90vh] overflow-y-auto pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+      <div
+        ref={containerRef}
+        className="relative w-full max-w-lg bg-[#180026] text-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border-t sm:border border-pink-500/20 z-10 animate-in slide-in-from-bottom duration-300 max-h-[90vh] overflow-y-auto pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+      >
         {/* Mobile Drag Indicator Bar */}
         <div className="w-12 h-1.5 bg-pink-500/30 rounded-full mx-auto mb-4 cursor-grab sm:hidden" />
 
@@ -49,6 +63,7 @@ export default function BottomSheet({
             <h3 className="text-lg font-bold text-white tracking-tight">{title}</h3>
             <button
               onClick={onClose}
+              aria-label="Close dialog"
               className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-pink-300 hover:text-white transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />

@@ -5,6 +5,9 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import CallModal from '@/components/social/CallModal';
+import { useChatViewport } from '@/hooks/useChatViewport';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
+import { sanitizeChatText } from '@/lib/sanitizeChatText';
 import {
   ArrowLeft,
   Phone,
@@ -108,7 +111,11 @@ const PrivateChatMessageItem = React.memo(function PrivateChatMessageItem({
         )}
 
         {/* Text content */}
-        {msg.content && <p className="text-xs whitespace-pre-wrap leading-relaxed">{msg.content}</p>}
+        {msg.content && (
+          <bdi className="block text-xs whitespace-pre-wrap leading-relaxed break-words [overflow-wrap:anywhere] [word-break:break-word]">
+            {sanitizeChatText(msg.content)}
+          </bdi>
+        )}
 
         {/* Message footer: timestamp + status */}
         <div className="flex items-center justify-end space-x-1 text-[10px] opacity-75">
@@ -167,11 +174,13 @@ export default function PrivateChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reportModalRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll
-  const scrollToBottom = (behavior: 'smooth' | 'auto' = 'smooth') => {
-    messagesEndRef.current?.scrollIntoView({ behavior });
-  };
+  // Dynamic mobile keyboard & visual viewport adaptation (BUG-001)
+  const { containerStyle, scrollToBottom } = useChatViewport({ scrollRef: messagesEndRef });
+
+  // Focus trap for report dialog (BUG-007)
+  useFocusTrap(reportModalRef, showReportModal, () => setShowReportModal(false));
 
   useEffect(() => {
     scrollToBottom('auto');
@@ -481,7 +490,7 @@ export default function PrivateChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] max-h-[100dvh] bg-[#090011] text-white overflow-hidden font-sans">
+    <div style={containerStyle} className="flex flex-col bg-[#090011] text-white overflow-hidden font-sans">
       {/* Global Call Modal Overlay */}
       <CallModal onCallEnded={syncMessages} />
 
@@ -499,7 +508,11 @@ export default function PrivateChatPage() {
             <div className="flex items-center space-x-2.5 overflow-hidden">
               <div className="relative w-10 h-10 rounded-2xl overflow-hidden bg-slate-900 border border-white/10 shrink-0 flex items-center justify-center">
                 {partner.avatarUrl ? (
-                  <img src={partner.avatarUrl} alt={partner.username} className="w-full h-full object-cover" />
+                  <img
+                    src={partner.avatarUrl}
+                    alt={`Profile picture for ${partner.displayName || partner.username}`}
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
                   <span className="text-xl">{partner.avatarEmoji}</span>
                 )}
@@ -689,10 +702,20 @@ export default function PrivateChatPage() {
       {/* Report Modal */}
       {showReportModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-3xl bg-[#120021] border border-pink-500/30 p-6 space-y-4 shadow-2xl">
+          <div
+            ref={reportModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report Member"
+            className="w-full max-w-md rounded-3xl bg-[#120021] border border-pink-500/30 p-6 space-y-4 shadow-2xl"
+          >
             <div className="flex items-center justify-between">
               <h3 className="text-base font-black text-white">Report Member</h3>
-              <button onClick={() => setShowReportModal(false)} className="text-slate-400 hover:text-white">
+              <button
+                onClick={() => setShowReportModal(false)}
+                aria-label="Close dialog"
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>

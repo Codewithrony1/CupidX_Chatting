@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
+import { useChatViewport } from '@/hooks/useChatViewport';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
+import { sanitizeChatText } from '@/lib/sanitizeChatText';
 import {
   Send,
   Image as ImageIcon,
@@ -94,7 +97,11 @@ const DirectChatMessageItem = React.memo(function DirectChatMessageItem({
             loading="lazy"
           />
         )}
-        <p>{msg.content}</p>
+        {msg.content && (
+          <bdi className="block break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap leading-relaxed">
+            {sanitizeChatText(msg.content)}
+          </bdi>
+        )}
 
         {/* Message hover delete trigger */}
         {isMe && !msg.isDeleted && (
@@ -162,6 +169,19 @@ export default function ChatWindow() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
+  // Dynamic mobile keyboard & visual viewport adaptation (BUG-001)
+  const { containerStyle, scrollToBottom } = useChatViewport({ scrollRef: messagesEndRef });
+
+  // Modal focus traps (BUG-007)
+  const reportModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(reportModalRef, showReportModal, () => setShowReportModal(false));
+
+  const profileModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(profileModalRef, showUserProfileModal, () => setShowUserProfileModal(false));
+
+  const vipLockModalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(vipLockModalRef, showVipLockModal, () => setShowVipLockModal(false));
+
   // Typing debounce timer
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCurrentlyTypingRef = useRef(false);
@@ -194,13 +214,6 @@ export default function ChatWindow() {
       fetchChatHistory();
     }
   }, [targetUsername]);
-
-  // Scroll to bottom helper
-  const scrollToBottom = (behavior: 'smooth' | 'auto' = 'smooth') => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior });
-    }
-  };
 
   useEffect(() => {
     scrollToBottom('auto');
@@ -421,7 +434,7 @@ export default function ChatWindow() {
   }
 
   return (
-    <div className="min-h-[100dvh] max-h-[100dvh] bg-[#07000e] text-white flex flex-col overflow-hidden font-sans relative">
+    <div style={containerStyle} className="bg-[#07000e] text-white flex flex-col overflow-hidden font-sans relative">
       {/* Dynamic Background */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-lg h-96 bg-gradient-to-b from-pink-600/15 via-purple-600/10 to-transparent blur-3xl pointer-events-none" />
 
@@ -442,7 +455,7 @@ export default function ChatWindow() {
             <div className="relative">
               <img
                 src={targetUser.avatarUrl || '/default-avatar.png'}
-                alt={targetUser.username}
+                alt={`Profile picture for ${targetUser.fullName || targetUser.username}`}
                 className="w-10 h-10 rounded-full object-cover bg-slate-900 border border-pink-500/30 group-hover:border-pink-400 transition-colors"
               />
               {targetUser.isOnline && (
@@ -650,12 +663,19 @@ export default function ChatWindow() {
       {/* Report Modal */}
       {showReportModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="w-full max-w-md glass-premium rounded-3xl p-8 space-y-6 relative border border-yellow-500/20">
+          <div
+            ref={reportModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report User"
+            className="w-full max-w-md glass-premium rounded-3xl p-8 space-y-6 relative border border-yellow-500/20"
+          >
             <button
               onClick={() => setShowReportModal(false)}
+              aria-label="Close dialog"
               className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
 
             <div className="space-y-4 text-center">
@@ -693,14 +713,19 @@ export default function ChatWindow() {
         </div>
       )}
 
-
-
-      {/* Public User Profile View Modal (Requirement 13 & 14) */}
+      {/* Public User Profile View Modal */}
       {showUserProfileModal && targetUser && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/30 shadow-2xl">
+          <div
+            ref={profileModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${targetUser.username}'s Profile`}
+            className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/30 shadow-2xl"
+          >
             <button
               onClick={() => setShowUserProfileModal(false)}
+              aria-label="Close dialog"
               className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />
@@ -709,7 +734,7 @@ export default function ChatWindow() {
             <div className="relative w-20 h-20 mx-auto">
               <img
                 src={targetUser.avatarUrl || '/default-avatar.png'}
-                alt={targetUser.username}
+                alt={`Profile picture for ${targetUser.fullName || targetUser.username}`}
                 className="w-20 h-20 rounded-full object-cover bg-slate-900 border-2 border-pink-400 shadow-lg"
               />
               {targetUser.isOnline && (
@@ -762,9 +787,16 @@ export default function ChatWindow() {
       {/* Free User VIP Feature Lock Modal */}
       {showVipLockModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/30 shadow-2xl">
+          <div
+            ref={vipLockModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="VIP Feature Required"
+            className="w-full max-w-sm glass-premium rounded-3xl p-6 space-y-5 text-center relative border border-pink-500/30 shadow-2xl"
+          >
             <button
               onClick={() => setShowVipLockModal(false)}
+              aria-label="Close dialog"
               className="absolute top-4 right-4 p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />

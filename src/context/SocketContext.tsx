@@ -29,9 +29,27 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Offline message buffer queue for zero message drops during network blips
+  const storageKey = useMemo(() => `cupidx_offline_queue_${user?.id || 'anon'}`, [user?.id]);
+
+  // Offline message buffer queue backed by sessionStorage (BUG-002)
   const offlineQueueRef = useRef<OfflineMessage[]>([]);
   const lastTypingEmitRef = useRef<number>(0);
+
+  // Restore queued messages from sessionStorage on mount/user change
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = sessionStorage.getItem(storageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          offlineQueueRef.current = parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('[SocketContext] Could not restore offline queue:', e);
+    }
+  }, [storageKey]);
 
   useEffect(() => {
     if (!user) {
@@ -39,12 +57,47 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     let activeSocket: Socket | null = null;
+    let isDisposed = false;
+
+    const flushQueue = (sock: Socket) => {
+      let queue: OfflineMessage[] = [...offlineQueueRef.current];
+      if (typeof window !== 'undefined') {
+        try {
+          const stored = sessionStorage.getItem(storageKey);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+              const existingTimestamps = new Set(queue.map((q) => q.timestamp));
+              parsed.forEach((item) => {
+                if (!existingTimestamps.has(item.timestamp)) {
+                  queue.push(item);
+                }
+              });
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (queue.length > 0 && sock.connected) {
+        queue.sort((a, b) => a.timestamp - b.timestamp);
+        console.log(`[SocketContext] Flushing ${queue.length} buffered offline messages in chronological order...`);
+        offlineQueueRef.current = [];
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem(storageKey);
+        }
+        queue.forEach((item) => {
+          sock.emit(item.eventName, item.data);
+        });
+      }
+    };
 
     const initSocket = async () => {
       try {
         let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
         const isClientInBrowser = typeof window !== 'undefined';
-        const isLocalHost = isClientInBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+        const isLocalHost =
+          isClientInBrowser &&
+          (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
         if (!socketUrl) {
           if (isLocalHost) {
@@ -52,18 +105,22 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           }
         }
 
-        // If on a public domain (e.g. cupidxchat.in) and socketUrl is localhost, avoid connecting to the client device's localhost
-        if (isClientInBrowser && !isLocalHost && socketUrl && (socketUrl.includes('localhost') || socketUrl.includes('127.0.0.1'))) {
+        if (
+          isClientInBrowser &&
+          !isLocalHost &&
+          socketUrl &&
+          (socketUrl.includes('localhost') || socketUrl.includes('127.0.0.1'))
+        ) {
           console.log('[SocketContext] Public domain detected without remote socket server; operating in resilient dual-transport mode.');
           return;
         }
 
-        if (!socketUrl) {
+        if (!socketUrl || isDisposed) {
           return;
         }
 
         const res = await fetch('/api/auth/token');
-        if (!res.ok) {
+        if (!res.ok || isDisposed) {
           return;
         }
         const { token } = await res.json();
@@ -80,27 +137,36 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         activeSocket.on('connect', () => {
+          if (isDisposed) return;
           setIsConnected(true);
           console.log('⚡ Connected to CupidX Real-Time WebSocket');
-
-          // Flush offline message buffer upon connection/reconnection
-          if (offlineQueueRef.current.length > 0 && activeSocket) {
-            console.log(`Flushing ${offlineQueueRef.current.length} buffered offline messages...`);
-            const pending = [...offlineQueueRef.current];
-            offlineQueueRef.current = [];
-            pending.forEach((item) => {
-              activeSocket?.emit(item.eventName, item.data);
-            });
+          if (activeSocket) {
+            flushQueue(activeSocket);
           }
         });
 
         activeSocket.on('disconnect', (reason) => {
+          if (isDisposed) return;
           setIsConnected(false);
           console.log('Socket disconnected:', reason);
+          if (reason === 'io server disconnect' && activeSocket) {
+            activeSocket.connect();
+          }
         });
 
-        activeSocket.on('connect_error', (err) => {
+        activeSocket.on('connect_error', async (err) => {
+          if (isDisposed) return;
           console.warn('Socket reconnection attempt error:', err.message);
+          // Proactively refresh auth token for subsequent reconnect attempts
+          try {
+            const tokenRes = await fetch('/api/auth/token');
+            if (tokenRes.ok) {
+              const fresh = await tokenRes.json();
+              if (fresh?.token && activeSocket) {
+                activeSocket.auth = { token: fresh.token };
+              }
+            }
+          } catch (e) {}
         });
 
         setSocket(activeSocket);
@@ -111,12 +177,47 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
     initSocket();
 
+    // Browser online / offline listeners for instant network recovery (BUG-002)
+    const handleOnline = () => {
+      console.log('[SocketContext] Network restored (online). Triggering immediate socket reconnection...');
+      if (activeSocket) {
+        fetch('/api/auth/token')
+          .then((r) => r.json())
+          .then(({ token }) => {
+            if (token && activeSocket) {
+              activeSocket.auth = { token };
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (activeSocket && !activeSocket.connected) {
+              activeSocket.connect();
+            }
+          });
+      }
+    };
+
+    const handleOffline = () => {
+      console.log('[SocketContext] Network disconnected (offline).');
+      setIsConnected(false);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+    }
+
     return () => {
+      isDisposed = true;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      }
       if (activeSocket) {
         (activeSocket as Socket).disconnect();
       }
     };
-  }, [user?.id]);
+  }, [user?.id, storageKey]);
 
   // Throttled typing indicator emit (at most once every 300ms)
   const emitThrottledTyping = useCallback(
@@ -134,21 +235,27 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     [socket, isConnected]
   );
 
-  // Buffer messages if offline so they send the instant socket reconnects
+  // Buffer messages in sessionStorage so they survive refreshes and send upon reconnection (BUG-002)
   const sendBufferedMessage = useCallback(
     (eventName: string, data: any) => {
       try {
-        if (socket && isConnected) {
+        if (socket && isConnected && socket.connected) {
           socket.emit(eventName, data);
         } else {
-          console.log(`Socket offline. Buffering message: ${eventName}`);
-          offlineQueueRef.current.push({ eventName, data, timestamp: Date.now() });
+          console.log(`Socket offline. Buffering message to sessionStorage: ${eventName}`);
+          const item: OfflineMessage = { eventName, data, timestamp: Date.now() };
+          offlineQueueRef.current.push(item);
+          if (typeof window !== 'undefined') {
+            try {
+              sessionStorage.setItem(storageKey, JSON.stringify(offlineQueueRef.current));
+            } catch (e) {}
+          }
         }
       } catch (e) {
         console.warn('sendBufferedMessage notice:', e);
       }
     },
-    [socket, isConnected]
+    [socket, isConnected, storageKey]
   );
 
   const contextValue = useMemo(

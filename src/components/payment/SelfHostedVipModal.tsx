@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import confetti from 'canvas-confetti';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 interface SelfHostedVipModalProps {
   isOpen: boolean;
@@ -42,6 +43,10 @@ export default function SelfHostedVipModal({
   reason,
 }: SelfHostedVipModalProps) {
   const { user, refreshUser } = useAuth();
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Trap keyboard focus & enable Escape key dismissal (BUG-007)
+  useFocusTrap(modalRef, isOpen, onClose);
 
   // Steps: 'REGION_SELECT' | 'QR_VIEW' | 'FORM_VIEW' | 'STATUS_VIEW'
   const [step, setStep] = useState<'REGION_SELECT' | 'QR_VIEW' | 'FORM_VIEW' | 'STATUS_VIEW'>('REGION_SELECT');
@@ -241,6 +246,10 @@ export default function SelfHostedVipModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md">
       <motion.div
+        ref={modalRef as any}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Unlock CupidX VIP"
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}

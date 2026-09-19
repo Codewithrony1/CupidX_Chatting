@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import Image from 'next/image';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 interface ActiveCallData {
   id: string;
@@ -320,6 +321,10 @@ export default function CallModal({ onCallEnded }: CallModalProps) {
     onCallEnded?.();
   };
 
+  const callModalRef = useRef<HTMLDivElement>(null);
+  // Trap keyboard focus & enable Escape key dismissal (BUG-007)
+  useFocusTrap(callModalRef, Boolean(activeCall), handleEndCall);
+
   // Toggle Mute
   const toggleMute = () => {
     if (localStreamRef.current) {
@@ -352,7 +357,13 @@ export default function CallModal({ onCallEnded }: CallModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex flex-col items-center justify-between p-6 animate-in fade-in duration-200">
+    <div
+      ref={callModalRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={isVideo ? 'VIP Video Call' : 'VIP Voice Call'}
+      className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex flex-col items-center justify-between p-6 animate-in fade-in duration-200"
+    >
       {/* Hidden Audio element for remote voice */}
       <audio ref={remoteAudioRef} autoPlay playsInline />
 
@@ -407,7 +418,7 @@ export default function CallModal({ onCallEnded }: CallModalProps) {
                 {activeCall.otherUser.avatarUrl ? (
                   <img
                     src={activeCall.otherUser.avatarUrl}
-                    alt={activeCall.otherUser.username}
+                    alt={`Profile picture for ${activeCall.otherUser.username}`}
                     className="w-full h-full object-cover"
                   />
                 ) : (

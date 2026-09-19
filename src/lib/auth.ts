@@ -57,7 +57,7 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
       user.clerkUserId = cleanId;
     }
 
-    // Self-healing check: if profile is not marked completed in Prisma, verify Firestore and Clerk metadata
+    // Self-healing check: if profile is not marked completed in Prisma, verify Clerk metadata
     if (!user.profileCompleted || !user.genderDobLocked || user.gender === 'unspecified' || !user.dob) {
       let isCompletedInCloud = false;
       let cloudDob: Date | null = null;
@@ -66,33 +66,7 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
       let cloudAvatarEmoji: string = '😊';
       let isCloudVip = false;
 
-      // A. Check Firestore Admin doc with strict timeout
-      try {
-        const { getAdminDb } = await import('./firebaseAdmin');
-        const adminDb = getAdminDb();
-        if (adminDb) {
-          const snap: any = await Promise.race([
-            adminDb.collection('users').doc(cleanId).get(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1500)),
-          ]).catch(() => null);
-
-          if (snap && snap.exists) {
-            const d = snap.data();
-            if (d?.profileCompleted || d?.genderDobLocked || (d?.dateOfBirth && d?.gender && d?.gender !== 'unspecified')) {
-              isCompletedInCloud = true;
-              if (d?.dateOfBirth) cloudDob = new Date(d.dateOfBirth);
-              if (d?.gender && d?.gender !== 'unspecified') cloudGender = d.gender;
-              if (d?.fullName || d?.displayName) cloudName = d.fullName || d.displayName;
-              if (d?.profile?.avatarEmoji) cloudAvatarEmoji = d.profile.avatarEmoji;
-            }
-            if (d?.is_vip || d?.isVIP || d?.membershipTier === 'VIP') {
-              isCloudVip = true;
-            }
-          }
-        }
-      } catch (fsErr) {}
-
-      // B. Check Clerk User publicMetadata
+      // Check Clerk User publicMetadata
       try {
         const client = await clerkClient();
         const cDetail = await client.users.getUser(cleanId);
@@ -184,38 +158,12 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
   }
 
   // 3. Provision new user in database with collision-free username
-  // Check if cloud profile already exists in Firestore or Clerk metadata
   let isCloudCompleted = false;
   let cloudDob: Date | null = null;
   let cloudGender: string = 'unspecified';
   let cloudName: string | null = null;
   let cloudAvatarEmoji: string = '😊';
   let isCloudVip = false;
-
-  try {
-    const { getAdminDb } = await import('./firebaseAdmin');
-    const adminDb = getAdminDb();
-    if (adminDb) {
-      const snap: any = await Promise.race([
-        adminDb.collection('users').doc(cleanId).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1500)),
-      ]).catch(() => null);
-
-      if (snap && snap.exists) {
-        const d = snap.data();
-        if (d?.profileCompleted || d?.genderDobLocked || (d?.dateOfBirth && d?.gender && d?.gender !== 'unspecified')) {
-          isCloudCompleted = true;
-          if (d?.dateOfBirth) cloudDob = new Date(d.dateOfBirth);
-          if (d?.gender && d?.gender !== 'unspecified') cloudGender = d.gender;
-          if (d?.fullName || d?.displayName) cloudName = d.fullName || d.displayName;
-          if (d?.profile?.avatarEmoji) cloudAvatarEmoji = d.profile.avatarEmoji;
-        }
-        if (d?.is_vip || d?.isVIP || d?.membershipTier === 'VIP') {
-          isCloudVip = true;
-        }
-      }
-    }
-  } catch (fsErr) {}
 
   const meta: any = clerkDetail?.publicMetadata || {};
   if (meta?.profileCompleted || meta?.genderDobLocked || (meta?.dob && meta?.gender && meta?.gender !== 'unspecified')) {
@@ -311,7 +259,17 @@ export async function getCurrentUser(req?: Request) {
       // clerkAuth may throw outside Next.js request lifecycle
     }
 
-    // 2. Cryptographically verify Bearer token from Authorization header
+    // 2. Direct Clerk currentUser() check as additional fallback
+    if (!resolvedClerkId) {
+      try {
+        const clerkUser = await clerkCurrentUser();
+        if (clerkUser && clerkUser.id) {
+          resolvedClerkId = clerkUser.id;
+        }
+      } catch (e) {}
+    }
+
+    // 3. Cryptographically verify Bearer token from Authorization header
     if (!resolvedClerkId && req) {
       const authHeader = req.headers.get('authorization');
       if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -332,8 +290,9 @@ export async function getCurrentUser(req?: Request) {
             const verifiedPayload: any = await clerkVerifyToken(rawToken, {
               secretKey: process.env.CLERK_SECRET_KEY,
             });
-            if (verifiedPayload?.sub) {
-              resolvedClerkId = verifiedPayload.sub;
+            const sub = verifiedPayload?.data?.sub || verifiedPayload?.sub;
+            if (sub) {
+              resolvedClerkId = sub;
             }
           } catch (e) {
             // Invalid or expired token
@@ -342,7 +301,7 @@ export async function getCurrentUser(req?: Request) {
       }
     }
 
-    // 3. Cryptographically verify Clerk __session cookie
+    // 4. Cryptographically verify Clerk __session cookie
     if (!resolvedClerkId && req) {
       const cookieHeader = req.headers.get('cookie') || '';
       const sessionMatch = cookieHeader.match(/(?:^|;\s*)__session=([^;]*)/);
@@ -351,8 +310,9 @@ export async function getCurrentUser(req?: Request) {
           const verifiedPayload: any = await clerkVerifyToken(sessionMatch[1], {
             secretKey: process.env.CLERK_SECRET_KEY,
           });
-          if (verifiedPayload?.sub) {
-            resolvedClerkId = verifiedPayload.sub;
+          const sub = verifiedPayload?.data?.sub || verifiedPayload?.sub;
+          if (sub) {
+            resolvedClerkId = sub;
           }
         } catch (e) {
           // Invalid or expired cookie
@@ -360,7 +320,7 @@ export async function getCurrentUser(req?: Request) {
       }
     }
 
-    // 4. If Clerk user ID was cryptographically verified, resolve or provision user
+    // 5. If Clerk user ID was cryptographically verified, resolve or provision user
     if (resolvedClerkId) {
       const user = await getOrCreateUserFromClerk(resolvedClerkId);
       if (user && !user.isSuspended) {
@@ -415,3 +375,23 @@ export async function getCurrentUser(req?: Request) {
     return null;
   }
 }
+
+/**
+ * Hardened session cookie configuration options (BUG-004)
+ * Guarantees HttpOnly: true, SameSite: 'strict', and Secure: true in production/HTTPS.
+ */
+export function getAuthCookieOptions(req?: Request, maxAgeSeconds: number = 7 * 24 * 60 * 60) {
+  const isHttps = req
+    ? req.headers.get('x-forwarded-proto') === 'https' || req.url.startsWith('https://')
+    : true;
+  const isSecure = process.env.NODE_ENV === 'production' || isHttps;
+
+  return {
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: 'strict' as const,
+    maxAge: maxAgeSeconds,
+    path: '/',
+  };
+}
+

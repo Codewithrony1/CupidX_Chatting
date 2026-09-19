@@ -1,28 +1,37 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { comparePassword, signToken } from '@/lib/auth';
-import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '@/lib/rateLimit';
+import { comparePassword, signToken, getAuthCookieOptions } from '@/lib/auth';
+import {
+  checkAuthRateLimit,
+  recordAuthAttempt,
+  applyRateLimitHeaders,
+  getClientIp,
+} from '@/lib/rateLimit';
 
 export async function POST(req: Request) {
+  const clientIp = getClientIp(req);
+
   try {
     const { username, password } = await req.json();
 
     if (!username || !password) {
-      return NextResponse.json({ error: 'Missing username or password' }, { status: 400 });
+      const errRes = NextResponse.json({ error: 'Missing username or password' }, { status: 400 });
+      return applyRateLimitHeaders(errRes, checkAuthRateLimit(clientIp));
     }
 
     const cleanUsername = username.toLowerCase().trim();
-    const clientIp = req.headers.get('x-forwarded-for') || '127.0.0.1';
-    
-    // Account-based + IP dual rate limiting key
-    const rateLimitKey = `login:${cleanUsername}:${clientIp}`;
 
-    const limitCheck = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000);
+    // Dual-tier rate limiting: IP throttle (10 req/min) + Account lockout (5 failed attempts/15 mins)
+    const limitCheck = checkAuthRateLimit(clientIp, cleanUsername);
     if (limitCheck.isBlocked) {
-      return NextResponse.json(
-        { error: `Too many failed login attempts. Please try again in ${limitCheck.retryAfterSeconds} seconds.` },
+      const blockedRes = NextResponse.json(
+        {
+          error: `Too many login attempts. Please try again in ${limitCheck.retryAfterSeconds} seconds.`,
+          retryAfter: limitCheck.retryAfterSeconds,
+        },
         { status: 429 }
       );
+      return applyRateLimitHeaders(blockedRes, limitCheck);
     }
 
     const user = await prisma.user.findUnique({
@@ -31,26 +40,38 @@ export async function POST(req: Request) {
     });
 
     if (!user) {
-      recordFailedAttempt(rateLimitKey);
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 400 });
+      recordAuthAttempt(clientIp, cleanUsername, true);
+      const postLimit = checkAuthRateLimit(clientIp, cleanUsername);
+      const errRes = NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+      return applyRateLimitHeaders(errRes, postLimit);
     }
 
     if (user.isSuspended) {
-      return NextResponse.json({ error: 'Your account has been suspended' }, { status: 403 });
+      const suspendedRes = NextResponse.json(
+        { error: 'Your account has been suspended' },
+        { status: 403 }
+      );
+      return applyRateLimitHeaders(suspendedRes, limitCheck);
     }
 
     if (!user.passwordHash) {
-      return NextResponse.json({ error: 'This account was created with Google. Please click Continue with Google.' }, { status: 400 });
+      const oauthRes = NextResponse.json(
+        { error: 'This account was created with Google. Please click Continue with Google.' },
+        { status: 400 }
+      );
+      return applyRateLimitHeaders(oauthRes, limitCheck);
     }
 
     const match = await comparePassword(password, user.passwordHash);
     if (!match) {
-      recordFailedAttempt(rateLimitKey);
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 400 });
+      recordAuthAttempt(clientIp, cleanUsername, true);
+      const postLimit = checkAuthRateLimit(clientIp, cleanUsername);
+      const errRes = NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+      return applyRateLimitHeaders(errRes, postLimit);
     }
 
-    // Success! Clear rate limit record
-    clearRateLimit(rateLimitKey);
+    // Success! Record successful auth (clears account lock)
+    recordAuthAttempt(clientIp, cleanUsername, false);
 
     const token = signToken({
       userId: user.id,
@@ -70,17 +91,14 @@ export async function POST(req: Request) {
       },
     });
 
-    response.cookies.set('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60, // 7 days
-      path: '/',
-    });
+    // Enforce HttpOnly: true, Secure: true, SameSite: 'strict' (BUG-004)
+    response.cookies.set('token', token, getAuthCookieOptions(req));
 
-    return response;
+    const postLimit = checkAuthRateLimit(clientIp, cleanUsername);
+    return applyRateLimitHeaders(response, postLimit);
   } catch (error) {
     console.error('Login error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    const errRes = NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return applyRateLimitHeaders(errRes, checkAuthRateLimit(clientIp));
   }
 }

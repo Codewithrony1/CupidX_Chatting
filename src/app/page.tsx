@@ -143,7 +143,7 @@ export default function Home() {
             <div className="glass-romantic rounded-3xl p-5 space-y-2 border border-pink-500/20">
               <span className="w-8 h-8 rounded-2xl bg-pink-500/20 text-pink-400 font-black text-sm flex items-center justify-center border border-pink-500/30">4</span>
               <h4 className="text-sm font-bold text-white">Press NEXT</h4>
-              <p className="text-pink-200/70 text-xs leading-relaxed">When done, press NEXT. All chat messages are erased on the server.</p>
+              <p className="text-pink-200/70 text-xs leading-relaxed">When done, press NEXT. The active chat session terminates and messages are cleared immediately.</p>
             </div>
           </div>
         </motion.div>
@@ -193,15 +193,17 @@ export default function Home() {
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Basic @username Profile</span>
+                    <span>Standard Avatar Emojis & @username Profile</span>
                   </li>
-                  <li className="flex items-center gap-2 text-pink-200/40 line-through">
-                    <X className="w-4 h-4 text-rose-400 shrink-0" />
-                    <span>Custom Profile Picture & DP Uploads</span>
+                  <li className="flex items-center gap-2 text-pink-200/50">
+                    <Lock className="w-4 h-4 text-rose-400/80 shrink-0" />
+                    <span className="line-through">Custom Profile Picture & DP Uploads</span>
+                    <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">VIP ONLY</span>
                   </li>
-                  <li className="flex items-center gap-2 text-pink-200/40 line-through">
-                    <X className="w-4 h-4 text-rose-400 shrink-0" />
-                    <span>Target Gender & Discovery Match Preferences</span>
+                  <li className="flex items-center gap-2 text-pink-200/50">
+                    <Lock className="w-4 h-4 text-rose-400/80 shrink-0" />
+                    <span className="line-through">Target Gender Match Preferences</span>
+                    <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">VIP ONLY</span>
                   </li>
                 </ul>
               </div>
@@ -232,9 +234,9 @@ export default function Home() {
                   <div className="text-right">
                     <div className="text-2xl font-black text-yellow-400 flex items-baseline justify-end gap-1">
                       <span>₹29</span>
-                      <span className="text-xs text-slate-400 font-normal">/mo</span>
+                      <span className="text-xs text-yellow-200/80 font-normal">/mo</span>
                     </div>
-                    <span className="text-[10px] text-slate-400 line-through">₹199/mo</span>
+                    <span className="text-[10px] text-emerald-400 font-semibold block">Monthly Plan</span>
                   </div>
                 </div>
 
@@ -249,7 +251,7 @@ export default function Home() {
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
-                    <span className="font-semibold">Custom Moods & Expiration Timers</span>
+                    <span className="font-semibold">Custom Bio, Moods & Expiration Timers</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
@@ -261,16 +263,16 @@ export default function Home() {
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-yellow-400 shrink-0 fill-yellow-400/20" />
-                    <span className="font-semibold">VIP User Bans</span>
+                    <span className="font-semibold">Direct Priority Support & Ad-Free Experience</span>
                   </li>
                 </ul>
               </div>
 
               <Link
                 href="/vip"
-                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs text-center shadow-lg shadow-yellow-500/30 transition-all hover:scale-102 active:scale-95 block mt-4 border border-yellow-300/40 cursor-pointer"
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-black text-xs text-center shadow-lg shadow-yellow-500/30 transition-all hover:scale-102 active:scale-95 block mt-4 border border-yellow-300/40 cursor-pointer uppercase tracking-wider"
               >
-                UNLOCK VIP NOW — ₹29 ONLY
+                UNLOCK VIP NOW — ₹29 / MONTH
               </Link>
             </div>
 
@@ -286,11 +288,20 @@ export default function Home() {
         >
           <div className="flex items-center space-x-2 text-pink-400 font-bold text-sm">
             <Shield className="w-5 h-5" />
-            <span>Complete Data Privacy Policy</span>
+            <span>Complete Data Privacy & Ephemeral Chat Guarantee</span>
           </div>
           <p className="text-xs sm:text-sm text-pink-100/90 leading-relaxed">
-            Cupidx is built around temporary 1-to-1 conversations. We do not keep permanent chat logs or store message contents in database archives after a chat is ended or expired.
+            Cupidx strictly distinguishes between ephemeral chat conversations and persistent account profiles. Real-time random chat messages are <strong>100% ephemeral</strong>—never archived or retained after a conversation ends or when NEXT is clicked. Account profile credentials (@username, avatar, and 18+ verification) are stored securely and can be permanently deleted at any time from your Settings.
           </p>
+          <div className="pt-1">
+            <Link
+              href="/privacy"
+              className="text-xs font-bold text-pink-400 hover:text-pink-300 underline underline-offset-4 inline-flex items-center gap-1 transition-colors"
+            >
+              <span>Read our full Privacy Policy & Data Retention terms</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
         </motion.div>
       </main>
 

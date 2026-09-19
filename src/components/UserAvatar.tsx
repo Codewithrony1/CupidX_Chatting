@@ -18,12 +18,14 @@ interface UserAvatarProps {
   } | null;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
+  alt?: string;
 }
 
-function UserAvatarComponent({ user, size = 'md', className = '' }: UserAvatarProps) {
+function UserAvatarComponent({ user, size = 'md', className = '', alt }: UserAvatarProps) {
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
   const isImageAvatar = isVIP && user?.profile?.avatarType === 'IMAGE' && user?.profile?.avatarUrl;
   const avatarEmoji = user?.profile?.avatarEmoji || '😊';
+  const resolvedAlt = alt || (user?.username ? `Profile picture for ${user.username}` : 'User avatar');
 
   const sizeClasses = {
     sm: 'w-8 h-8 text-base rounded-xl',
@@ -36,7 +38,7 @@ function UserAvatarComponent({ user, size = 'md', className = '' }: UserAvatarPr
     return (
       <img
         src={user.profile!.avatarUrl!}
-        alt={user?.username || 'Avatar'}
+        alt={resolvedAlt}
         className={`${sizeClasses[size]} object-cover border border-pink-400/50 shadow-md ${className}`}
       />
     );
@@ -44,6 +46,8 @@ function UserAvatarComponent({ user, size = 'md', className = '' }: UserAvatarPr
 
   return (
     <div
+      role="img"
+      aria-label={resolvedAlt}
       className={`${sizeClasses[size]} bg-gradient-to-tr from-pink-600/30 via-purple-600/30 to-rose-600/30 border border-pink-400/50 flex items-center justify-center select-none shadow-md ${className}`}
     >
       {avatarEmoji}

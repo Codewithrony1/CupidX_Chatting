@@ -90,6 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const [backendRes, firestoreProfile] = await Promise.all([
         fetch('/api/auth/me', {
           headers: authHeaders,
+          credentials: 'include',
         })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
@@ -245,7 +246,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isAuthed = Boolean(isSignedIn && clerkUser);
 
     // Unauthenticated user on protected route
-    if (!isAuthed && !isPublic && pathname !== '/onboarding') {
+    if (!isAuthed && !isPublic) {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
       console.log('[AUTH GUARD] Unauthenticated user -> redirecting to /login');
@@ -513,8 +514,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setFirestoreUserPresence(clerkUser.id, false).catch(() => {});
       }
 
-      if (typeof document !== 'undefined') {
-        document.cookie = 'token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; Max-Age=0;';
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (logoutApiErr) {
+        console.warn('[AUTH] Logout API clearance notice:', logoutApiErr);
       }
 
       setUser(null);
@@ -528,7 +531,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('[AUTH] Logout error:', e);
       router.replace('/login');
     }
-  }, [clerkUser?.id, clerk, router]);
+  }, [clerkUser, clerk, router]);
 
   const isAuthenticated = Boolean(isSignedIn && clerkUser);
 

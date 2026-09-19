@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { usernameSchema } from '@/lib/validation/username';
-import { signToken, getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
+import { signToken, getCurrentUser, getOrCreateUserFromClerk, getAuthCookieOptions } from '@/lib/auth';
 
 export async function GET(req: Request) {
   try {
@@ -45,9 +45,19 @@ import { validateDob } from '@/lib/validation/dob';
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { displayName, dob, gender, avatarEmoji, clerkUserId } = body;
+    const { displayName, dob, gender, avatarEmoji } = body;
 
-    const user = await getCurrentUser(req);
+    let user = await getCurrentUser(req);
+    if (!user) {
+      try {
+        const { auth: clerkAuth } = await import('@clerk/nextjs/server');
+        const clerkSession = await clerkAuth();
+        if (clerkSession?.userId) {
+          user = await getOrCreateUserFromClerk(clerkSession.userId);
+        }
+      } catch (e) {}
+    }
+
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
@@ -219,7 +229,7 @@ export async function POST(req: Request) {
 
     // 3. Save to Clerk User publicMetadata for permanent cross-session cloud persistence
     try {
-      const targetClerkId = user.clerkUserId || clerkUserId || user.id;
+      const targetClerkId = user.clerkUserId || user.id;
       if (targetClerkId) {
         const { clerkClient } = await import('@clerk/nextjs/server');
         const client = await clerkClient();
@@ -266,13 +276,7 @@ export async function POST(req: Request) {
       },
     });
 
-    response.cookies.set('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60,
-      path: '/',
-    });
+    response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
 
     return response;
   } catch (error: any) {

@@ -304,7 +304,7 @@ export default function DashboardPage() {
                   <div className="flex items-center space-x-2.5">
                     <img
                       src={u.avatarUrl || '/default-avatar.png'}
-                      alt={u.displayName || 'User'}
+                      alt={`Profile picture for ${u.displayName || u.username || 'User'}`}
                       className="w-8 h-8 rounded-full object-cover bg-slate-800"
                     />
                     <div>
@@ -489,7 +489,7 @@ export default function DashboardPage() {
             <div className="flex items-center space-x-3">
               <img
                 src={user?.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user?.displayName || user?.id || 'cupidx'}`}
-                alt={user?.displayName || 'User'}
+                alt={`Profile picture for ${user?.displayName || user?.fullName || 'My Profile'}`}
                 className="w-10 h-10 rounded-full object-cover bg-slate-800 border border-pink-400/50"
               />
               <div>

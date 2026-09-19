@@ -36,57 +36,84 @@ export default function PrivacyPage() {
           <section className="space-y-2">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <EyeOff className="w-4 h-4 text-pink-400" />
-              1. What We Collect & Why
+              1. What We Collect & Why (Ephemeral vs. Persistent Data)
             </h2>
             <p>
-              CupidX (cupidxchat.in) is committed to protecting your personal privacy. We collect only the data necessary to provide and secure our real-time matching and anonymous chat services:
+              CupidX (cupidxchat.in) is engineered with a strict distinction between <strong>ephemeral random communication</strong> and <strong>persistent account credentials</strong>:
             </p>
-            <ul className="list-disc pl-5 space-y-1 text-slate-400">
-              <li><strong>Authentication Data:</strong> Handled securely via Clerk (email address, Clerk User ID, verified account credentials).</li>
-              <li><strong>Profile Information:</strong> Public display name, unique username, optional gender, age, avatar emoji or image, and self-described bio.</li>
-              <li><strong>Payment Records:</strong> UTR/transaction ID and submitted payment screenshots solely for manual VIP membership verification and activation.</li>
-              <li><strong>Technical Metadata:</strong> WebSocket connection state, timestamps, and rate-limiting metrics used to maintain platform stability and prevent spam.</li>
+            <ul className="list-disc pl-5 space-y-2 text-slate-400">
+              <li>
+                <strong>Ephemeral Chat Messages & Media (Temporary):</strong> Messages, text snippets, and emojis sent during 1-to-1 random chat sessions are strictly ephemeral. They are routed via encrypted WebSockets (WSS) and are automatically destroyed from server memory and databases immediately when either participant presses NEXT or disconnects.
+              </li>
+              <li>
+                <strong>Persistent Profile Identity:</strong> To allow you to log in, maintain your identity, and access VIP perks, we securely store your chosen unique @username, public display name, date of birth (collected exclusively to ensure 18+ age verification and child safety legal compliance), gender preferences, avatar (emoji or VIP uploaded profile image), and short bio.
+              </li>
+              <li>
+                <strong>Authentication Credentials:</strong> Securely handled by Clerk. We do not store your raw passwords on our application servers.
+              </li>
+              <li>
+                <strong>VIP Payment Records:</strong> Transaction IDs (UTR) and payment screenshot proofs submitted by users solely for manual VIP membership verification and activation.
+              </li>
+              <li>
+                <strong>Platform Integrity & Abuse Prevention:</strong> Rate-limiting metrics, abuse report flags, and block records used solely to prevent bots, harassment, and unauthorized access.
+              </li>
             </ul>
           </section>
 
           <section className="space-y-2">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <Lock className="w-4 h-4 text-purple-400" />
-              2. Profile Privacy & Random Chat Isolation
+              2. Profile Privacy & Random Chat Partner Isolation
             </h2>
             <p>
-              When participating in random matchmaking, your chat partner <strong>NEVER</strong> receives access to your email address, Clerk User ID, internal database identifiers, or IP address. Partners only receive public information (your display name, gender, and avatar emoji).
+              When you join the random matching queue, CupidX strictly isolates your private information:
             </p>
+            <ul className="list-disc pl-5 space-y-1 text-slate-400">
+              <li>Your chat partner <strong>NEVER</strong> receives access to your email address, phone number, Clerk User ID, internal database identifiers, or IP address.</li>
+              <li>Random partners only see your public profile representation: your display name, @username, avatar emoji/DP, gender tag, and age.</li>
+              <li>You have full autonomy to skip any conversation instantly by clicking NEXT.</li>
+            </ul>
           </section>
 
           <section className="space-y-2">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <Server className="w-4 h-4 text-blue-400" />
-              3. Message Storage & Retention
+              3. Message Storage, Ephemeral Architecture & DP Security
             </h2>
             <p>
-              Messages transmitted during random chats are handled over secure encrypted transport (HTTPS / WSS). When a session ends or a user clicks NEXT, the active connection is closed immediately and temporary messages are removed according to cleanup policies.
+              We believe romantic conversations should stay private between two individuals:
             </p>
+            <ul className="list-disc pl-5 space-y-1 text-slate-400">
+              <li><strong>Zero Permanent Chat Archives:</strong> We do not log, retain, or index chat transcripts from random chat sessions. Once a session ends, the temporary messages are wiped.</li>
+              <li><strong>Profile Photo (DP) Storage:</strong> Custom profile pictures uploaded by VIP members are stored securely in protected storage. They are never shared with advertising networks, third-party data aggregators, or search engines.</li>
+              <li><strong>Transport Encryption:</strong> All client-to-server traffic is protected using modern Transport Layer Security (TLS/HTTPS) and Secure WebSockets (WSS).</li>
+            </ul>
           </section>
 
           <section className="space-y-2">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <UserCheck className="w-4 h-4 text-emerald-400" />
-              4. Third-Party Integrations & Security Practices
+              4. Third-Party Infrastructure & Safety Compliance
             </h2>
             <p>
-              We utilize trusted infrastructure providers including Clerk for secure authentication and transport encryption (TLS/HTTPS/WSS) across all endpoints. We never sell, rent, or monetize your personal data with third-party advertisers.
+              We utilize trusted infrastructure providers including Clerk (Authentication) and encrypted cloud databases. We never sell, rent, or trade your personal information or profile data to third parties. We comply with all applicable digital safety, age gate, and data protection standards.
             </p>
           </section>
 
           <section className="space-y-2">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <Trash2 className="w-4 h-4 text-rose-400" />
-              5. User Rights & Account Deletion
+              5. User Rights & Permanent Account Deletion
             </h2>
             <p>
-              You have the full right to edit your profile, update your preferences, or permanently delete your account at any time via Settings. Account deletion removes your user profile, active sessions, block lists, and notifications.
+              You maintain total ownership of your personal profile data. You have the right to:
             </p>
+            <ul className="list-disc pl-5 space-y-1 text-slate-400">
+              <li>Edit or remove your display name, bio, and avatar at any time from your Profile Settings.</li>
+              <li>
+                <strong>Permanently Delete Your Account:</strong> At any time, you can click <em>Delete Account</em> in your Settings. This triggers an immediate, irreversible database transaction that deletes your user record, profile data, uploaded photos, friends, block lists, and authentication sessions.
+              </li>
+            </ul>
           </section>
 
           <div className="border-t border-pink-500/20 pt-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
