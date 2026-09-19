@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import BottomSheet from '@/components/ui/BottomSheet';
 import { Crown, UserPlus, Check } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { DEFAULT_BIO } from '@/lib/vipCommon';
 
 interface PartnerProfile {
   id: string;
@@ -145,11 +146,9 @@ export default function ProfilePreviewSheet({
         )}
 
         {/* Bio */}
-        {partner.bio && (
-          <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-pink-100/90 leading-relaxed text-center">
-            "{partner.bio}"
-          </div>
-        )}
+        <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-pink-100/90 leading-relaxed text-center italic">
+          &ldquo;{partner.bio || DEFAULT_BIO}&rdquo;
+        </div>
 
         {/* Personality Tags */}
         {personalityTags.length > 0 && (

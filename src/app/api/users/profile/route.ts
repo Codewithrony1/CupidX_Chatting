@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { checkBlockBetween } from '@/lib/vipAuth';
+import { checkBlockBetween, isUserVip, DEFAULT_BIO } from '@/lib/vipAuth';
 
 export async function GET(req: Request) {
   try {
@@ -38,7 +38,7 @@ export async function GET(req: Request) {
       }
     }
 
-    const isVIP = targetUser.membershipTier === 'VIP' || (targetUser.subscription?.isActive === true && targetUser.subscription?.plan === 'VIP');
+    const isVIP = isUserVip(targetUser);
     const prof = targetUser.profile;
 
     return NextResponse.json({
@@ -53,7 +53,7 @@ export async function GET(req: Request) {
               avatarType: prof.avatarType || 'EMOJI',
               avatarEmoji: prof.avatarEmoji || '😊',
               avatarUrl: prof.avatarUrl || null,
-              bio: prof.showBio ? prof.bio : undefined,
+              bio: prof.showBio ? (prof.bio || DEFAULT_BIO) : undefined,
               gender: prof.showGender ? prof.gender : undefined,
               mood: prof.showMood ? prof.mood : undefined,
               personalityPreferences: prof.personalityPreferences,

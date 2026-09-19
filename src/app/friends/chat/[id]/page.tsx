@@ -94,7 +94,7 @@ const PrivateChatMessageItem = React.memo(function PrivateChatMessageItem({
   return (
     <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
       <div
-        className={`max-w-[80%] sm:max-w-md rounded-2xl p-3 space-y-1.5 shadow-md ${
+        className={`min-w-[72px] max-w-[85%] sm:max-w-md rounded-2xl p-3 space-y-1.5 shadow-md ${
           isMine
             ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-br-none'
             : 'bg-white/10 text-slate-100 rounded-bl-none border border-white/10'
@@ -118,10 +118,10 @@ const PrivateChatMessageItem = React.memo(function PrivateChatMessageItem({
         )}
 
         {/* Message footer: timestamp + status */}
-        <div className="flex items-center justify-end space-x-1 text-[10px] opacity-75">
+        <div className="flex items-center justify-end space-x-1 text-[10px] opacity-75 whitespace-nowrap select-none shrink-0">
           <span>{formattedTime}</span>
           {isMine && (
-            <span>
+            <span className="shrink-0">
               {msg.status === 'SENDING' ? (
                 '⏳'
               ) : msg.status === 'FAILED' ? (
@@ -495,148 +495,154 @@ export default function PrivateChatPage() {
       <CallModal onCallEnded={syncMessages} />
 
       {/* Header */}
-      <header className="px-4 py-3 bg-slate-950/70 border-b border-white/10 flex items-center justify-between backdrop-blur-md z-30 shrink-0">
-        <div className="flex items-center space-x-3 overflow-hidden">
-          <Link
-            href="/friends"
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all shrink-0"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-
-          {partner && (
-            <div className="flex items-center space-x-2.5 overflow-hidden">
-              <div className="relative w-10 h-10 rounded-2xl overflow-hidden bg-slate-900 border border-white/10 shrink-0 flex items-center justify-center">
-                {partner.avatarUrl ? (
-                  <img
-                    src={partner.avatarUrl}
-                    alt={`Profile picture for ${partner.displayName || partner.username}`}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-xl">{partner.avatarEmoji}</span>
-                )}
-                {partner.isOnline && (
-                  <span className="absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
-                )}
-              </div>
-
-              <div className="overflow-hidden">
-                <h4 className="text-xs font-bold text-white truncate flex items-center gap-1">
-                  {partner.displayName}
-                  <Sparkles className="w-3 h-3 text-yellow-400 fill-current shrink-0" />
-                </h4>
-                <p className="text-[11px] font-mono font-bold text-pink-400 truncate">@{partner.username}</p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex items-center space-x-1.5 shrink-0">
-          <button
-            onClick={() => handleInitiateCall('VOICE')}
-            className="p-2 rounded-xl bg-white/5 hover:bg-emerald-500/20 hover:text-emerald-300 border border-white/10 text-slate-300 transition-all cursor-pointer"
-            title="Voice Call"
-          >
-            <Phone className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => handleInitiateCall('VIDEO')}
-            className="p-2 rounded-xl bg-white/5 hover:bg-purple-500/20 hover:text-purple-300 border border-white/10 text-slate-300 transition-all cursor-pointer"
-            title="Video Call"
-          >
-            <Video className="w-4 h-4" />
-          </button>
-
-          <div className="relative">
-            <button
-              onClick={() => setShowOptions(!showOptions)}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all cursor-pointer"
+      <header className="px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-950/70 border-b border-white/10 backdrop-blur-md z-30 shrink-0">
+        <div className="max-w-4xl mx-auto w-full flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
+            <Link
+              href="/friends"
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all shrink-0"
             >
-              <MoreVertical className="w-4 h-4" />
-            </button>
+              <ArrowLeft className="w-4 h-4" />
+            </Link>
 
-            {showOptions && (
-              <div className="absolute right-0 mt-2 w-44 rounded-2xl bg-[#140024] border border-pink-500/30 shadow-2xl p-1.5 z-50 space-y-1 text-xs font-bold animate-in fade-in zoom-in-95 duration-150">
-                <button
-                  onClick={() => {
-                    setShowOptions(false);
-                    setShowReportModal(true);
-                  }}
-                  className="w-full px-3 py-2 rounded-xl text-left text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <Flag className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Report Member</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setShowOptions(false);
-                    handleBlockUser();
-                  }}
-                  className="w-full px-3 py-2 rounded-xl text-left text-rose-400 hover:bg-rose-500/10 flex items-center justify-between transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <Ban className="w-3.5 h-3.5" />
-                    <span>Block Member</span>
-                  </div>
-                  {!isVip && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
-                      <Lock className="w-2.5 h-2.5" /> VIP
-                    </span>
+            {partner && (
+              <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                <div className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-2xl overflow-hidden bg-slate-900 border border-white/10 shrink-0 flex items-center justify-center">
+                  {partner.avatarUrl ? (
+                    <img
+                      src={partner.avatarUrl}
+                      alt={`Profile picture for ${partner.displayName || partner.username}`}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xl">{partner.avatarEmoji}</span>
                   )}
-                </button>
+                  {partner.isOnline && (
+                    <span className="absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-xs font-bold text-white truncate flex items-center gap-1">
+                    <span className="truncate">{partner.displayName}</span>
+                    <Sparkles className="w-3 h-3 text-yellow-400 fill-current shrink-0" />
+                  </h4>
+                  <p className="text-[11px] font-mono font-bold text-pink-400 truncate">@{partner.username}</p>
+                </div>
               </div>
             )}
+          </div>
+
+          {/* Action Controls */}
+          <div className="flex items-center space-x-1.5 shrink-0">
+            <button
+              onClick={() => handleInitiateCall('VOICE')}
+              className="p-2 rounded-xl bg-white/5 hover:bg-emerald-500/20 hover:text-emerald-300 border border-white/10 text-slate-300 transition-all cursor-pointer shrink-0"
+              title="Voice Call"
+            >
+              <Phone className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => handleInitiateCall('VIDEO')}
+              className="p-2 rounded-xl bg-white/5 hover:bg-purple-500/20 hover:text-purple-300 border border-white/10 text-slate-300 transition-all cursor-pointer shrink-0"
+              title="Video Call"
+            >
+              <Video className="w-4 h-4" />
+            </button>
+
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setShowOptions(!showOptions)}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all cursor-pointer"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+
+              {showOptions && (
+                <div className="absolute right-0 mt-2 w-44 rounded-2xl bg-[#140024] border border-pink-500/30 shadow-2xl p-1.5 z-50 space-y-1 text-xs font-bold animate-in fade-in zoom-in-95 duration-150">
+                  <button
+                    onClick={() => {
+                      setShowOptions(false);
+                      setShowReportModal(true);
+                    }}
+                    className="w-full px-3 py-2 rounded-xl text-left text-slate-300 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Flag className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Report Member</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowOptions(false);
+                      handleBlockUser();
+                    }}
+                    className="w-full px-3 py-2 rounded-xl text-left text-rose-400 hover:bg-rose-500/10 flex items-center justify-between transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Ban className="w-3.5 h-3.5" />
+                      <span>Block Member</span>
+                    </div>
+                    {!isVip && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                        <Lock className="w-2.5 h-2.5" /> VIP
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       {/* Messages Feed Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-3">
-        {loading && (
-          <div className="text-center py-12 text-xs text-slate-500 animate-pulse">
-            Loading private chat history...
-          </div>
-        )}
+      <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 overscroll-contain">
+        <div className="max-w-4xl mx-auto w-full flex flex-col space-y-3">
+          {loading && (
+            <div className="text-center py-12 text-xs text-slate-500 animate-pulse">
+              Loading private chat history...
+            </div>
+          )}
 
-        {messages.map((msg) => (
-          <PrivateChatMessageItem
-            key={msg.id}
-            msg={msg}
-            isMine={msg.senderId === user?.id}
-            onZoomImage={handleZoomImage}
-          />
-        ))}
-        <div ref={messagesEndRef} />
+          {messages.map((msg) => (
+            <PrivateChatMessageItem
+              key={msg.id}
+              msg={msg}
+              isMine={msg.senderId === user?.id}
+              onZoomImage={handleZoomImage}
+            />
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
       </main>
 
       {/* Image Preview Thumbnail prior to send */}
       {imagePreview && (
-        <div className="px-4 py-2 bg-black/40 border-t border-white/10 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 rounded-xl overflow-hidden border border-pink-500/40">
-              <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+        <div className="px-4 py-2 bg-black/40 border-t border-white/10 shrink-0">
+          <div className="max-w-4xl mx-auto w-full flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 rounded-xl overflow-hidden border border-pink-500/40">
+                <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+              </div>
+              <span className="text-xs text-slate-300">Ready to send photo</span>
             </div>
-            <span className="text-xs text-slate-300">Ready to send photo</span>
-          </div>
 
-          <button
-            onClick={() => {
-              setSelectedFile(null);
-              setImagePreview(null);
-            }}
-            className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"
-          >
-            <X className="w-4 h-4" />
-          </button>
+            <button
+              onClick={() => {
+                setSelectedFile(null);
+                setImagePreview(null);
+              }}
+              className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
       {/* Message Composer */}
-      <footer className="p-3 bg-slate-950/80 border-t border-white/10 shrink-0 backdrop-blur-md">
+      <footer className="p-2.5 sm:p-3 pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:pb-3 bg-slate-950/80 border-t border-white/10 shrink-0 backdrop-blur-md">
         {!isVip ? (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-pink-500/10 via-purple-500/10 to-amber-500/10 border border-pink-500/30 max-w-4xl mx-auto">
             <div className="flex items-center space-x-2.5 text-xs text-pink-200">
@@ -663,7 +669,7 @@ export default function PrivateChatPage() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-pink-400 border border-white/10 transition-all cursor-pointer"
+              className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-pink-400 border border-white/10 transition-all cursor-pointer shrink-0"
               title="Attach Image"
             >
               <ImageIcon className="w-4 h-4" />
@@ -675,7 +681,7 @@ export default function PrivateChatPage() {
               onChange={(e) => setInputText(e.target.value)}
               placeholder="Type a private message..."
               maxLength={2000}
-              className="flex-1 px-4 py-2.5 rounded-2xl bg-black/50 border border-white/10 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-pink-500 transition-all font-sans"
+              className="flex-1 min-w-0 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-black/50 border border-white/10 text-white text-[15px] sm:text-xs placeholder:text-slate-500 focus:outline-none focus:border-pink-500 transition-all font-sans"
             />
 
             <button

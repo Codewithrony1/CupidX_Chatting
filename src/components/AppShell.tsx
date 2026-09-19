@@ -26,9 +26,18 @@ import UserAvatar from '@/components/UserAvatar';
 interface AppShellProps {
   children: React.ReactNode;
   showNav?: boolean;
+  showHeader?: boolean;
+  fullHeightChat?: boolean;
+  containerStyle?: React.CSSProperties;
 }
 
-export default function AppShell({ children, showNav = true }: AppShellProps) {
+export default function AppShell({
+  children,
+  showNav = true,
+  showHeader = true,
+  fullHeightChat = false,
+  containerStyle,
+}: AppShellProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -76,7 +85,14 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#0d0014] text-white flex flex-col md:flex-row justify-between relative overflow-x-hidden selection:bg-pink-500 selection:text-white">
+    <div
+      style={containerStyle}
+      className={`${
+        fullHeightChat
+          ? 'h-[100dvh] max-h-[100dvh] overflow-hidden'
+          : 'min-h-[100dvh] overflow-x-hidden'
+      } bg-[#0d0014] text-white flex flex-col md:flex-row justify-between relative selection:bg-pink-500 selection:text-white`}
+    >
       {/* Background Effects */}
       <FloatingHearts />
 
@@ -265,52 +281,64 @@ export default function AppShell({ children, showNav = true }: AppShellProps) {
       </aside>
 
       {/* Desktop Frame Wrapper */}
-      <div className="w-full max-w-5xl mx-auto flex flex-col flex-grow min-h-[100dvh] relative z-10 sm:py-4">
+      <div
+        className={`w-full max-w-5xl mx-auto flex flex-col flex-grow relative z-10 ${
+          fullHeightChat
+            ? 'h-full max-h-full overflow-hidden py-0'
+            : 'min-h-[100dvh] sm:py-4'
+        }`}
+      >
         {/* Compact App Header */}
-        <header className="w-full px-4 py-3 flex items-center justify-between border-b border-pink-500/15 bg-slate-950/40 backdrop-blur-md sticky top-0 z-30 sm:rounded-t-3xl">
-          <div className="flex items-center space-x-2.5">
-            {/* Hamburger Menu Toggle Button (Mobile Only) */}
-            <button
-              onClick={() => setDrawerOpen(true)}
-              aria-expanded={drawerOpen}
-              aria-controls="navigation-drawer"
-              aria-label="Toggle Navigation Menu"
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-pink-300 hover:text-white border border-pink-500/20 transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-95 sm:hidden"
-            >
-              <Menu className="w-4 h-4 text-pink-300" />
-            </button>
+        {showHeader && (
+          <header className="w-full px-4 py-3 flex items-center justify-between border-b border-pink-500/15 bg-slate-950/40 backdrop-blur-md sticky top-0 z-30 sm:rounded-t-3xl shrink-0">
+            <div className="flex items-center space-x-2.5">
+              {/* Hamburger Menu Toggle Button (Mobile Only) */}
+              <button
+                onClick={() => setDrawerOpen(true)}
+                aria-expanded={drawerOpen}
+                aria-controls="navigation-drawer"
+                aria-label="Toggle Navigation Menu"
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-pink-300 hover:text-white border border-pink-500/20 transition-all cursor-pointer flex items-center justify-center shrink-0 active:scale-95 sm:hidden"
+              >
+                <Menu className="w-4 h-4 text-pink-300" />
+              </button>
 
-            <Link href="/dashboard" className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-pink-600 to-rose-500 flex items-center justify-center shadow-md shadow-pink-500/30">
-                <Heart className="w-4.5 h-4.5 text-white fill-white animate-pulse" />
-              </div>
-              <span className="text-lg font-black tracking-wider text-white">
-                Cupid<span className="text-pink-400">X</span>
-              </span>
-            </Link>
-          </div>
+              <Link href="/dashboard" className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-pink-600 to-rose-500 flex items-center justify-center shadow-md shadow-pink-500/30">
+                  <Heart className="w-4.5 h-4.5 text-white fill-white animate-pulse" />
+                </div>
+                <span className="text-lg font-black tracking-wider text-white">
+                  Cupid<span className="text-pink-400">X</span>
+                </span>
+              </Link>
+            </div>
 
-          <div className="flex items-center space-x-3">
-            <Link
-              href="/vip"
-              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-sm transition-all"
-            >
-              <Crown className="w-3 h-3 fill-current" />
-              <span>VIP</span>
-            </Link>
+            <div className="flex items-center space-x-3">
+              <Link
+                href="/vip"
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-sm transition-all"
+              >
+                <Crown className="w-3 h-3 fill-current" />
+                <span>VIP</span>
+              </Link>
 
-            <Link href="/profile" className="flex items-center space-x-1.5 group">
-              <img
-                src={user?.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user?.username || 'me'}`}
-                alt={user?.displayName || user?.username ? `Profile picture for ${user?.displayName || user?.username}` : 'My profile picture'}
-                className="w-8 h-8 rounded-full border border-pink-400/50 object-cover group-hover:scale-105 transition-transform"
-              />
-            </Link>
-          </div>
-        </header>
+              <Link href="/profile" className="flex items-center space-x-1.5 group">
+                <img
+                  src={user?.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user?.username || 'me'}`}
+                  alt={user?.displayName || user?.username ? `Profile picture for ${user?.displayName || user?.username}` : 'My profile picture'}
+                  className="w-8 h-8 rounded-full border border-pink-400/50 object-cover group-hover:scale-105 transition-transform"
+                />
+              </Link>
+            </div>
+          </header>
+        )}
 
         {/* Main Content Area */}
-        <main className={`flex-grow flex flex-col relative z-10 ${showNav ? 'pb-20 sm:pb-6' : ''}`}>
+        <main
+          className={`flex-grow flex flex-col relative z-10 min-h-0 ${
+            fullHeightChat ? 'h-full overflow-hidden' : showNav ? 'pb-20 sm:pb-6' : ''
+          }`}
+        >
           {children}
         </main>
       </div>

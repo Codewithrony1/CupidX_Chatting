@@ -78,12 +78,12 @@ const DirectChatMessageItem = React.memo(function DirectChatMessageItem({
 
   return (
     <div
-      className={`flex group max-w-[85%] md:max-w-[70%] flex-col ${
+      className={`flex group max-w-[85%] sm:max-w-[70%] flex-col ${
         isMe ? 'self-end items-end' : 'self-start items-start'
-      }`}
+      } max-w-full`}
     >
       <div
-        className={`relative p-3.5 rounded-2xl text-sm leading-relaxed overflow-hidden ${
+        className={`relative p-3 sm:p-3.5 rounded-2xl text-xs sm:text-sm leading-relaxed overflow-hidden break-words [overflow-wrap:anywhere] [word-break:break-word] min-w-[72px] ${
           isMe
             ? 'bg-gradient-to-tr from-purple-600 to-pink-500 text-white rounded-br-none shadow-md shadow-purple-950/20'
             : 'bg-white/5 border border-white/5 text-slate-100 rounded-bl-none'
@@ -93,12 +93,12 @@ const DirectChatMessageItem = React.memo(function DirectChatMessageItem({
           <img
             src={msg.imageUrl}
             alt="Shared attachment"
-            className="rounded-xl max-h-60 object-cover mb-2 border border-black/20 w-full"
+            className="rounded-xl max-h-60 object-cover mb-2 border border-black/20 w-full max-w-full"
             loading="lazy"
           />
         )}
         {msg.content && (
-          <bdi className="block break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap leading-relaxed">
+          <bdi className="block break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap leading-relaxed select-text">
             {sanitizeChatText(msg.content)}
           </bdi>
         )}
@@ -115,10 +115,10 @@ const DirectChatMessageItem = React.memo(function DirectChatMessageItem({
         )}
       </div>
 
-      <div className="flex items-center space-x-1.5 mt-1 text-[9px] text-slate-500 px-1">
+      <div className="flex items-center space-x-1.5 mt-1 text-[9px] text-slate-500 px-1 whitespace-nowrap select-none shrink-0">
         <span>{formattedTime}</span>
         {isMe && (
-          <span>
+          <span className="shrink-0">
             • {msg.isRead ? <span className="text-purple-400 font-bold">Read</span> : 'Sent'}
           </span>
         )}
@@ -439,225 +439,231 @@ export default function ChatWindow() {
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-lg h-96 bg-gradient-to-b from-pink-600/15 via-purple-600/10 to-transparent blur-3xl pointer-events-none" />
 
       {/* Top Header */}
-      <header className="px-4 py-3 border-b border-white/5 glass flex items-center justify-between z-20 shrink-0">
-        <div className="flex items-center space-x-3">
-          <Link
-            href="/dashboard"
-            className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
+      <header className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-white/5 glass z-20 shrink-0">
+        <div className="max-w-4xl mx-auto w-full flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
+            <Link
+              href="/dashboard"
+              className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
 
-          <div
-            onClick={() => setShowUserProfileModal(true)}
-            className="flex items-center space-x-3 cursor-pointer group"
-          >
-            <div className="relative">
-              <img
-                src={targetUser.avatarUrl || '/default-avatar.png'}
-                alt={`Profile picture for ${targetUser.fullName || targetUser.username}`}
-                className="w-10 h-10 rounded-full object-cover bg-slate-900 border border-pink-500/30 group-hover:border-pink-400 transition-colors"
-              />
-              {targetUser.isOnline && (
-                <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
-              )}
-            </div>
-
-            <div>
-              <h4 className="text-sm font-black text-white flex items-center gap-1.5 leading-tight">
-                <span>@{targetUser.username}</span>
-                {targetUser.isVIP && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
-                    <Sparkles className="w-2.5 h-2.5 fill-current" /> VIP
-                  </span>
+            <div
+              onClick={() => setShowUserProfileModal(true)}
+              className="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer group min-w-0 flex-1"
+            >
+              <div className="relative shrink-0">
+                <img
+                  src={targetUser.avatarUrl || '/default-avatar.png'}
+                  alt={`Profile picture for ${targetUser.fullName || targetUser.username}`}
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover bg-slate-900 border border-pink-500/30 group-hover:border-pink-400 transition-colors"
+                />
+                {targetUser.isOnline && (
+                  <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
                 )}
-              </h4>
-              <p className="text-[11px] text-slate-400 font-medium">
-                {targetUserTyping
-                  ? 'Typing...'
-                  : targetUser.isOnline
-                  ? 'Online now'
-                  : 'Offline'}
-              </p>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5 leading-tight truncate">
+                  <span className="truncate">@{targetUser.username}</span>
+                  {targetUser.isVIP && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5 shrink-0">
+                      <Sparkles className="w-2.5 h-2.5 fill-current" /> VIP
+                    </span>
+                  )}
+                </h4>
+                <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate">
+                  {targetUserTyping
+                    ? 'Typing...'
+                    : targetUser.isOnline
+                    ? 'Online now'
+                    : 'Offline'}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Right Menu Action */}
-        <div className="relative">
-          <button
-            onClick={() => setShowMenu(!showMenu)}
-            className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
-          >
-            <MoreVertical className="w-5 h-5" />
-          </button>
+          {/* Right Menu Action */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-2 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
 
-          {showMenu && (
-            <div className="absolute right-0 mt-2 w-48 rounded-2xl glass-dropdown border border-white/10 p-1.5 shadow-2xl z-50 space-y-1">
-              <button
-                onClick={() => {
-                  setShowMenu(false);
-                  setShowUserProfileModal(true);
-                }}
-                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all text-left cursor-pointer"
-              >
-                <User className="w-4 h-4 text-purple-400" />
-                <span>View Profile</span>
-              </button>
+            {showMenu && (
+              <div className="absolute right-0 mt-2 w-48 rounded-2xl glass-dropdown border border-white/10 p-1.5 shadow-2xl z-50 space-y-1">
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    setShowUserProfileModal(true);
+                  }}
+                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all text-left cursor-pointer"
+                >
+                  <User className="w-4 h-4 text-purple-400" />
+                  <span>View Profile</span>
+                </button>
 
-              <button
-                onClick={() => {
-                  setShowMenu(false);
-                  handleBlockUser();
-                }}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-pink-400 hover:bg-pink-500/10 transition-all text-left cursor-pointer"
-              >
-                <div className="flex items-center space-x-2.5">
-                  <Ban className="w-4 h-4" />
-                  <span>{blockedByMe ? 'Unblock User' : 'Block User'}</span>
-                </div>
-                {!isVIP && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
-                    <Lock className="w-2.5 h-2.5" /> VIP
-                  </span>
-                )}
-              </button>
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    handleBlockUser();
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-pink-400 hover:bg-pink-500/10 transition-all text-left cursor-pointer"
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <Ban className="w-4 h-4" />
+                    <span>{blockedByMe ? 'Unblock User' : 'Block User'}</span>
+                  </div>
+                  {!isVIP && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-0.5">
+                      <Lock className="w-2.5 h-2.5" /> VIP
+                    </span>
+                  )}
+                </button>
 
-              <button
-                onClick={() => {
-                  setShowReportModal(true);
-                  setShowMenu(false);
-                }}
-                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-all text-left cursor-pointer"
-              >
-                <Flag className="w-4 h-4" />
-                <span>Report User</span>
-              </button>
-            </div>
-          )}
+                <button
+                  onClick={() => {
+                    setShowReportModal(true);
+                    setShowMenu(false);
+                  }}
+                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-all text-left cursor-pointer"
+                >
+                  <Flag className="w-4 h-4" />
+                  <span>Report User</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Messages Feed */}
-      <div className="flex-grow overflow-y-auto p-6 space-y-4 flex flex-col" ref={chatContainerRef}>
-        {messages.length === 0 ? (
-          <div className="flex-grow flex flex-col items-center justify-center text-center space-y-3">
-            <div className="w-16 h-16 rounded-3xl bg-purple-500/10 flex items-center justify-center text-purple-400">
-              <MessageSquare className="w-8 h-8" />
+      <div className="flex-grow overflow-y-auto overflow-x-hidden p-3 sm:p-6 flex flex-col overscroll-contain" ref={chatContainerRef}>
+        <div className="max-w-4xl mx-auto w-full flex-grow flex flex-col space-y-4">
+          {messages.length === 0 ? (
+            <div className="flex-grow flex flex-col items-center justify-center text-center space-y-3">
+              <div className="w-16 h-16 rounded-3xl bg-purple-500/10 flex items-center justify-center text-purple-400">
+                <MessageSquare className="w-8 h-8" />
+              </div>
+              <div>
+                <h5 className="text-sm font-bold text-white">Your secure chat with @{targetUser.username}</h5>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1">
+                  This dialog is fully monitored. Type a message below to start communicating.
+                </p>
+              </div>
             </div>
-            <div>
-              <h5 className="text-sm font-bold text-white">Your secure chat with @{targetUser.username}</h5>
-              <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1">
-                This dialog is fully monitored. Type a message below to start communicating.
-              </p>
-            </div>
-          </div>
-        ) : (
-          messages.map((msg) => (
-            <DirectChatMessageItem
-              key={msg.id}
-              msg={msg}
-              isMe={msg.senderId === user?.id}
-              onDeleteMessage={handleDeleteMessage}
-            />
-          ))
-        )}
+          ) : (
+            messages.map((msg) => (
+              <DirectChatMessageItem
+                key={msg.id}
+                msg={msg}
+                isMe={msg.senderId === user?.id}
+                onDeleteMessage={handleDeleteMessage}
+              />
+            ))
+          )}
 
-        {/* Live typing Indicator */}
-        {targetUserTyping && (
-          <div className="self-start flex items-center space-x-2 bg-white/5 border border-white/5 p-3 rounded-2xl rounded-bl-none text-xs text-slate-400">
-            <div className="flex space-x-1 items-center h-2">
-              <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-              <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-              <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" />
+          {/* Live typing Indicator */}
+          {targetUserTyping && (
+            <div className="self-start flex items-center space-x-2 bg-white/5 border border-white/5 p-2.5 sm:p-3 rounded-2xl rounded-bl-none text-xs text-slate-400 shrink-0 max-w-[85%]">
+              <div className="flex space-x-1 items-center h-2 shrink-0">
+                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" />
+              </div>
+              <span className="truncate">@{targetUser.username} is typing...</span>
             </div>
-            <span>@{targetUser.username} is typing...</span>
-          </div>
-        )}
+          )}
 
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* Footer / Input Bar */}
-      <footer className="p-4 md:p-6 glass border-t border-white/5 shrink-0 z-10">
-        {isBlocked ? (
-          <div className="flex items-center justify-center space-x-2 p-3 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-xs text-pink-400 text-center font-medium animate-pulse">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>
-              {blockedByMe
-                ? 'You have blocked this user. Unblock them to resume messaging.'
-                : 'You have been blocked from messaging this user.'}
-            </span>
-          </div>
-        ) : !isVIP ? (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-pink-500/10 via-purple-500/10 to-amber-500/10 border border-pink-500/30">
-            <div className="flex items-center space-x-2.5 text-xs text-pink-200">
-              <AlertCircle className="w-4 h-4 text-pink-400 shrink-0" />
-              <span>You cannot message this person. Get VIP to chat.</span>
+      <footer className="p-3 sm:p-4 md:p-6 pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:pb-4 md:pb-6 glass border-t border-white/5 shrink-0 z-10">
+        <div className="max-w-4xl mx-auto w-full">
+          {isBlocked ? (
+            <div className="flex items-center justify-center space-x-2 p-3 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-xs text-pink-400 text-center font-medium animate-pulse">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>
+                {blockedByMe
+                  ? 'You have blocked this user. Unblock them to resume messaging.'
+                  : 'You have been blocked from messaging this user.'}
+              </span>
             </div>
-            <Link
-              href="/vip"
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 via-rose-500 to-amber-500 text-white text-xs font-black tracking-wide shadow-md shadow-pink-500/20 hover:brightness-110 active:scale-95 transition-all text-center whitespace-nowrap"
-            >
-              Get VIP
-            </Link>
-          </div>
-        ) : (
-          <form onSubmit={handleSendMessage} className="space-y-3">
-            {/* Attachment preview banner */}
-            {imageFile && (
-              <div className="flex items-center space-x-2 p-2 rounded-xl bg-white/5 border border-white/5 inline-flex relative">
-                <img src={imageFile} alt="Attach Preview" className="w-12 h-12 object-cover rounded-lg" />
-                <button
-                  type="button"
-                  onClick={() => setImageFile('')}
-                  className="absolute -top-1 -right-1 p-0.5 rounded-full bg-slate-900 border border-white/10 text-slate-400 hover:text-white cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+          ) : !isVIP ? (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-pink-500/10 via-purple-500/10 to-amber-500/10 border border-pink-500/30">
+              <div className="flex items-center space-x-2.5 text-xs text-pink-200">
+                <AlertCircle className="w-4 h-4 text-pink-400 shrink-0" />
+                <span>You cannot message this person. Get VIP to chat.</span>
               </div>
-            )}
-
-            <div className="flex items-center gap-3">
-              <div className="flex gap-1.5">
-                <label className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer">
-                  <ImageIcon className="w-5 h-5" />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              <div className="relative flex-grow">
-                <input
-                  type="text"
-                  placeholder="Type a message spark..."
-                  value={inputText}
-                  onChange={handleInputChange}
-                  className="w-full pl-4 pr-10 py-3 rounded-2xl glass-input text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setInputText(prev => prev + ' Spark! ✨')}
-                  className="absolute right-3 top-3.5 text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  <Smile className="w-4 h-4" />
-                </button>
-              </div>
-
-              <button
-                type="submit"
-                disabled={!inputText.trim() && !imageFile}
-                className="p-3 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md active:scale-95 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+              <Link
+                href="/vip"
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 via-rose-500 to-amber-500 text-white text-xs font-black tracking-wide shadow-md shadow-pink-500/20 hover:brightness-110 active:scale-95 transition-all text-center whitespace-nowrap"
               >
-                <Send className="w-5 h-5" />
-              </button>
+                Get VIP
+              </Link>
             </div>
-          </form>
-        )}
+          ) : (
+            <form onSubmit={handleSendMessage} className="space-y-3">
+              {/* Attachment preview banner */}
+              {imageFile && (
+                <div className="flex items-center space-x-2 p-2 rounded-xl bg-white/5 border border-white/5 inline-flex relative">
+                  <img src={imageFile} alt="Attach Preview" className="w-12 h-12 object-cover rounded-lg" />
+                  <button
+                    type="button"
+                    onClick={() => setImageFile('')}
+                    className="absolute -top-1 -right-1 p-0.5 rounded-full bg-slate-900 border border-white/10 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="flex gap-1.5 shrink-0">
+                  <label className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all cursor-pointer">
+                    <ImageIcon className="w-5 h-5" />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageChange}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <div className="relative flex-1 min-w-0">
+                  <input
+                    type="text"
+                    placeholder="Type a message spark..."
+                    value={inputText}
+                    onChange={handleInputChange}
+                    className="w-full pl-3.5 sm:pl-4 pr-10 py-2.5 sm:py-3 rounded-2xl glass-input text-[15px] sm:text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setInputText(prev => prev + ' Spark! ✨')}
+                    className="absolute right-3 top-3 sm:top-3.5 text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    <Smile className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!inputText.trim() && !imageFile}
+                  className="p-2.5 sm:p-3 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md active:scale-95 disabled:opacity-40 disabled:pointer-events-none cursor-pointer shrink-0"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       </footer>
 
       {/* Report Modal */}

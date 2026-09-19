@@ -33,6 +33,7 @@ import FloatingHearts from '@/components/FloatingHearts';
 import AppShell from '@/components/AppShell';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION } from '@/lib/config/policy';
+import { DEFAULT_BIO } from '@/lib/vipCommon';
 
 interface BlockedUser {
   id: string;
@@ -66,11 +67,16 @@ export default function SettingsPage() {
   const { user, logout, refreshUser } = useAuth();
   const router = useRouter();
 
-  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
+  const isVIP = Boolean(
+    user?.membershipTier === 'VIP' ||
+    user?.is_vip ||
+    user?.isVIP ||
+    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP')
+  );
 
   // Profile & Theme State
   const [displayName, setDisplayName] = useState(user?.fullName || '');
-  const [bio, setBio] = useState(user?.profile?.bio || '');
+  const [bio, setBio] = useState(user?.profile?.bio || DEFAULT_BIO);
   const [theme, setTheme] = useState(user?.profile?.themePreference || 'system');
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -153,7 +159,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (user) {
       setDisplayName(user.fullName || '');
-      setBio(user.profile?.bio || '');
+      setBio(user.profile?.bio || DEFAULT_BIO);
       setTheme(user.profile?.themePreference || 'system');
       fetchPrivacyLists();
       fetchConsentRecords();
@@ -171,7 +177,7 @@ export default function SettingsPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bio,
+          bio: isVIP ? bio : undefined,
           themePreference: theme,
         }),
       });
@@ -283,7 +289,14 @@ export default function SettingsPage() {
               <div className="space-y-1">
                 <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Username</label>
                 <div className="px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 font-mono flex items-center justify-between">
-                  <span>@{user?.username}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span>@{user?.username}</span>
+                    {isVIP && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black flex items-center gap-0.5 select-none">
+                        <Crown className="w-2.5 h-2.5 fill-current" /> VIP
+                      </span>
+                    )}
+                  </div>
                   <span className="text-[10px] text-pink-400 font-bold">Unique</span>
                 </div>
               </div>
@@ -323,14 +336,28 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Bio</label>
-              <textarea
-                rows={3}
-                value={bio}
-                onChange={(e) => setBio(e.target.value)}
-                placeholder="Share something about yourself..."
-                className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs"
-              />
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold text-pink-300 uppercase tracking-wider block">Bio</label>
+                {isVIP && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-extrabold border border-yellow-500/30 flex items-center gap-1">
+                    <Crown className="w-3 h-3 fill-current" /> VIP
+                  </span>
+                )}
+              </div>
+              {!isVIP ? (
+                <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 text-xs text-pink-100/90 leading-relaxed italic select-none">
+                  &ldquo;{user?.profile?.bio || DEFAULT_BIO}&rdquo;
+                </div>
+              ) : (
+                <textarea
+                  rows={3}
+                  maxLength={500}
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  placeholder="Share something about yourself..."
+                  className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs"
+                />
+              )}
             </div>
           </div>
 

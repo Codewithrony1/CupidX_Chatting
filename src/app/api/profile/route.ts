@@ -5,6 +5,7 @@ import { isVipAvatar } from '@/lib/avatars';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { validateDob } from '@/lib/validation/dob';
 import { saveBase64Image } from '@/lib/safeImageUpload';
+import { isUserVip, DEFAULT_BIO } from '@/lib/vipAuth';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -38,16 +39,19 @@ export async function GET(req: Request) {
   const currentDayCount = lastChangeStr === todayStr ? (user.profile?.nameChangesCount ?? 0) : 0;
   const remainingNameChanges = Math.max(0, 4 - currentDayCount);
 
+  const isVIP = isUserVip(user);
+
   return NextResponse.json({
     profile: {
       ...user.profile,
+      bio: user.profile?.bio || DEFAULT_BIO,
       nameChangesCount: currentDayCount,
       remainingNameChangesToday: remainingNameChanges,
       randomChatIntroSeen: user.profile?.randomChatIntroSeen ?? false,
     },
     subscription: user.subscription,
-    membershipTier: user.membershipTier,
-    is_vip: user.is_vip,
+    membershipTier: isVIP ? 'VIP' : 'FREE',
+    is_vip: isVIP,
   });
 }
 
@@ -60,7 +64,7 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
+    const isVIP = isUserVip(user);
     const {
       displayName,
       bio,
@@ -180,16 +184,13 @@ export async function PUT(req: Request) {
 
     // E. Free users cannot edit Bio
     if (bio !== undefined && !isVIP) {
-      const cleanNewBio = bio.trim();
-      if (cleanNewBio !== existingBio.trim()) {
-        return NextResponse.json(
-          {
-            error: 'Bio customization is an exclusive CupidX VIP feature. Upgrade to VIP to write a custom bio.',
-            isVipRequired: true,
-          },
-          { status: 403 }
-        );
-      }
+      return NextResponse.json(
+        {
+          error: 'Bio customization is an exclusive CupidX VIP feature. Upgrade to VIP to write a custom bio.',
+          isVipRequired: true,
+        },
+        { status: 403 }
+      );
     }
 
     // ─── 2. Display Name Change Limit for VIP: Max 4 per calendar day ─────────

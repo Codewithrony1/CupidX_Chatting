@@ -107,9 +107,9 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
   }, [msg.createdAt]);
 
   return (
-    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} max-w-full`}>
       <div
-        className={`max-w-[80%] sm:max-w-[65%] rounded-3xl p-3.5 shadow-lg relative break-words ${
+        className={`max-w-[85%] sm:max-w-[70%] md:max-w-[65%] min-w-[72px] rounded-3xl p-3 sm:p-3.5 shadow-lg relative break-words [overflow-wrap:anywhere] [word-break:break-word] ${
           isMine
             ? 'bg-gradient-to-br from-pink-600 via-rose-500 to-purple-600 text-white rounded-tr-sm shadow-pink-500/10'
             : 'bg-slate-900/90 border border-slate-800 text-slate-100 rounded-tl-sm'
@@ -123,7 +123,7 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
             <img
               src={msg.imageUrl}
               alt={`Attachment from ${isMine ? 'you' : 'partner'}`}
-              className="max-h-60 w-full object-cover group-hover:scale-105 transition-transform"
+              className="max-h-60 w-full max-w-full object-cover rounded-xl group-hover:scale-105 transition-transform"
               loading="lazy"
             />
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
@@ -133,13 +133,13 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
         )}
 
         {msg.content && (
-          <bdi className="block break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap text-xs leading-relaxed">
+          <bdi className="block break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap text-xs sm:text-[13px] leading-relaxed select-text">
             {sanitizeChatText(msg.content)}
           </bdi>
         )}
 
-        <div className="flex items-center justify-end space-x-1 mt-1 text-[9px] opacity-70">
-          <span>{formattedTime}</span>
+        <div className="flex items-center justify-end space-x-1 mt-1 text-[9px] opacity-75 whitespace-nowrap select-none shrink-0">
+          <span className="shrink-0">{formattedTime}</span>
           {isMine &&
             (msg.status === 'FAILED' ? (
               <button
@@ -148,18 +148,18 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
                   e.stopPropagation();
                   onRetry?.(msg);
                 }}
-                className="inline-flex items-center gap-0.5 text-rose-300 hover:text-rose-200 font-bold cursor-pointer transition-colors"
+                className="inline-flex items-center gap-0.5 text-rose-300 hover:text-rose-200 font-bold cursor-pointer transition-colors shrink-0"
                 title="Failed to deliver. Click to retry."
               >
                 <span>!</span>
                 <span className="underline text-[8px]">Retry</span>
               </button>
             ) : msg.status === 'DELIVERED' ? (
-              <span title="Delivered"><CheckCheck className="w-3.5 h-3.5 text-pink-300" /></span>
+              <span title="Delivered" className="inline-flex items-center shrink-0"><CheckCheck className="w-3.5 h-3.5 text-pink-300" /></span>
             ) : msg.status === 'SENT' ? (
-              <span title="Sent"><CheckCheck className="w-3 h-3 text-white/80" /></span>
+              <span title="Sent" className="inline-flex items-center shrink-0"><CheckCheck className="w-3 h-3 text-white/80" /></span>
             ) : (
-              <span className="text-[9px] text-white/60" title="Sending...">🕒</span>
+              <span className="text-[9px] text-white/60 inline-flex items-center shrink-0" title="Sending...">🕒</span>
             ))}
         </div>
       </div>
@@ -193,16 +193,19 @@ const RandomChatMessageList = React.memo(function RandomChatMessageList({
   containerRef,
 }: RandomChatMessageListProps) {
   return (
-    <div ref={containerRef as any} className="flex-1 overflow-y-auto p-4 space-y-3">
+    <div
+      ref={containerRef as any}
+      className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-3 overscroll-contain min-h-0 select-text"
+    >
       <div className="text-center my-2">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] text-slate-400">
-          <ShieldCheck className="w-3.5 h-3.5 text-pink-400" />
-          <span>Connected with {partner?.displayName || partner?.fullName || 'Stranger'} • Be polite &amp; respectful</span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] text-slate-400 max-w-full truncate">
+          <ShieldCheck className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+          <span className="truncate">Connected with {partner?.displayName || partner?.fullName || 'Stranger'} • Be polite &amp; respectful</span>
         </span>
       </div>
 
       {messages.length === 0 && (
-        <div className="text-center py-12 text-slate-500 text-xs space-y-1">
+        <div className="text-center py-12 text-slate-500 text-xs space-y-1 select-none">
           <p className="font-bold text-slate-400">You are connected!</p>
           <p>Say hello to start the conversation 👋</p>
         </div>
@@ -225,13 +228,13 @@ const RandomChatMessageList = React.memo(function RandomChatMessageList({
       })}
 
       {partnerTyping && (
-        <div className="flex items-center space-x-2 text-xs text-slate-400 italic">
-          <div className="px-3 py-2 rounded-2xl bg-slate-900 border border-slate-800 flex items-center space-x-1">
+        <div className="flex items-center space-x-2 text-xs text-slate-400 italic shrink-0 select-none">
+          <div className="px-3 py-2 rounded-2xl bg-slate-900 border border-slate-800 flex items-center space-x-1 shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce" />
             <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:0.2s]" />
             <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-bounce [animation-delay:0.4s]" />
           </div>
-          <span className="text-[10px]">Partner is typing...</span>
+          <span className="text-[10px] truncate">Partner is typing...</span>
         </div>
       )}
 
@@ -347,10 +350,16 @@ export default function KnotChatRandomPage() {
       return;
     }
     const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 250;
-    if (isNearBottom) {
+    const lastMsg = messages[messages.length - 1];
+    const isMine = Boolean(
+      lastMsg &&
+      ((currentUidRef.current && lastMsg.senderId === currentUidRef.current) ||
+        (currentUser?.username && lastMsg.senderUsername === currentUser.username))
+    );
+    if (isMine || isNearBottom) {
       scrollToBottom(true);
     }
-  }, [messages.length, matchStatus, scrollToBottom]);
+  }, [messages.length, partnerTyping, matchStatus, scrollToBottom, currentUser?.username]);
 
   // ─── Auth redirect guard ───────────────────────────────────────────────────
   useEffect(() => {
@@ -1413,10 +1422,14 @@ export default function KnotChatRandomPage() {
   // ─── RENDER ────────────────────────────────────────────────────────────────
 
   return (
-    <AppShell showNav={matchStatus === 'idle'}>
+    <AppShell
+      showNav={matchStatus === 'idle'}
+      showHeader={matchStatus === 'idle'}
+      fullHeightChat={matchStatus !== 'idle'}
+      containerStyle={matchStatus !== 'idle' ? containerStyle : undefined}
+    >
       <div
-        style={containerStyle}
-        className="flex-1 flex flex-col bg-[#07000e] text-white overflow-hidden relative font-sans"
+        className="flex-1 flex flex-col bg-[#07000e] text-white overflow-hidden relative font-sans w-full h-full min-h-0"
       >
         {/* ================================================================= */}
         {/* 1. IDLE / START SCREEN                                            */}
@@ -1544,10 +1557,10 @@ export default function KnotChatRandomPage() {
         {matchStatus === 'connected' && (
           <div className="flex-1 flex flex-col h-full overflow-hidden">
             {/* HEADER */}
-            <header className="px-4 py-3 bg-[#0d0119]/95 backdrop-blur-xl border-b border-pink-500/20 flex items-center justify-between z-30 shrink-0 shadow-md">
-              <div className="flex items-center space-x-3">
-                <div onClick={() => setShowProfileSheet(true)} className="relative cursor-pointer">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 flex items-center justify-center text-white font-black text-sm border-2 border-pink-400/50 shadow-md overflow-hidden">
+            <header className="px-3 sm:px-4 py-2.5 sm:py-3 bg-[#0d0119]/95 backdrop-blur-xl border-b border-pink-500/20 flex items-center justify-between z-30 shrink-0 shadow-md gap-2">
+              <div className="flex items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
+                <div onClick={() => setShowProfileSheet(true)} className="relative cursor-pointer shrink-0">
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 flex items-center justify-center text-white font-black text-xs sm:text-sm border-2 border-pink-400/50 shadow-md overflow-hidden shrink-0">
                     {partner?.avatarUrl ? (
                       <img
                         src={partner.avatarUrl}
@@ -1558,12 +1571,12 @@ export default function KnotChatRandomPage() {
                       partner?.avatarEmoji || (partner?.displayName ? partner.displayName.substring(0, 2).toUpperCase() : '👤')
                     )}
                   </div>
-                  <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#0d0119]" />
+                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 border-2 border-[#0d0119]" />
                 </div>
 
-                <div onClick={() => setShowProfileSheet(true)} className="cursor-pointer">
-                  <div className="flex items-center space-x-1.5">
-                    <h3 className="text-sm font-black text-white truncate max-w-[140px] sm:max-w-[200px]">
+                <div onClick={() => setShowProfileSheet(true)} className="cursor-pointer min-w-0 flex-1 overflow-hidden">
+                  <div className="flex items-center space-x-1.5 min-w-0">
+                    <h3 className="text-xs sm:text-sm font-black text-white truncate">
                       {partner?.displayName || partner?.fullName || 'Stranger'}
                     </h3>
                     {partner?.countryFlag && (
@@ -1575,37 +1588,37 @@ export default function KnotChatRandomPage() {
                       <Crown className="w-3.5 h-3.5 text-yellow-400 fill-current shrink-0" />
                     )}
                   </div>
-                  <div className="flex items-center space-x-1.5 text-[10px]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                    <span className="text-emerald-400 font-bold">
+                  <div className="flex items-center space-x-1.5 text-[10px] min-w-0 text-slate-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+                    <span className="text-emerald-400 font-bold truncate shrink-0">
                       {partnerTyping ? 'typing...' : connectionState === 'CONNECTING' ? 'Connecting...' : 'Connected'}
                     </span>
                     {partner?.countryName && (
-                      <span className="text-slate-400 font-medium hidden sm:inline">
+                      <span className="text-slate-400 font-medium hidden sm:inline truncate">
                         • {partner.countryName}
                       </span>
                     )}
                     {(reconnecting || connectionState === 'DISCONNECTED') && (
-                      <span className="text-amber-400 font-bold">(reconnecting...)</span>
+                      <span className="text-amber-400 font-bold truncate shrink-0">(reconnecting...)</span>
                     )}
                   </div>
                 </div>
               </div>
 
               {/* Header actions */}
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
                 <button
                   onClick={handleNextPartner}
-                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-xs font-black shadow-md shadow-pink-500/20 flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                  className="px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-[11px] sm:text-xs font-black shadow-md shadow-pink-500/20 flex items-center gap-1 transition-all active:scale-95 cursor-pointer shrink-0"
                 >
                   <span>NEXT</span>
                   <FastForward className="w-3.5 h-3.5" />
                 </button>
 
-                <div className="relative">
+                <div className="relative shrink-0">
                   <button
                     onClick={() => setShowOptionsMenu(!showOptionsMenu)}
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    className="p-1.5 sm:p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
                   >
                     <MoreVertical className="w-4 h-4" />
                   </button>
@@ -1693,24 +1706,24 @@ export default function KnotChatRandomPage() {
                 e.stopPropagation();
                 handleSendMessage(e);
               }}
-              className="p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] bg-[#0d0119]/95 backdrop-blur-xl border-t border-pink-500/20 flex items-center space-x-2 z-30 shrink-0"
+              className="p-2.5 sm:p-3 pb-[calc(0.6rem+env(safe-area-inset-bottom))] sm:pb-3 bg-[#0d0119]/95 backdrop-blur-xl border-t border-pink-500/20 flex items-center space-x-2 z-30 shrink-0 w-full"
             >
               {!isVIP ? (
                 <button
                   type="button"
                   onClick={() => setShowVipModal(true)}
-                  className="px-2.5 py-1.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 flex items-center gap-1 transition-all cursor-pointer shrink-0 shadow-sm"
+                  className="px-2 sm:px-2.5 py-2 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 flex items-center gap-1 transition-all cursor-pointer shrink-0 shadow-sm"
                   title="Photo sharing is a VIP feature. Upgrade to VIP to send photos in random chats."
                 >
                   <span className="text-sm leading-none">📷</span>
                   <span className="text-xs leading-none">🔒</span>
-                  <span className="hidden sm:inline font-extrabold uppercase text-[10px] tracking-wider text-yellow-400">VIP Only</span>
+                  <span className="hidden sm:inline font-extrabold uppercase text-[10px] tracking-wider text-yellow-400">VIP</span>
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={handleImageAttachmentClick}
-                  className="p-2.5 rounded-2xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 hover:text-white border border-pink-500/30 transition-all cursor-pointer shrink-0"
+                  className="p-2 sm:p-2.5 rounded-2xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 hover:text-white border border-pink-500/30 transition-all cursor-pointer shrink-0"
                   title="Send photo"
                 >
                   <span className="text-base leading-none">📷</span>
@@ -1736,7 +1749,7 @@ export default function KnotChatRandomPage() {
                     handleSendMessage();
                   }
                 }}
-                className="flex-1 px-4 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+                className="flex-1 min-w-0 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-[15px] sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
               />
 
               <button
@@ -1747,7 +1760,8 @@ export default function KnotChatRandomPage() {
                   handleSendMessage();
                 }}
                 disabled={sendingMsg || (!inputText.trim() && !selectedImageFile)}
-                className="p-2.5 rounded-2xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-md shadow-pink-500/30 transition-all active:scale-95 disabled:opacity-40 cursor-pointer shrink-0"
+                className="p-2.5 sm:p-2.5 rounded-2xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-md shadow-pink-500/30 transition-all active:scale-95 disabled:opacity-40 cursor-pointer shrink-0"
+                aria-label="Send message"
               >
                 <Send className="w-4 h-4" />
               </button>

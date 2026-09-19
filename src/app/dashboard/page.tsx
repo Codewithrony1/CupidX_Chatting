@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/AppShell';
 import BottomSheet from '@/components/ui/BottomSheet';
+import { DEFAULT_BIO } from '@/lib/vipCommon';
 import {
   Search,
   Sparkles,
@@ -538,13 +539,20 @@ export default function DashboardPage() {
                 className="w-10 h-10 rounded-full object-cover bg-slate-800 border border-pink-400/50"
               />
               <div>
-                <h4 className="text-sm font-bold text-white">{user?.displayName || user?.fullName || 'My Profile'}</h4>
+                <div className="flex items-center gap-1.5">
+                  <h4 className="text-sm font-bold text-white">{user?.displayName || user?.fullName || 'My Profile'}</h4>
+                  {isVIP && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black flex items-center gap-0.5 select-none">
+                      <Crown className="w-2.5 h-2.5 fill-current" /> VIP
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] text-pink-200/70">{user?.gender ? (user.gender.charAt(0).toUpperCase() + user.gender.slice(1)) : 'Active Member'}</p>
               </div>
             </div>
 
             <p className="text-xs text-pink-200/80 italic p-2.5 rounded-xl bg-white/5">
-              "{user?.profile?.bio || 'Hey there! I am using Cupidx.'}"
+              &ldquo;{user?.profile?.bio || DEFAULT_BIO}&rdquo;
             </p>
           </div>
         </div>

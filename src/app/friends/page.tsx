@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/AppShell';
 import CallModal from '@/components/social/CallModal';
+import { DEFAULT_BIO } from '@/lib/vipCommon';
 import {
   Users,
   MessageSquare,
@@ -935,9 +936,16 @@ export default function FriendsHubPage() {
                           </div>
 
                           <div className="overflow-hidden">
-                            <h4 className="text-sm font-bold text-white truncate">{target.displayName}</h4>
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-sm font-bold text-white truncate">{target.displayName}</h4>
+                              {target.hasVipUsername && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gradient-to-r from-yellow-500 to-amber-500 text-slate-950 font-black flex items-center gap-0.5 select-none shrink-0">
+                                  <Crown className="w-2.5 h-2.5 fill-current" /> VIP
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs font-mono font-bold text-pink-400 truncate">@{target.username}</p>
-                            {target.bio && <p className="text-[11px] text-slate-400 truncate">{target.bio}</p>}
+                            <p className="text-[11px] text-slate-400 truncate">{target.bio || DEFAULT_BIO}</p>
                           </div>
                         </div>
 
