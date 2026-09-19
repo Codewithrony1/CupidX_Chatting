@@ -112,9 +112,9 @@ export default function DashboardPage() {
   const [currentMood, setCurrentMood] = useState(user?.profile?.mood || '😎 Attitude');
   const [savingMood, setSavingMood] = useState(false);
 
-  // Search users by username
+  // Search users by username (VIP Only)
   useEffect(() => {
-    if (!searchQuery.trim() || searchQuery.length < 2) {
+    if (!isVIP || !searchQuery.trim() || searchQuery.length < 2) {
       setSearchResults([]);
       return;
     }
@@ -126,16 +126,19 @@ export default function DashboardPage() {
         if (res.ok) {
           const data = await res.json();
           setSearchResults(data.users || []);
+        } else {
+          setSearchResults([]);
         }
       } catch (e) {
         console.error(e);
+        setSearchResults([]);
       } finally {
         setSearching(false);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, isVIP]);
 
   const handleSelectMood = async (selectedMood: string) => {
     setCurrentMood(selectedMood);
@@ -294,47 +297,75 @@ export default function DashboardPage() {
 
         {/* Quick Search & Random Chat */}
         <div className="space-y-3">
-          {/* Live Username Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-4 top-3.5 w-4 h-4 text-pink-400" />
-            <input
-              type="text"
-              placeholder="🔍 Search users..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 rounded-2xl glass-input text-xs text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-2 focus:ring-pink-500/50"
-            />
-          </div>
-
-          {/* Search Results Drawer */}
-          {searchResults.length > 0 && (
-            <div className="p-3 rounded-2xl bg-slate-900/90 border border-pink-500/30 space-y-2 animate-in fade-in duration-200">
-              <span className="text-[11px] font-bold text-pink-300 px-1">Matching Users</span>
-              {searchResults.map((u) => (
-                <div
-                  key={u.id}
-                  className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-between transition-colors"
-                >
-                  <div className="flex items-center space-x-2.5">
-                    <img
-                      src={u.avatarUrl || '/default-avatar.png'}
-                      alt={`Profile picture for ${u.displayName || u.username || 'User'}`}
-                      className="w-8 h-8 rounded-full object-cover bg-slate-800"
-                    />
-                    <div>
-                      <p className="text-xs font-bold text-white">{u.displayName || 'User'}</p>
-                      <p className="text-[10px] text-pink-200/60">{u.isOnline ? 'Online now' : 'Active Member'}</p>
-                    </div>
+          {/* VIP Username Search or Free Locked Indicator */}
+          {isVIP ? (
+            <>
+              {/* Live Username Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-4 top-3.5 w-4 h-4 text-pink-400" />
+                <input
+                  type="text"
+                  placeholder="🔍 Search users..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 rounded-2xl glass-input text-xs text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-2 focus:ring-pink-500/50"
+                />
+                {searching && (
+                  <div className="absolute right-4 top-3.5 text-pink-400">
+                    <Loader2 className="w-4 h-4 animate-spin" />
                   </div>
+                )}
+              </div>
 
-                  <button
-                    onClick={() => handleStartDirectChat(u.username)}
-                    className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs shadow-sm cursor-pointer"
-                  >
-                    Chat
-                  </button>
+              {/* Search Results Drawer */}
+              {searchResults.length > 0 && (
+                <div className="p-3 rounded-2xl bg-slate-900/90 border border-pink-500/30 space-y-2 animate-in fade-in duration-200">
+                  <span className="text-[11px] font-bold text-pink-300 px-1">Matching Users</span>
+                  {searchResults.map((u) => (
+                    <div
+                      key={u.id}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-between transition-colors"
+                    >
+                      <div className="flex items-center space-x-2.5">
+                        <img
+                          src={u.avatarUrl || '/default-avatar.png'}
+                          alt={`Profile picture for ${u.displayName || u.username || 'User'}`}
+                          className="w-8 h-8 rounded-full object-cover bg-slate-800"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-white">{u.displayName || 'User'}</p>
+                          <p className="text-[10px] text-pink-200/60">{u.isOnline ? 'Online now' : 'Active Member'}</p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => handleStartDirectChat(u.username)}
+                        className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs shadow-sm cursor-pointer"
+                      >
+                        Chat
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+            </>
+          ) : (
+            <div className="p-3.5 rounded-2xl glass border border-yellow-500/20 bg-gradient-to-r from-yellow-950/20 via-pink-950/20 to-slate-950/40 flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center shrink-0">
+                  <Crown className="w-4 h-4 text-yellow-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-white">Direct Username Search</p>
+                  <p className="text-[10px] text-pink-200/60">Search &amp; chat directly by username — VIP Exclusive</p>
+                </div>
+              </div>
+              <Link
+                href="/vip"
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-slate-950 font-black text-xs shrink-0 shadow-sm transition-transform active:scale-95 cursor-pointer"
+              >
+                Unlock VIP
+              </Link>
             </div>
           )}
 

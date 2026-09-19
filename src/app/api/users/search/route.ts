@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getCurrentUser } from '@/lib/auth';
+import { requireVipUser } from '@/lib/vipAuth';
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser(req);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { user, response } = await requireVipUser(req);
+    if (response || !user) {
+      return response;
     }
 
     const { searchParams } = new URL(req.url);

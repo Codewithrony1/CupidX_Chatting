@@ -88,7 +88,6 @@ export default function OnboardingPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
-  const [success, setSuccess] = useState(false);
 
   // Check 48-Hour Deletion Lock on Mount
   useEffect(() => {
@@ -169,11 +168,11 @@ export default function OnboardingPage() {
   // If already complete, redirect to dashboard
   useEffect(() => {
     if (!authLoading && user) {
-      if (isProfileComplete && !submitting && !success) {
+      if (isProfileComplete && !submitting) {
         router.replace('/dashboard');
       }
     }
-  }, [user, authLoading, isProfileComplete, submitting, success, router]);
+  }, [user, authLoading, isProfileComplete, submitting, router]);
 
   // Calculated dynamic age
   const dynamicAge = dateOfBirth ? calculateAge(dateOfBirth) : null;
@@ -223,7 +222,7 @@ export default function OnboardingPage() {
       !randomChatAcknowledged ||
       !locationProcessingAcknowledged
     ) {
-      setErrorMsg('Please review and agree to all required terms, privacy, age, and consent items before continuing.');
+      setErrorMsg('Please accept all required confirmations to continue.');
       return;
     }
 
@@ -268,12 +267,8 @@ export default function OnboardingPage() {
         return;
       }
 
-      setSuccess(true);
       await refreshUser();
-
-      setTimeout(() => {
-        router.replace('/dashboard');
-      }, 400);
+      router.replace('/dashboard');
     } catch (err: any) {
       console.error('Onboarding save error:', err);
       setErrorMsg(err?.message || 'Failed to complete profile setup. Please try again.');
@@ -281,7 +276,7 @@ export default function OnboardingPage() {
     }
   };
 
-  if (authLoading || (user && isProfileComplete && !success)) {
+  if (authLoading || (user && isProfileComplete && !submitting)) {
     return (
       <div className="min-h-screen bg-[#0d0014] text-white flex flex-col justify-center items-center p-4 relative overflow-hidden">
         <FloatingHearts />
@@ -329,16 +324,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {success ? (
-          <div className="py-12 text-center space-y-3">
-            <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto animate-bounce">
-              <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-black text-white">Profile ready ✨</h3>
-            <p className="text-xs text-slate-400">Opening your dashboard...</p>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
             
             {/* 0. Choose Username */}
             <div className="space-y-1.5 text-left">
@@ -494,6 +480,13 @@ export default function OnboardingPage() {
                 <span>PRIVACY &amp; CONSENT</span>
               </div>
 
+              {/* Inline Consent Validation Error */}
+              {errorMsg === 'Please accept all required confirmations to continue.' && (
+                <div className="p-3 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-xs text-rose-300 font-bold text-center leading-relaxed animate-in fade-in">
+                  Please accept all required confirmations to continue.
+                </div>
+              )}
+
               <div className="space-y-2.5 text-[11px] sm:text-xs text-pink-100/90 leading-snug">
                 {/* 1. Terms & Conditions */}
                 <label className="flex items-start gap-2.5 cursor-pointer group select-none">
@@ -609,21 +602,14 @@ export default function OnboardingPage() {
             {/* Primary Submit Button */}
             <button
               type="submit"
-              disabled={
-                submitting ||
-                isDeletionLocked ||
-                !displayName.trim() ||
-                !dateOfBirth ||
-                !termsAccepted ||
-                !privacyAcknowledged ||
-                !ageConfirmed ||
-                !randomChatAcknowledged ||
-                !locationProcessingAcknowledged
-              }
-              className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-xl shadow-pink-500/30 flex items-center justify-center space-x-2 text-sm disabled:opacity-40 disabled:pointer-events-none transition-all cursor-pointer active:scale-95"
+              disabled={submitting || isDeletionLocked}
+              className="w-full py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 via-rose-500 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white shadow-xl shadow-pink-500/30 flex items-center justify-center space-x-2 text-sm disabled:opacity-50 transition-all cursor-pointer active:scale-95"
             >
               {submitting ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Verifying...</span>
+                </>
               ) : (
                 <>
                   <span>Continue</span>
@@ -632,7 +618,6 @@ export default function OnboardingPage() {
               )}
             </button>
           </form>
-        )}
 
       </div>
     </div>
