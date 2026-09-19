@@ -266,6 +266,13 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
     });
   }
 
+  console.log('[AUTH:PROVISION] User provisioned/resolved:', {
+    clerkUserIdExists: Boolean(cleanId),
+    usernameExists: Boolean(user?.username),
+    profileExists: Boolean(user?.profile),
+    onboardingCompleted: Boolean(user?.profileCompleted),
+  });
+
   return user;
 }
 

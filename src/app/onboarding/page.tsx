@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
 import { calculateAge } from '@/lib/firestoreUser';
 import { validateDob, MIN_DOB_STRING, getTodayDateString } from '@/lib/validation/dob';
-import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2, Clock } from 'lucide-react';
+import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2, Clock, AtSign } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
 
 export default function OnboardingPage() {
@@ -18,10 +18,61 @@ export default function OnboardingPage() {
   const { user: directClerkUser } = useUser();
   const { getToken } = useClerkAuth();
 
+  const [username, setUsername] = useState('');
+  const [usernameChecking, setUsernameChecking] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [usernameError, setUsernameError] = useState<string>('');
   const [displayName, setDisplayName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say'>('male');
   const [selectedEmoji, setSelectedEmoji] = useState('😊');
+
+  // Real-time Debounced Username Availability Check
+  useEffect(() => {
+    const clean = username.trim().toLowerCase().replace(/^@/, '');
+    if (!clean) {
+      setUsernameAvailable(null);
+      setUsernameError('');
+      return;
+    }
+    if (clean.length < 3) {
+      setUsernameAvailable(false);
+      setUsernameError('Username must be at least 3 characters');
+      return;
+    }
+    if (clean.length > 20) {
+      setUsernameAvailable(false);
+      setUsernameError('Username cannot exceed 20 characters');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(clean)) {
+      setUsernameAvailable(false);
+      setUsernameError('Only letters, numbers, and underscores allowed');
+      return;
+    }
+
+    setUsernameChecking(true);
+    setUsernameError('');
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/auth/onboarding?username=${encodeURIComponent(clean)}`);
+        const data = await res.json().catch(() => ({}));
+        if (data?.available) {
+          setUsernameAvailable(true);
+          setUsernameError('');
+        } else {
+          setUsernameAvailable(false);
+          setUsernameError(data?.reason || 'Username is already taken');
+        }
+      } catch {
+        // network issue
+      } finally {
+        setUsernameChecking(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [username]);
 
   // Consent & Privacy State
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -74,6 +125,16 @@ export default function OnboardingPage() {
       setDisplayName(activeName);
     }
 
+    const suggestedUsername =
+      (user?.username && !user.username.startsWith('user_') && !user.username.includes('_') ? user.username : null) ||
+      (directClerkUser?.username || clerkUser?.username || '') ||
+      (user?.email ? user.email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20) : '') ||
+      '';
+
+    if (suggestedUsername && !username) {
+      setUsername(suggestedUsername);
+    }
+
     if (user) {
       if (user.dateOfBirth || user.profile?.dateOfBirth) {
         setDateOfBirth(user.dateOfBirth || user.profile?.dateOfBirth || '');
@@ -119,6 +180,25 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+    if (!cleanUsername) {
+      setErrorMsg('Please enter a username.');
+      return;
+    }
+    if (cleanUsername.length < 3 || cleanUsername.length > 20) {
+      setErrorMsg('Username must be between 3 and 20 characters.');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+      setErrorMsg('Username can only contain letters, numbers, and underscores.');
+      return;
+    }
+    if (usernameAvailable === false) {
+      setErrorMsg(usernameError || 'Please choose an available username.');
+      return;
+    }
+
     if (!displayName.trim()) {
       setErrorMsg('Please enter your full name.');
       return;
@@ -162,6 +242,7 @@ export default function OnboardingPage() {
         },
         credentials: 'include',
         body: JSON.stringify({
+          username: cleanUsername,
           displayName: displayName.trim(),
           dob: dateOfBirth,
           gender,
@@ -259,6 +340,51 @@ export default function OnboardingPage() {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             
+            {/* 0. Choose Username */}
+            <div className="space-y-1.5 text-left">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">
+                  <AtSign className="w-3.5 h-3.5 text-pink-400" />
+                  <span>USERNAME</span>
+                </label>
+                {usernameChecking && (
+                  <span className="text-[11px] font-semibold text-pink-300 flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Checking...
+                  </span>
+                )}
+                {!usernameChecking && usernameAvailable === true && (
+                  <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Available
+                  </span>
+                )}
+                {!usernameChecking && usernameAvailable === false && (
+                  <span className="text-[11px] font-bold text-rose-400 flex items-center gap-1">
+                    {usernameError || 'Unavailable'}
+                  </span>
+                )}
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-pink-400/80 font-bold text-sm">
+                  @
+                </div>
+                <input
+                  type="text"
+                  required
+                  placeholder="cupid_lover"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
+                  className="w-full pl-8 pr-4 py-3 rounded-2xl glass-input text-xs sm:text-sm text-white placeholder:text-pink-300/40 focus:outline-none focus:ring-1 focus:ring-pink-500 font-semibold lowercase"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  maxLength={20}
+                />
+              </div>
+              <p className="text-[10px] text-pink-200/50">3–20 characters (letters, numbers, and underscores). Your unique handle on CupidX.</p>
+            </div>
+
             {/* 1. Full Name */}
             <div className="space-y-1.5 text-left">
               <label className="text-xs font-bold text-pink-200 flex items-center gap-1.5">

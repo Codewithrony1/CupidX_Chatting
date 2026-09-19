@@ -22,9 +22,16 @@ export async function GET(req: Request) {
       });
     }
 
+    let currentUserId: string | null = null;
+    try {
+      const u = await getCurrentUser(req);
+      if (u) currentUserId = u.id;
+    } catch {}
+
     const existing = await prisma.user.findFirst({
       where: {
         username: cleanUsername,
+        ...(currentUserId ? { NOT: { id: currentUserId } } : {}),
       },
     });
 
@@ -139,6 +146,36 @@ export async function POST(req: Request) {
       );
     }
 
+    // Authoritative Server-side Username Validation
+    const rawUsername = body.username ? String(body.username).trim().toLowerCase().replace(/^@/, '') : null;
+    let finalUsername = user.username;
+
+    if (rawUsername) {
+      const usernameValidation = usernameSchema.safeParse(rawUsername);
+      if (!usernameValidation.success) {
+        return NextResponse.json(
+          { error: usernameValidation.error.issues[0]?.message || 'Invalid username format (3-20 letters, numbers, or underscores).' },
+          { status: 400 }
+        );
+      }
+
+      const existingUserWithUsername = await prisma.user.findFirst({
+        where: {
+          username: rawUsername,
+          NOT: { id: user.id },
+        },
+      });
+
+      if (existingUserWithUsername) {
+        return NextResponse.json(
+          { error: 'Username is already taken. Please choose another username.' },
+          { status: 400 }
+        );
+      }
+
+      finalUsername = rawUsername;
+    }
+
     // Authoritative Server-side Consent Validation
     if (!termsAccepted) {
       return NextResponse.json(
@@ -203,6 +240,7 @@ export async function POST(req: Request) {
       prisma.user.update({
         where: { id: user.id },
         data: {
+          username: finalUsername,
           fullName: cleanDisplayName,
           displayName: cleanDisplayName,
           gender: cleanGender,
@@ -333,6 +371,14 @@ export async function POST(req: Request) {
             privacyVersion: CURRENT_PRIVACY_VERSION,
           },
         });
+
+        if (finalUsername) {
+          await client.users.updateUser(targetClerkId, {
+            username: finalUsername,
+          }).catch((uErr: any) => {
+            console.warn('[ONBOARDING] Clerk username update notice:', uErr?.message || uErr);
+          });
+        }
       }
     } catch (clerkSyncErr) {
       console.warn('Clerk metadata sync notice:', clerkSyncErr);
