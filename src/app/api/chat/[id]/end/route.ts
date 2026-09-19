@@ -54,7 +54,7 @@ export async function POST(
     ]);
 
 
-    // Also sync to Firestore so partner client receives 'ended' status immediately
+    // Also sync to Firestore so partner client receives 'ended' status immediately & delete ephemeral messages
     try {
       const { getAdminDb } = await import('@/lib/firebaseAdmin');
       const adminDb = getAdminDb();
@@ -67,6 +67,14 @@ export async function POST(
           },
           { merge: true }
         );
+
+        // Permanently delete all ephemeral messages from shared store for this session
+        const msgsSnap = await adminDb.collection('matches').doc(chatSessionId).collection('messages').get();
+        if (!msgsSnap.empty) {
+          const batch = adminDb.batch();
+          msgsSnap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit().catch(() => {});
+        }
       }
     } catch (e) {
       console.warn('Firestore end chat sync error:', e);

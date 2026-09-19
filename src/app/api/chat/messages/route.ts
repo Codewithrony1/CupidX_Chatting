@@ -259,7 +259,11 @@ export async function POST(req: Request) {
       },
     });
 
-    // 7. Sync to Firestore matches/{chatSessionId}/messages for sub-50ms push delivery
+    const nowMs = Date.now();
+    const senderDisplayName = user.displayName || user.fullName || user.username || 'Stranger';
+    const messageDocId = message.id || clientMessageId || `msg_${nowMs}`;
+
+    // 7. Sync to shared ephemeral Firestore matches/{chatSessionId}/messages for cross-container synchronization
     try {
       const { getAdminDb } = await import('@/lib/firebaseAdmin');
       const adminDb = getAdminDb();
@@ -268,12 +272,20 @@ export async function POST(req: Request) {
           .collection('matches')
           .doc(chatSessionId)
           .collection('messages')
-          .add({
+          .doc(messageDocId)
+          .set({
+            id: messageDocId,
+            clientMessageId: clientMessageId || messageDocId,
+            chatSessionId,
+            senderId: user.id,
             senderUid: user.id,
-            senderUsername: user.displayName || user.fullName || 'Stranger',
+            senderUsername: senderDisplayName,
             content: (content || '').trim(),
             imageUrl: finalImageUrl,
-            createdAt: Date.now(),
+            sequenceNumber: nowMs,
+            status: 'SENT',
+            deliveredAt: null,
+            createdAt: nowMs,
           });
       }
     } catch (e) {
@@ -402,28 +414,92 @@ export async function GET(req: Request) {
     const partner = isUserA ? session.userB : session.userA;
     const isPartnerVIP = Boolean(partner?.membershipTier === 'VIP' || partner?.is_vip);
 
-    // Filter messages
-    const messageWhere: any = { chatSessionId };
-    if (since) {
-      const sinceDate = new Date(since);
-      if (!isNaN(sinceDate.getTime())) {
-        messageWhere.createdAt = { gt: sinceDate };
+    // 1. Query shared ephemeral Firestore collection first for cross-container serverless synchronization
+    let firestoreMessages: any[] = [];
+    try {
+      const { getAdminDb } = await import('@/lib/firebaseAdmin');
+      const adminDb = getAdminDb();
+      if (adminDb) {
+        const msgsSnap = await adminDb
+          .collection('matches')
+          .doc(chatSessionId)
+          .collection('messages')
+          .orderBy('createdAt', 'asc')
+          .limit(200)
+          .get();
+
+        if (!msgsSnap.empty) {
+          firestoreMessages = msgsSnap.docs.map((docSnap) => {
+            const data = docSnap.data();
+            const createdAtStr =
+              typeof data.createdAt === 'number'
+                ? new Date(data.createdAt).toISOString()
+                : data.createdAt?.toDate
+                ? data.createdAt.toDate().toISOString()
+                : new Date().toISOString();
+
+            return {
+              id: docSnap.id,
+              clientMessageId: data.clientMessageId || docSnap.id,
+              chatSessionId: data.chatSessionId || chatSessionId,
+              senderId: data.senderUid || data.senderId,
+              senderUsername: data.senderUsername || 'Stranger',
+              content: data.content || '',
+              imageUrl: data.imageUrl || null,
+              sequenceNumber: data.sequenceNumber || data.createdAt || 0,
+              status: data.deliveredAt ? 'DELIVERED' : (data.status || 'SENT'),
+              deliveredAt: data.deliveredAt
+                ? typeof data.deliveredAt === 'number'
+                  ? new Date(data.deliveredAt).toISOString()
+                  : data.deliveredAt
+                : null,
+              createdAt: createdAtStr,
+            };
+          });
+        }
       }
+    } catch (fsErr) {
+      console.warn('[MESSAGES_GET] Firestore read notice:', fsErr);
     }
 
-    const rawMessages = await prisma.message.findMany({
-      where: messageWhere,
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-      include: {
-        sender: {
-          select: { username: true, displayName: true, fullName: true },
-        },
-      },
-    });
+    let finalMessages: any[] = [];
+    if (firestoreMessages.length > 0) {
+      finalMessages = firestoreMessages;
+    } else {
+      // 2. Fallback to local SQLite database if Firestore has no records
+      const messageWhere: any = { chatSessionId };
+      if (since) {
+        const sinceDate = new Date(since);
+        if (!isNaN(sinceDate.getTime())) {
+          messageWhere.createdAt = { gt: sinceDate };
+        }
+      }
 
-    // Reverse to return chronologically ascending order (oldest to newest)
-    const messages = rawMessages.reverse();
+      const rawMessages = await prisma.message.findMany({
+        where: messageWhere,
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        include: {
+          sender: {
+            select: { username: true, displayName: true, fullName: true },
+          },
+        },
+      });
+
+      finalMessages = rawMessages.reverse().map((m) => ({
+        id: m.id,
+        clientMessageId: m.clientMessageId,
+        chatSessionId: m.chatSessionId,
+        senderId: m.senderId,
+        senderUsername: m.sender.displayName || m.sender.fullName || m.sender.username || 'Stranger',
+        content: m.content,
+        imageUrl: m.imageUrl,
+        sequenceNumber: m.createdAt.getTime(),
+        status: m.deliveredAt ? 'DELIVERED' : m.status,
+        deliveredAt: m.deliveredAt ? m.deliveredAt.toISOString() : null,
+        createdAt: m.createdAt.toISOString(),
+      }));
+    }
 
     return NextResponse.json({
       success: true,
@@ -439,18 +515,7 @@ export async function GET(req: Request) {
             isVIP: isPartnerVIP,
           }
         : null,
-      messages: messages.map((m) => ({
-        id: m.id,
-        clientMessageId: m.clientMessageId,
-        chatSessionId: m.chatSessionId,
-        senderId: m.senderId,
-        senderUsername: m.sender.displayName || m.sender.fullName || m.sender.username || 'Stranger',
-        content: m.content,
-        imageUrl: m.imageUrl,
-        status: m.deliveredAt ? 'DELIVERED' : m.status,
-        deliveredAt: m.deliveredAt ? m.deliveredAt.toISOString() : null,
-        createdAt: m.createdAt.toISOString(),
-      })),
+      messages: finalMessages,
     });
   } catch (error: any) {
     console.error('Get messages error:', error);

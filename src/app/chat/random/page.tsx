@@ -76,6 +76,7 @@ interface RandomMessage {
   senderUsername: string;
   content: string;
   imageUrl: string | null;
+  sequenceNumber?: number;
   createdAt: string;
   status?: 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED';
   deliveredAt?: string | null;
@@ -87,10 +88,12 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
   msg,
   isMine,
   onImageClick,
+  onRetry,
 }: {
   msg: RandomMessage;
   isMine: boolean;
   onImageClick: (url: string) => void;
+  onRetry?: (msg: RandomMessage) => void;
 }) {
   const formattedTime = useMemo(() => {
     try {
@@ -139,7 +142,18 @@ const RandomChatMessageItem = React.memo(function RandomChatMessageItem({
           <span>{formattedTime}</span>
           {isMine &&
             (msg.status === 'FAILED' ? (
-              <span className="text-rose-300 font-bold" title="Failed">!</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry?.(msg);
+                }}
+                className="inline-flex items-center gap-0.5 text-rose-300 hover:text-rose-200 font-bold cursor-pointer transition-colors"
+                title="Failed to deliver. Click to retry."
+              >
+                <span>!</span>
+                <span className="underline text-[8px]">Retry</span>
+              </button>
             ) : msg.status === 'DELIVERED' ? (
               <span title="Delivered"><CheckCheck className="w-3.5 h-3.5 text-pink-300" /></span>
             ) : msg.status === 'SENT' ? (
@@ -162,6 +176,7 @@ interface RandomChatMessageListProps {
   currentUsername?: string | null;
   partnerTyping: boolean;
   onImageClick: (url: string) => void;
+  onRetry?: (msg: RandomMessage) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -173,6 +188,7 @@ const RandomChatMessageList = React.memo(function RandomChatMessageList({
   currentUsername,
   partnerTyping,
   onImageClick,
+  onRetry,
   scrollRef,
   containerRef,
 }: RandomChatMessageListProps) {
@@ -203,6 +219,7 @@ const RandomChatMessageList = React.memo(function RandomChatMessageList({
             msg={msg}
             isMine={isMine}
             onImageClick={onImageClick}
+            onRetry={onRetry}
           />
         );
       })}
@@ -386,18 +403,29 @@ export default function KnotChatRandomPage() {
       }
 
       setMessages((prev) => {
+        let nextState: RandomMessage[];
         if (message.clientMessageId) {
           const exists = prev.some((m) => m.clientMessageId === message.clientMessageId);
           if (exists) {
-            return prev.map((m) =>
+            nextState = prev.map((m) =>
               m.clientMessageId === message.clientMessageId ? { ...message, status: message.status || 'SENT' } : m
             );
+          } else if (prev.some((m) => m.id === message.id)) {
+            return prev;
+          } else {
+            nextState = [...prev, { ...message, status: message.status || 'SENT' }];
           }
-        }
-        if (prev.some((m) => m.id === message.id)) {
+        } else if (prev.some((m) => m.id === message.id)) {
           return prev;
+        } else {
+          nextState = [...prev, { ...message, status: message.status || 'SENT' }];
         }
-        return [...prev, { ...message, status: message.status || 'SENT' }];
+
+        return nextState.sort((a, b) => {
+          const seqA = a.sequenceNumber || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+          const seqB = b.sequenceNumber || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+          return seqA - seqB;
+        });
       });
 
       // 2. Send Delivery Acknowledgement to sender if message is from partner
@@ -862,6 +890,17 @@ export default function KnotChatRandomPage() {
     setImagePreview(null);
     setSendingMsg(true);
 
+    // 15-second delivery watchdog: If a message is still 'SENDING' after 15s, mark as 'FAILED'
+    setTimeout(() => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          (m.id === tempId || m.clientMessageId === tempId) && m.status === 'SENDING'
+            ? { ...m, status: 'FAILED' as const }
+            : m
+        )
+      );
+    }, 15000);
+
     if (isCurrentlyTypingRef.current) {
       isCurrentlyTypingRef.current = false;
       if (socket && socket.connected) {
@@ -896,12 +935,46 @@ export default function KnotChatRandomPage() {
         }
 
         if (socket && socket.connected) {
-          socket.emit('send_random_message', {
-            chatSessionId: activeMid,
-            content: textToSend,
-            imageUrl: uploadData.imageUrl || null,
-            clientMessageId: tempId,
-          });
+          socket.emit(
+            'send_random_message',
+            {
+              chatSessionId: activeMid,
+              content: textToSend,
+              imageUrl: uploadData.imageUrl || null,
+              clientMessageId: tempId,
+            },
+            (res: any) => {
+              if (res?.success) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.clientMessageId === tempId || m.id === tempId
+                      ? { ...m, id: res.message?.id || tempId, status: 'SENT' as const }
+                      : m
+                  )
+                );
+              } else {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.clientMessageId === tempId || m.id === tempId
+                      ? { ...m, status: 'FAILED' as const }
+                      : m
+                  )
+                );
+              }
+            }
+          );
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempId
+                ? {
+                    ...m,
+                    id: uploadData.message?.id || tempId,
+                    status: 'SENT' as const,
+                  }
+                : m
+            )
+          );
         }
       } else {
         if (socket && socket.connected) {
@@ -913,8 +986,28 @@ export default function KnotChatRandomPage() {
               clientMessageId: tempId,
             },
             (res: any) => {
-              if (res?.error) {
-                console.warn('Socket message notice:', res.error);
+              if (res?.success) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.clientMessageId === tempId || m.id === tempId
+                      ? {
+                          ...m,
+                          id: res.message?.id || tempId,
+                          sequenceNumber: res.message?.sequenceNumber || Date.now(),
+                          status: 'SENT' as const,
+                        }
+                      : m
+                  )
+                );
+              } else {
+                console.warn('[RANDOM_CHAT] Socket message send error:', res?.error);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.clientMessageId === tempId || m.id === tempId
+                      ? { ...m, status: 'FAILED' as const }
+                      : m
+                  )
+                );
               }
             }
           );
@@ -939,12 +1032,23 @@ export default function KnotChatRandomPage() {
             const postData = await postRes.json().catch(() => ({}));
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === tempId
+                m.id === tempId || m.clientMessageId === tempId
                   ? {
                       ...m,
                       id: postData.message?.id || tempId,
+                      sequenceNumber: postData.message?.sequenceNumber || Date.now(),
                       status: 'SENT' as const,
                     }
+                  : m
+              )
+            );
+          } else {
+            const errData = await postRes.json().catch(() => ({}));
+            console.warn('[RANDOM_CHAT] Message send failed:', errData?.error);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === tempId || m.clientMessageId === tempId
+                  ? { ...m, status: 'FAILED' as const }
                   : m
               )
             );
@@ -954,12 +1058,130 @@ export default function KnotChatRandomPage() {
     } catch (err: any) {
       console.warn('Send message notice:', err?.message || err);
       setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? { ...m, status: 'FAILED' as const } : m))
+        prev.map((m) => (m.id === tempId || m.clientMessageId === tempId ? { ...m, status: 'FAILED' as const } : m))
       );
     } finally {
       setSendingMsg(false);
     }
   };
+
+  // ─── RETRY FAILED MESSAGE ──────────────────────────────────────────────────
+  const handleRetryMessage = useCallback(
+    async (failedMsg: RandomMessage) => {
+      const activeMid = activeMatchIdRef.current || matchId;
+      if (!activeMid || matchStatus !== 'connected') return;
+
+      const retryKey = failedMsg.clientMessageId || failedMsg.id;
+
+      // Set status back to SENDING
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === failedMsg.id || m.clientMessageId === retryKey
+            ? { ...m, status: 'SENDING' as const }
+            : m
+        )
+      );
+
+      // 15-second retry watchdog
+      setTimeout(() => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            (m.id === retryKey || m.clientMessageId === retryKey) && m.status === 'SENDING'
+              ? { ...m, status: 'FAILED' as const }
+              : m
+          )
+        );
+      }, 15000);
+
+      try {
+        if (socket && socket.connected) {
+          socket.emit(
+            'send_random_message',
+            {
+              chatSessionId: activeMid,
+              content: failedMsg.content,
+              imageUrl: failedMsg.imageUrl,
+              clientMessageId: retryKey,
+            },
+            (res: any) => {
+              if (res?.success) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === failedMsg.id || m.clientMessageId === retryKey
+                      ? {
+                          ...m,
+                          id: res.message?.id || failedMsg.id,
+                          sequenceNumber: res.message?.sequenceNumber || Date.now(),
+                          status: 'SENT' as const,
+                        }
+                      : m
+                  )
+                );
+              } else {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === failedMsg.id || m.clientMessageId === retryKey
+                      ? { ...m, status: 'FAILED' as const }
+                      : m
+                  )
+                );
+              }
+            }
+          );
+        } else {
+          const token = await getToken().catch(() => null);
+          const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+          const postRes = await fetch('/api/chat/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+            },
+            body: JSON.stringify({
+              chatSessionId: activeMid,
+              content: failedMsg.content,
+              imageUrl: failedMsg.imageUrl,
+              clientMessageId: retryKey,
+            }),
+          });
+
+          if (postRes.ok) {
+            const postData = await postRes.json().catch(() => ({}));
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === failedMsg.id || m.clientMessageId === retryKey
+                  ? {
+                      ...m,
+                      id: postData.message?.id || failedMsg.id,
+                      sequenceNumber: postData.message?.sequenceNumber || Date.now(),
+                      status: 'SENT' as const,
+                    }
+                  : m
+              )
+            );
+          } else {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === failedMsg.id || m.clientMessageId === retryKey
+                  ? { ...m, status: 'FAILED' as const }
+                  : m
+              )
+            );
+          }
+        }
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === failedMsg.id || m.clientMessageId === retryKey
+              ? { ...m, status: 'FAILED' as const }
+              : m
+          )
+        );
+      }
+    },
+    [socket, matchId, matchStatus, getToken, currentUser]
+  );
 
   // ─── Realtime HTTP Message & Session Sync (when socket is disconnected) ────
   useEffect(() => {
@@ -1028,7 +1250,7 @@ export default function KnotChatRandomPage() {
                 }).catch(() => {});
               });
 
-              return [
+              const allMerged = [
                 ...updated,
                 ...newMsgs.map((m: any) => ({
                   id: m.id,
@@ -1038,11 +1260,20 @@ export default function KnotChatRandomPage() {
                   senderUsername: m.senderUsername || 'Stranger',
                   content: m.content,
                   imageUrl: m.imageUrl,
+                  sequenceNumber: m.sequenceNumber || (m.createdAt ? new Date(m.createdAt).getTime() : 0),
                   createdAt: m.createdAt,
                   status: (m.status || 'SENT') as any,
                   deliveredAt: m.deliveredAt,
                 })),
               ];
+
+              allMerged.sort((a, b) => {
+                const seqA = a.sequenceNumber || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+                const seqB = b.sequenceNumber || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+                return seqA - seqB;
+              });
+
+              return allMerged;
             });
           }
         }
@@ -1426,6 +1657,7 @@ export default function KnotChatRandomPage() {
               currentUsername={currentUser?.username}
               partnerTyping={partnerTyping}
               onImageClick={handleImageClick}
+              onRetry={handleRetryMessage}
               scrollRef={messagesEndRef}
               containerRef={chatScrollContainerRef}
             />

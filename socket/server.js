@@ -834,6 +834,7 @@ io.on('connection', async (socket) => {
       senderUsername: username,
       content: (content || '').trim(),
       imageUrl: imageUrl || null,
+      sequenceNumber: Date.now(),
       createdAt: new Date().toISOString(),
       status: 'SENT',
     };

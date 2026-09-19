@@ -17,27 +17,67 @@ export async function POST(req: Request) {
     }
 
     const now = new Date();
+    const nowIso = now.toISOString();
 
-    const message = await prisma.message.findFirst({
-      where: {
-        OR: [
-          ...(messageId ? [{ id: messageId }] : []),
-          ...(clientMessageId ? [{ clientMessageId }] : []),
-        ],
-        ...(chatSessionId ? { chatSessionId } : {}),
-      },
-    });
-
-    if (message && !message.deliveredAt) {
-      await prisma.message.update({
-        where: { id: message.id },
-        data: { deliveredAt: now },
+    // 1. Update local database if record is present on this container
+    try {
+      const message = await prisma.message.findFirst({
+        where: {
+          OR: [
+            ...(messageId ? [{ id: messageId }] : []),
+            ...(clientMessageId ? [{ clientMessageId }] : []),
+          ],
+          ...(chatSessionId ? { chatSessionId } : {}),
+        },
       });
+
+      if (message && !message.deliveredAt) {
+        await prisma.message.update({
+          where: { id: message.id },
+          data: { deliveredAt: now },
+        });
+      }
+    } catch (dbErr) {
+      console.warn('[ACK_ROUTE] Local DB ack update notice:', dbErr);
+    }
+
+    // 2. Update shared ephemeral Firestore document for cross-container synchronization
+    if (chatSessionId) {
+      try {
+        const { getAdminDb } = await import('@/lib/firebaseAdmin');
+        const adminDb = getAdminDb();
+        if (adminDb) {
+          const messagesCol = adminDb.collection('matches').doc(chatSessionId).collection('messages');
+          
+          if (messageId) {
+            const docRef = messagesCol.doc(messageId);
+            const docSnap = await docRef.get();
+            if (docSnap.exists) {
+              await docRef.update({
+                status: 'DELIVERED',
+                deliveredAt: nowIso,
+              });
+            }
+          }
+
+          if (clientMessageId) {
+            const querySnap = await messagesCol.where('clientMessageId', '==', clientMessageId).limit(1).get();
+            if (!querySnap.empty) {
+              await querySnap.docs[0].ref.update({
+                status: 'DELIVERED',
+                deliveredAt: nowIso,
+              });
+            }
+          }
+        }
+      } catch (fsErr) {
+        console.warn('[ACK_ROUTE] Firestore ack sync error:', fsErr);
+      }
     }
 
     return NextResponse.json({
       success: true,
-      deliveredAt: now.toISOString(),
+      deliveredAt: nowIso,
     });
   } catch (error: any) {
     console.error('Ack message error:', error);
