@@ -90,6 +90,48 @@ export async function POST(req: Request) {
       },
     });
 
+    // AI moderation is intentionally asynchronous so report submission stays fast.
+    setImmediate(async () => {
+      try {
+        // Reuse the backend moderation agent; it is never exposed to the client.
+        const { analyzeMessage, recordModerationEvent } = require('../../../../../socket/moderation');
+        const contextText = snapshotMessages
+          ? JSON.parse(snapshotMessages)
+              .slice(-20)
+              .map((m: any) => String(m.content || ''))
+              .filter(Boolean)
+              .join('\n')
+          : reason;
+        const result = await analyzeMessage(contextText, {
+          reportCount: await prisma.report.count({ where: { reportedUserId: targetUserId } }).catch(() => 1),
+          recentMessageCount: snapshotMessages ? JSON.parse(snapshotMessages).length : 0,
+          reportReason: reason,
+        });
+        const action = result.risk === 'CRITICAL'
+          ? 'FLAGGED_CRITICAL'
+          : result.risk === 'HIGH_RISK'
+            ? 'FLAGGED_FOR_ADMIN_REVIEW'
+            : result.risk === 'MEDIUM_RISK'
+              ? 'MONITOR'
+              : 'NONE';
+
+        await recordModerationEvent(prisma, {
+          userId: targetUserId,
+          matchId: chatSessionId || null,
+          messageId: null,
+          category: result.category,
+          severity: result.risk,
+          risk: result.risk,
+          confidence: result.confidence,
+          recommendedAction: result.recommendedAction,
+          action,
+          reason: `Report: ${String(reason).slice(0, 500)}`,
+        });
+      } catch (moderationError) {
+        console.warn('[REPORT_MODERATION] Async analysis failed:', moderationError?.message || moderationError);
+      }
+    });
+
     return NextResponse.json({
       message: 'Report submitted successfully. Conversation snapshot captured for review.',
       report,
