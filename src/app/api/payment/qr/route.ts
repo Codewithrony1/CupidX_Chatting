@@ -30,11 +30,11 @@ export async function GET() {
 
     const settingsMap = new Map(settings.map((s) => [s.key, s.value]));
 
-    const paymentQrUrlIndia = settingsMap.get('paymentQrUrlIndia') || '/uploads/qr/payment-qr-india.jpg';
+    const paymentQrUrlIndia = settingsMap.get('paymentQrUrlIndia') || '/uploads/qr/29.jpeg';
     const paymentQrUrlIndiaWeekly = settingsMap.get('paymentQrUrlIndiaWeekly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaMonthly = settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaThreeMonths = settingsMap.get('paymentQrUrlIndiaThreeMonths') || settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
-    const paymentQrUrlIndiaYearly = settingsMap.get('paymentQrUrlIndiaYearly') || '/uploads/qr/payment-qr-india-yearly.jpg';
+    const paymentQrUrlIndiaYearly = settingsMap.get('paymentQrUrlIndiaYearly') || '/uploads/qr/399qr.jpeg';
     const paymentQrUrlInternational = settingsMap.get('paymentQrUrlInternational') || '/lexino-qr.jpg';
     const storedMerchantUpiId = settingsMap.get('merchantUpiId');
     const merchantUpiId = storedMerchantUpiId && storedMerchantUpiId !== LEGACY_MERCHANT_UPI_ID
@@ -97,9 +97,9 @@ export async function GET() {
     console.error('Error fetching payment QR settings:', error);
     return NextResponse.json({
       success: true,
-      paymentQrUrlIndia: '/uploads/qr/payment-qr-india.jpg',
-      paymentQrUrlIndiaMonthly: '/uploads/qr/payment-qr-india.jpg',
-      paymentQrUrlIndiaYearly: '/uploads/qr/payment-qr-india-yearly.jpg',
+      paymentQrUrlIndia: '/uploads/qr/29.jpeg',
+      paymentQrUrlIndiaMonthly: '/uploads/qr/29.jpeg',
+      paymentQrUrlIndiaYearly: '/uploads/qr/399qr.jpeg',
       paymentQrUrlInternational: '/lexino-qr.jpg',
       merchantUpiId: DEFAULT_MERCHANT_UPI_ID,
       merchantName: 'CupidX Chat',
@@ -110,9 +110,9 @@ export async function GET() {
           monthly: 29,
           threeMonths: 99,
           yearly: 399,
-          qrMonthly: '/uploads/qr/payment-qr-india.jpg',
-          qrThreeMonths: '/uploads/qr/payment-qr-india.jpg',
-          qrYearly: '/uploads/qr/payment-qr-india-yearly.jpg',
+          qrMonthly: '/uploads/qr/29.jpeg',
+          qrThreeMonths: '/uploads/qr/29.jpeg',
+          qrYearly: '/uploads/qr/399qr.jpeg',
         },
         international: {
           currency: 'USD',
