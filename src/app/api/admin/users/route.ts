@@ -14,7 +14,8 @@ export async function GET(req: Request) {
     const search = (searchParams.get('search') || '').toLowerCase().trim();
     const planFilter = (searchParams.get('plan') || 'all').toLowerCase();
 
-    // Fetch Database Users
+    // Fetch every local user. Clerk is the canonical identity source; linked Clerk IDs/emails are
+    // already persisted by getCurrentUser/getOrCreateUserFromClerk during authenticated activity.
     const localUsers = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
