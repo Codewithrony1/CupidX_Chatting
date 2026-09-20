@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
+const DEFAULT_MERCHANT_UPI_ID = 'sumitpornsware@fam';
+const LEGACY_MERCHANT_UPI_ID = 'cupidxchat@upi';
+
 export async function GET() {
   try {
     const settings = await prisma.appSetting.findMany({
@@ -31,7 +34,19 @@ export async function GET() {
     const paymentQrUrlIndiaMonthly = settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaYearly = settingsMap.get('paymentQrUrlIndiaYearly') || '/uploads/qr/payment-qr-india-199.jpg';
     const paymentQrUrlInternational = settingsMap.get('paymentQrUrlInternational') || '/lexino-qr.jpg';
-    const merchantUpiId = settingsMap.get('merchantUpiId') || process.env.MERCHANT_UPI_ID || 'cupidxchat@upi';
+    const storedMerchantUpiId = settingsMap.get('merchantUpiId');
+    const merchantUpiId = storedMerchantUpiId && storedMerchantUpiId !== LEGACY_MERCHANT_UPI_ID
+      ? storedMerchantUpiId
+      : (process.env.MERCHANT_UPI_ID || DEFAULT_MERCHANT_UPI_ID);
+
+    // Migrate the legacy UPI ID once so future requests and the admin UI use the new account.
+    if (!storedMerchantUpiId || storedMerchantUpiId === LEGACY_MERCHANT_UPI_ID) {
+      await prisma.appSetting.upsert({
+        where: { key: 'merchantUpiId' },
+        update: { value: merchantUpiId },
+        create: { key: 'merchantUpiId', value: merchantUpiId },
+      });
+    }
     const merchantName = settingsMap.get('merchantName') || 'CupidX Chat';
 
     const indiaPriceMonthly = parseFloat(settingsMap.get('indiaPriceMonthly') || '29');
@@ -84,7 +99,7 @@ export async function GET() {
       paymentQrUrlIndiaMonthly: '/uploads/qr/payment-qr-india.jpg',
       paymentQrUrlIndiaYearly: '/uploads/qr/payment-qr-india-199.jpg',
       paymentQrUrlInternational: '/lexino-qr.jpg',
-      merchantUpiId: 'cupidxchat@upi',
+      merchantUpiId: DEFAULT_MERCHANT_UPI_ID,
       merchantName: 'CupidX Chat',
       pricing: {
         india: {
