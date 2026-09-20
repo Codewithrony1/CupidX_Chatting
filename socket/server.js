@@ -930,7 +930,7 @@ io.on('connection', async (socket) => {
   });
 
   // ── Event: Send Random Message ─────────────────────────────────────────────
-  socket.on('send_random_message', (data, callback) => {
+  socket.on('send_random_message', async (data, callback) => {
     const matchId = userActiveMatch.get(userId);
     if (!matchId) {
       if (typeof callback === 'function') callback({ error: 'No active chat session found.', code: 'SESSION_EXPIRED' });
