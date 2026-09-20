@@ -28,12 +28,15 @@ export async function GET(req: Request) {
     });
 
     let mergedUsers = localUsers.map((u) => {
+      // Keep the admin response type stable even if a cached/generated Prisma client
+      // is temporarily behind the current schema. clerkUserId is optional by design.
+      const clerkUserId = (u as { clerkUserId?: string | null }).clerkUserId ?? null;
       const isVip = u.is_vip || u.membershipTier === 'VIP' || (u.subscription?.isActive === true && u.subscription?.plan === 'VIP');
 
       return {
         id: u.id,
         firebaseUid: u.firebaseUid,
-        clerkUserId: u.clerkUserId || null,
+        clerkUserId,
         username: u.username || 'user',
         vipUsername: u.vipUsername || null,
         vipUsernameClaimedAt: u.vipUsernameClaimedAt || null,
