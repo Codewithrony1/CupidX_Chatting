@@ -54,10 +54,10 @@ export default function SelfHostedVipModal({
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | '3months' | 'yearly'>(defaultPlan);
 
   // Dynamic QR & Pricing configs from server
-  const [paymentQrUrlIndia, setPaymentQrUrlIndia] = useState<string>('/uploads/qr/payment-qr-india.jpg');
-  const [paymentQrUrlIndiaMonthly, setPaymentQrUrlIndiaMonthly] = useState<string>('/uploads/qr/payment-qr-india.jpg');
-  const [paymentQrUrlIndiaThreeMonths, setPaymentQrUrlIndiaThreeMonths] = useState<string>('/uploads/qr/payment-qr-india.jpg');
-  const [paymentQrUrlIndiaYearly, setPaymentQrUrlIndiaYearly] = useState<string>('/uploads/qr/payment-qr-india-yearly.jpg');
+  const [paymentQrUrlIndia, setPaymentQrUrlIndia] = useState<string>('/uploads/qr/29.jpeg');
+  const [paymentQrUrlIndiaMonthly, setPaymentQrUrlIndiaMonthly] = useState<string>('/uploads/qr/29.jpeg');
+  const [paymentQrUrlIndiaThreeMonths, setPaymentQrUrlIndiaThreeMonths] = useState<string>('/uploads/qr/99qr.jpeg');
+  const [paymentQrUrlIndiaYearly, setPaymentQrUrlIndiaYearly] = useState<string>('/uploads/qr/399qr.jpeg');
   const [paymentQrUrlInternational, setPaymentQrUrlInternational] = useState<string>('/lexino-qr.jpg');
   const [merchantUpiId, setMerchantUpiId] = useState<string>('sumitpornsware@fam');
   const [merchantName, setMerchantName] = useState<string>('CupidX Chat');
