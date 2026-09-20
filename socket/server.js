@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
 const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
+const { analyzeMessage, recordModerationEvent } = require('./moderation');
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
@@ -72,6 +73,19 @@ const userActiveMatch = new Map();
 const reconnectGraceTimers = new Map();
 // 60-second Anti-Rematch Exclusions: pairHash -> expiresAt (timestamp in ms)
 const rematchExclusions = new Map();
+const matchmakingTokens = new Map();
+const matchmakingStates = new Map();
+const recentMatchMessageCounts = new Map();
+
+function nextMatchmakingToken(userId) {
+  const next = (matchmakingTokens.get(userId) || 0) + 1;
+  matchmakingTokens.set(userId, next);
+  return next;
+}
+
+function isCurrentQueueCandidate(candidate) {
+  return Boolean(candidate && userSockets.has(candidate.userId) && matchmakingTokens.get(candidate.userId) === candidate.searchToken && matchmakingStates.get(candidate.userId) === 'SEARCHING' && !userActiveMatch.has(candidate.userId));
+}
 
 function getRematchPairHash(u1, u2) {
   const [first, second] = [String(u1), String(u2)].sort();
@@ -527,6 +541,15 @@ function processMatchQueue() {
       (c) => c.userId !== candidateA.userId && c.userId !== candidateB.userId
     );
 
+    if (!isCurrentQueueCandidate(candidateA) || !isCurrentQueueCandidate(candidateB)) {
+      randomMatchQueue = randomMatchQueue.filter((c) => isCurrentQueueCandidate(c));
+      if (randomMatchQueue.length >= 2) setImmediate(processMatchQueue);
+      return;
+    }
+
+    matchmakingStates.set(candidateA.userId, 'MATCHED');
+    matchmakingStates.set(candidateB.userId, 'MATCHED');
+
     const matchId = `match_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const roomId = `room_${matchId}`;
 
@@ -727,6 +750,9 @@ function teardownMatch(matchId, reason, triggeringUserId) {
   }
 
   activeMatches.delete(matchId);
+  recentMatchMessageCounts.delete(matchId);
+  matchmakingStates.set(userA.userId, 'IDLE');
+  matchmakingStates.set(userB.userId, 'IDLE');
   userActiveMatch.delete(userA.userId);
   userActiveMatch.delete(userB.userId);
 
@@ -871,8 +897,11 @@ io.on('connection', async (socket) => {
       countryName: country.countryName,
       countryFlag: country.countryFlag,
       joinTime: Date.now(),
+      searchToken: nextMatchmakingToken(userId),
     };
 
+    matchmakingStates.set(userId, 'SEARCHING');
+    matchmakingStates.set(userId, 'SEARCHING');
     const existingIdx = randomMatchQueue.findIndex((c) => c.userId === userId);
     if (existingIdx !== -1) {
       randomMatchQueue[existingIdx] = candidate;
@@ -887,6 +916,8 @@ io.on('connection', async (socket) => {
 
   // ── Event: Leave Random Queue ──────────────────────────────────────────────
   socket.on('leave_random_queue', () => {
+    nextMatchmakingToken(userId);
+    matchmakingStates.set(userId, 'IDLE');
     randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
     console.log(`[QUEUE_LEAVE] User ${userId} left queue. Total in queue: ${randomMatchQueue.length}`);
     socket.emit('queue_left');
@@ -942,6 +973,38 @@ io.on('connection', async (socket) => {
     };
 
     io.to(match.roomId).emit('receive_random_message', messageObj);
+    recentMatchMessageCounts.set(matchId, (recentMatchMessageCounts.get(matchId) || 0) + 1);
+    setImmediate(async () => {
+      try {
+        const result = await analyzeMessage(messageObj.content, {
+          recentMessageCount: recentMatchMessageCounts.get(matchId) || 0,
+          reportCount: await prisma.report.count({ where: { reportedUserId: userId } }).catch(() => 0),
+          matchId,
+        });
+        const action = result.risk === 'CRITICAL' ? 'MATCH_TERMINATED_PENDING_REVIEW' : result.risk === 'HIGH_RISK' ? 'FLAGGED_FOR_ADMIN_REVIEW' : result.risk === 'MEDIUM_RISK' ? 'MONITOR' : 'NONE';
+        await recordModerationEvent(prisma, {
+          userId,
+          matchId,
+          messageId: messageObj.id,
+          category: result.category,
+          severity: result.risk,
+          risk: result.risk,
+          confidence: result.confidence,
+          recommendedAction: result.recommendedAction,
+          action,
+          reason: result.reason || null,
+        });
+        console.log('[MODERATION_MESSAGE_ANALYZED]', { userId, matchId, risk: result.risk, category: result.category, confidence: result.confidence });
+        if (result.risk === 'CRITICAL') {
+          if (activeMatches.has(matchId)) teardownMatch(matchId, 'moderation_critical', userId);
+          if (process.env.CUPIDX_AUTO_SUSPEND_CRITICAL === 'true' && result.confidence >= 0.92) {
+            await prisma.user.update({ where: { id: userId }, data: { isSuspended: true } }).catch(() => {});
+          }
+        }
+      } catch (moderationError) {
+        console.warn('[MODERATION] Async analysis failed:', moderationError?.message || moderationError);
+      }
+    });
     console.log(`[MESSAGE_SENT] User ${userId} in room ${match.roomId} (Session: ${matchId})`);
 
     if (typeof callback === 'function') {
@@ -981,6 +1044,8 @@ io.on('connection', async (socket) => {
 
   // ── Event: Next Partner (Instant skip & re-queue with 60s anti-rematch) ────
   socket.on('next_partner', async (preferences = {}) => {
+    nextMatchmakingToken(userId);
+    matchmakingStates.set(userId, 'DISCONNECTING');
     const currentMatchId = userActiveMatch.get(userId);
     if (currentMatchId) {
       console.log(`[NEXT] User ${userId} skipped match ${currentMatchId}`);
@@ -1034,12 +1099,15 @@ io.on('connection', async (socket) => {
 
   // ── Event: End Random Chat ─────────────────────────────────────────────────
   socket.on('end_random_chat', () => {
+    nextMatchmakingToken(userId);
+    matchmakingStates.set(userId, 'DISCONNECTING');
     const currentMatchId = userActiveMatch.get(userId);
     if (currentMatchId) {
       console.log(`[SESSION_CLEANUP] User ${userId} requested chat end for match ${currentMatchId}`);
       teardownMatch(currentMatchId, 'chat_ended', userId);
     }
     randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
+    matchmakingStates.set(userId, 'IDLE');
     socket.emit('chat_ended_confirm');
   });
 
@@ -1235,6 +1303,8 @@ io.on('connection', async (socket) => {
 
   // ── Disconnect Handler with 10-Second Grace Period ─────────────────────────
   socket.on('disconnect', () => {
+    nextMatchmakingToken(userId);
+    matchmakingStates.set(userId, 'DISCONNECTING');
     socketToUser.delete(socket.id);
 
     const userSocketSet = userSockets.get(userId);
