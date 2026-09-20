@@ -4,7 +4,7 @@ import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
 import { isVipAvatar } from '@/lib/avatars';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { validateDob } from '@/lib/validation/dob';
-import { saveBase64Image } from '@/lib/safeImageUpload';
+import { saveBase64Image, deleteStoredImage } from '@/lib/safeImageUpload';
 import { isUserVip, DEFAULT_BIO } from '@/lib/vipAuth';
 import fs from 'fs/promises';
 import path from 'path';
@@ -264,9 +264,14 @@ export async function PUT(req: Request) {
     let avatarUrl = avatarUrlPreset !== undefined ? avatarUrlPreset : undefined;
 
     if (isUpdatingVIPAvatarImage && isVIP && avatarData) {
+      const previousAvatarUrl = user.profile?.avatarUrl || null;
       const uploadRes = await saveBase64Image(avatarData, 'uploads', user.username);
       if (uploadRes.success && uploadRes.url) {
         avatarUrl = uploadRes.url;
+        // Remove the previous custom avatar after the new image is safely stored.
+        if (previousAvatarUrl && previousAvatarUrl !== avatarUrl) {
+          await deleteStoredImage(previousAvatarUrl);
+        }
       } else {
         return NextResponse.json(
           { error: uploadRes.error || 'Failed to process avatar image.' },
