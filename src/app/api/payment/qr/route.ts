@@ -33,7 +33,7 @@ export async function GET() {
     const paymentQrUrlIndia = settingsMap.get('paymentQrUrlIndia') || '/uploads/qr/29.jpeg';
     const paymentQrUrlIndiaWeekly = settingsMap.get('paymentQrUrlIndiaWeekly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaMonthly = settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
-    const paymentQrUrlIndiaThreeMonths = settingsMap.get('paymentQrUrlIndiaThreeMonths') || settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
+    const paymentQrUrlIndiaThreeMonths = settingsMap.get('paymentQrUrlIndiaThreeMonths') || '/uploads/qr/99qr.jpeg';
     const paymentQrUrlIndiaYearly = settingsMap.get('paymentQrUrlIndiaYearly') || '/uploads/qr/399qr.jpeg';
     const paymentQrUrlInternational = settingsMap.get('paymentQrUrlInternational') || '/lexino-qr.jpg';
     const storedMerchantUpiId = settingsMap.get('merchantUpiId');
@@ -111,7 +111,7 @@ export async function GET() {
           threeMonths: 99,
           yearly: 399,
           qrMonthly: '/uploads/qr/29.jpeg',
-          qrThreeMonths: '/uploads/qr/29.jpeg',
+          qrThreeMonths: '/uploads/qr/99qr.jpeg',
           qrYearly: '/uploads/qr/399qr.jpeg',
         },
         international: {
