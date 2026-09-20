@@ -52,7 +52,6 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
       OR: [
         { clerkUserId: cleanId },
         { id: cleanId },
-        { firebaseUid: cleanId },
       ],
     },
     include: {
