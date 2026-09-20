@@ -10,7 +10,9 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'cupidx_jwt_ultra_secret_key_2026_change_in_production';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET is required in production.');
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'cupidx-development-only-secret';
 const PORT = process.env.SOCKET_PORT || 3001;
 const CLIENT_URL = process.env.NEXT_PUBLIC_CLIENT_URL || 'http://localhost:3000';
 
@@ -349,10 +351,9 @@ const server = http.createServer((req, res) => {
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('cupidxchat.in')) {
-        return callback(null, true);
-      }
-      return callback(null, true);
+      const allowedOrigins = new Set(['https://cupidxchat.in','https://www.cupidxchat.in',CLIENT_URL,'http://localhost:3000','http://127.0.0.1:3000']);
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      return callback(new Error('Origin not allowed'));
     },
     methods: ['GET', 'POST'],
     credentials: true,
@@ -383,7 +384,7 @@ io.use((socket, next) => {
       return next(new Error('Authentication token required'));
     }
 
-    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    jwt.verify(token, EFFECTIVE_JWT_SECRET, (err, decoded) => {
       if (err) {
         if (isTest && testUserId) {
           socket.user = {
@@ -955,73 +956,85 @@ io.on('connection', async (socket) => {
     }
 
     const { content, imageUrl, clientMessageId } = data || {};
-    if (!content && !imageUrl) {
+    const normalizedContent = typeof content === 'string' ? content.trim() : '';
+    const normalizedImageUrl = typeof imageUrl === 'string' && imageUrl.trim() ? imageUrl.trim() : null;
+    if (!normalizedContent && !normalizedImageUrl) {
       if (typeof callback === 'function') callback({ error: 'Content or image is required.' });
+      return;
+    }
+    if (normalizedContent.length > 2000) {
+      if (typeof callback === 'function') callback({ error: 'Message exceeds the 2000 character limit.', code: 'MESSAGE_TOO_LONG' });
+      return;
+    }
+
+    const senderData = await getCachedUserData(userId);
+    if (normalizedImageUrl && !senderData.isVIP) {
+      if (typeof callback === 'function') callback({ error: 'Image sharing is a VIP feature.', code: 'VIP_REQUIRED' });
       return;
     }
 
     const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+    const recentCount = (recentMatchMessageCounts.get(matchId) || 0) + 1;
+    let result = { risk: 'SAFE', category: 'SAFE', confidence: 0, recommendedAction: 'NONE', reason: null };
+
+    try {
+      const [reportCount, priorHighRiskCount] = await Promise.all([
+        prisma.report.count({ where: { reportedUserId: userId } }).catch(() => 0),
+        prisma.moderationEvent.count({
+          where: { userId, risk: { in: ['HIGH_RISK', 'CRITICAL'] }, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
+        }).catch(() => 0),
+      ]);
+      result = await analyzeMessage(normalizedContent, { recentMessageCount: recentCount, reportCount, priorHighRiskCount, matchId });
+    } catch (moderationError) {
+      console.warn('[MODERATION] Pre-delivery analysis failed:', moderationError?.message || moderationError);
+    }
+
+    if (result.risk === 'HIGH_RISK' || result.risk === 'CRITICAL') {
+      const action = result.risk === 'CRITICAL' ? 'MATCH_TERMINATED_PENDING_REVIEW' : 'FLAGGED_FOR_ADMIN_REVIEW';
+      recordModerationEvent(prisma, {
+        userId, matchId, messageId: clientMessageId || `blocked_${Date.now()}`,
+        category: result.category, severity: result.risk, risk: result.risk,
+        confidence: result.confidence, recommendedAction: result.recommendedAction,
+        action, reason: result.reason || null,
+      }).catch(() => {});
+      if (result.risk === 'CRITICAL' && activeMatches.has(matchId)) teardownMatch(matchId, 'moderation_critical', userId);
+      if (result.risk === 'CRITICAL' && process.env.CUPIDX_AUTO_SUSPEND_CRITICAL === 'true' && result.confidence >= 0.92) {
+        await prisma.user.update({ where: { id: userId }, data: { isSuspended: true } }).catch(() => {});
+        userCache.delete(userId);
+      }
+      if (typeof callback === 'function') callback({ error: 'Message blocked by CupidX safety moderation.', code: 'MESSAGE_BLOCKED', risk: result.risk, category: result.category });
+      return;
+    }
 
     const messageObj = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       clientMessageId: clientMessageId || null,
-      chatSessionId: matchId,
-      matchId,
-      senderId: userId,
-      recipientId: partnerId,
-      senderUsername: username,
-      content: (content || '').trim(),
-      imageUrl: imageUrl || null,
-      sequenceNumber: Date.now(),
-      createdAt: new Date().toISOString(),
-      status: 'SENT',
+      chatSessionId: matchId, matchId, senderId: userId, recipientId: partnerId,
+      senderUsername: username, content: normalizedContent, imageUrl: normalizedImageUrl,
+      sequenceNumber: Date.now(), createdAt: new Date().toISOString(), status: 'SENT',
     };
 
-    io.to(match.roomId).emit('receive_random_message', messageObj);
-    recentMatchMessageCounts.set(matchId, (recentMatchMessageCounts.get(matchId) || 0) + 1);
-    setImmediate(async () => {
-      try {
-        const [reportCount, priorHighRiskCount] = await Promise.all([
-          prisma.report.count({ where: { reportedUserId: userId } }).catch(() => 0),
-          prisma.moderationEvent.count({
-            where: {
-              userId,
-              risk: { in: ['HIGH_RISK', 'CRITICAL'] },
-              createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-            },
-          }).catch(() => 0),
-        ]);
-        const result = await analyzeMessage(messageObj.content, {
-          recentMessageCount: recentMatchMessageCounts.get(matchId) || 0,
-          reportCount,
-          priorHighRiskCount,
-          matchId,
+    try {
+      let persisted = null;
+      if (clientMessageId) persisted = await prisma.message.findFirst({ where: { clientMessageId, chatSessionId: matchId, senderId: userId } });
+      if (!persisted) {
+        persisted = await prisma.message.create({
+          data: { clientMessageId: clientMessageId || null, chatSessionId: matchId, senderId: userId, content: normalizedContent, imageUrl: normalizedImageUrl },
         });
-        const action = result.risk === 'CRITICAL' ? 'MATCH_TERMINATED_PENDING_REVIEW' : result.risk === 'HIGH_RISK' ? 'FLAGGED_FOR_ADMIN_REVIEW' : result.risk === 'MEDIUM_RISK' ? 'MONITOR' : 'NONE';
-        await recordModerationEvent(prisma, {
-          userId,
-          matchId,
-          messageId: messageObj.id,
-          category: result.category,
-          severity: result.risk,
-          risk: result.risk,
-          confidence: result.confidence,
-          recommendedAction: result.recommendedAction,
-          action,
-          reason: result.reason || null,
-        });
-        console.log('[MODERATION_MESSAGE_ANALYZED]', { userId, matchId, risk: result.risk, category: result.category, confidence: result.confidence });
-        if (result.risk === 'CRITICAL') {
-          if (activeMatches.has(matchId)) teardownMatch(matchId, 'moderation_critical', userId);
-          if (process.env.CUPIDX_AUTO_SUSPEND_CRITICAL === 'true' && result.confidence >= 0.92) {
-            await prisma.user.update({ where: { id: userId }, data: { isSuspended: true } }).catch(() => {});
-          }
-        }
-      } catch (moderationError) {
-        console.warn('[MODERATION] Async analysis failed:', moderationError?.message || moderationError);
       }
-    });
-    console.log(`[MESSAGE_SENT] User ${userId} in room ${match.roomId} (Session: ${matchId})`);
+      messageObj.id = persisted.id;
+    } catch (persistError) {
+      console.warn('[MESSAGE_PERSIST] Socket message persistence failed:', persistError?.message || persistError);
+    }
+
+    recentMatchMessageCounts.set(matchId, recentCount);
+    io.to(match.roomId).emit('receive_random_message', messageObj);
+    recordModerationEvent(prisma, {
+      userId, matchId, messageId: messageObj.id, category: result.category, severity: result.risk, risk: result.risk,
+      confidence: result.confidence, recommendedAction: result.recommendedAction,
+      action: result.risk === 'MEDIUM_RISK' ? 'MONITOR' : 'NONE', reason: result.reason || null,
+    }).catch(() => {});
+    console.log('[MESSAGE_SENT]', { userId, matchId, messageId: messageObj.id, risk: result.risk });
 
     if (typeof callback === 'function') {
       callback({ success: true, message: messageObj });
