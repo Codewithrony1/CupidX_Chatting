@@ -197,3 +197,15 @@ export function validateDob(
     dobString,
   };
 }
+
+/** Format a DOB for profile display. */
+export function formatDisplayDob(dob: string | Date | null | undefined): string {
+  if (!dob) return 'Not set';
+  const birthDate = typeof dob === 'string' ? new Date(dob) : dob;
+  if (isNaN(birthDate.getTime())) return 'Not set';
+  return birthDate.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
