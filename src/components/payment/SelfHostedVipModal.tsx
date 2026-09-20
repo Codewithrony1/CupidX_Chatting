@@ -56,7 +56,7 @@ export default function SelfHostedVipModal({
   // Dynamic QR & Pricing configs from server
   const [paymentQrUrlIndia, setPaymentQrUrlIndia] = useState<string>('/uploads/qr/29.jpeg');
   const [paymentQrUrlIndiaMonthly, setPaymentQrUrlIndiaMonthly] = useState<string>('/uploads/qr/29.jpeg');
-  const [paymentQrUrlIndiaThreeMonths, setPaymentQrUrlIndiaThreeMonths] = useState<string>('/uploads/qr/29.jpeg');
+  const [paymentQrUrlIndiaThreeMonths, setPaymentQrUrlIndiaThreeMonths] = useState<string>('/uploads/qr/99qr.jpeg');
   const [paymentQrUrlIndiaYearly, setPaymentQrUrlIndiaYearly] = useState<string>('/uploads/qr/399qr.jpeg');
   const [paymentQrUrlInternational, setPaymentQrUrlInternational] = useState<string>('/lexino-qr.jpg');
   const [merchantUpiId, setMerchantUpiId] = useState<string>('sumitpornsware@fam');
