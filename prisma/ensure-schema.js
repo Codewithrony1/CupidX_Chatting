@@ -261,6 +261,32 @@ function ensureDatabaseSchema(targetDbPath) {
       `);
     }
 
+    // 9b. Inspect and ensure ModerationEvent table
+    const moderationEventTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ModerationEvent'").get();
+    if (!moderationEventTable) {
+      console.log(`[SCHEMA SYNC] Creating ModerationEvent table in ${targetDbPath}`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS "ModerationEvent" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "userId" TEXT NOT NULL,
+          "matchId" TEXT,
+          "messageId" TEXT,
+          "category" TEXT NOT NULL,
+          "severity" TEXT NOT NULL,
+          "risk" TEXT NOT NULL,
+          "confidence" REAL NOT NULL DEFAULT 0,
+          "recommendedAction" TEXT NOT NULL,
+          "action" TEXT NOT NULL,
+          "reason" TEXT,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS "ModerationEvent_userId_createdAt_idx" ON "ModerationEvent"("userId", "createdAt");
+        CREATE INDEX IF NOT EXISTS "ModerationEvent_matchId_createdAt_idx" ON "ModerationEvent"("matchId", "createdAt");
+        CREATE INDEX IF NOT EXISTS "ModerationEvent_risk_createdAt_idx" ON "ModerationEvent"("risk", "createdAt");
+        CREATE INDEX IF NOT EXISTS "ModerationEvent_category_createdAt_idx" ON "ModerationEvent"("category", "createdAt");
+      `);
+    }
+
     // 10. Inspect and ensure MatchmakingQueue country columns
     const queueTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='MatchmakingQueue'").get();
     if (queueTable) {
