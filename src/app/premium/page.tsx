@@ -53,7 +53,7 @@ export default function PremiumPage() {
     monthly: 29,
     threeMonths: 99,
     yearly: 399,
-    merchantUpiId: 'cupidxchat@upi',
+    merchantUpiId: 'sumitpornsware@fam',
     merchantName: 'CupidX Chat',
     qrMonthly: '/uploads/qr/payment-qr-india.jpg',
     qrThreeMonths: '/uploads/qr/payment-qr-india.jpg',
@@ -87,7 +87,7 @@ export default function PremiumPage() {
 
   // Compute Active Price & UPI String
   const activeAmount = selectedPlan === 'yearly' ? pricing.yearly : (selectedPlan === '3months' ? pricing.threeMonths : pricing.monthly);
-  const planLabel = selectedPlan === 'yearly' ? 'Yearly (₹399)' : (selectedPlan === '3months' ? '3 Months (₹99)' : 'Monthly (₹29)');
+  const planLabel = selectedPlan === 'yearly' ? `Yearly (₹${pricing.yearly})` : (selectedPlan === '3months' ? `3 Months (₹${pricing.threeMonths})` : `Monthly (₹${pricing.monthly})`);
   const upiPayUri = `upi://pay?pa=${pricing.merchantUpiId}&pn=${encodeURIComponent(pricing.merchantName)}&am=${activeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`CupidX VIP ${planLabel}`)}`;
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiPayUri)}`;
 
