@@ -16,6 +16,9 @@ function isLocalAdminRequest(req: Request): boolean {
   const host = (forwardedHost || req.headers.get('host') || url.host || '').toLowerCase();
 
   return (
+    host === 'localhost:3000' ||
+    host === '127.0.0.1:3000' ||
+    host === '[::1]:3000' ||
     host === 'localhost:3001' ||
     host === '127.0.0.1:3001' ||
     host === '[::1]:3001'
@@ -23,7 +26,7 @@ function isLocalAdminRequest(req: Request): boolean {
 }
 
 export async function verifyAdminAccess(req: Request) {
-  // Hard security boundary: ADMIN_MODE + localhost:3001 are both required.
+  // Hard security boundary: ADMIN_MODE + loopback host are both required.
   if (!isLocalAdminRequest(req)) {
     return {
       authorized: false,
