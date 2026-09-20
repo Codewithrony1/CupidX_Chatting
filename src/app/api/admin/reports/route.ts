@@ -21,7 +21,16 @@ export async function GET(req: Request) {
       },
     });
 
-    return NextResponse.json({ reports });
+    const reportedUserIds = Array.from(new Set(reports.map((report) => report.reportedUserId)));
+    const moderationEvents = reportedUserIds.length
+      ? await prisma.moderationEvent.findMany({
+          where: { userId: { in: reportedUserIds } },
+          orderBy: { createdAt: 'desc' },
+          take: 500,
+        })
+      : [];
+
+    return NextResponse.json({ reports, moderationEvents });
   } catch (error) {
     console.error('Error fetching admin reports:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
