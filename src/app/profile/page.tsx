@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useAuth as useClerkAuth } from '@clerk/nextjs';
 import { VIP_AVATAR_CATEGORIES } from '@/lib/avatars';
-import { formatDisplayDob, calculateAge } from '@/lib/firestoreUser';
+import { formatDisplayDob, calculateDobAge as calculateAge } from '@/lib/validation/dob';
 import AppShell from '@/components/AppShell';
 import BottomSheet from '@/components/ui/BottomSheet';
 import {
