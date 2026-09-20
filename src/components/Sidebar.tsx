@@ -166,20 +166,6 @@ export default function Sidebar({
             <Settings className="w-4 h-4" />
             <span>Settings</span>
           </Link>
-
-          {user.role === 'ADMIN' && (
-            <Link
-              href="/admin"
-              className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                pathname === '/admin'
-                  ? 'bg-pink-600/20 text-pink-300 border border-pink-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Shield className="w-4 h-4 text-pink-400" />
-              <span>Admin Panel</span>
-            </Link>
-          )}
         </nav>
       </div>
 
