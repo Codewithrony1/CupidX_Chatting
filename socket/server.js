@@ -901,7 +901,6 @@ io.on('connection', async (socket) => {
     };
 
     matchmakingStates.set(userId, 'SEARCHING');
-    matchmakingStates.set(userId, 'SEARCHING');
     const existingIdx = randomMatchQueue.findIndex((c) => c.userId === userId);
     if (existingIdx !== -1) {
       randomMatchQueue[existingIdx] = candidate;
@@ -1083,8 +1082,10 @@ io.on('connection', async (socket) => {
       countryName: country.countryName,
       countryFlag: country.countryFlag,
       joinTime: Date.now(),
+      searchToken: nextMatchmakingToken(userId),
     };
 
+    matchmakingStates.set(userId, 'SEARCHING');
     const existingIdx = randomMatchQueue.findIndex((c) => c.userId === userId);
     if (existingIdx !== -1) {
       randomMatchQueue[existingIdx] = candidate;
