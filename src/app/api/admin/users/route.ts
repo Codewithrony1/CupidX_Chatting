@@ -33,6 +33,7 @@ export async function GET(req: Request) {
       return {
         id: u.id,
         firebaseUid: u.firebaseUid,
+        clerkUserId: u.clerkUserId || null,
         username: u.username || 'user',
         vipUsername: u.vipUsername || null,
         vipUsernameClaimedAt: u.vipUsernameClaimedAt || null,
