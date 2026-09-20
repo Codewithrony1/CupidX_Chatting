@@ -1411,7 +1411,7 @@ export default function AdminPage() {
                     <input
                       type="number"
                       value={qrSettings.indiaPriceYearly}
-                      onChange={(e) => setQrSettings({ ...qrSettings, indiaPriceYearly: parseFloat(e.target.value) || 199 })}
+                      onChange={(e) => setQrSettings({ ...qrSettings, indiaPriceYearly: parseFloat(e.target.value) || 399 })}
                       className="w-full px-3 py-2 rounded-xl bg-black/60 border border-slate-800 text-xs text-white font-bold"
                     />
                   </div>
