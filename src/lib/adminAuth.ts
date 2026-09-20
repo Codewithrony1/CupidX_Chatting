@@ -5,11 +5,24 @@ export async function verifyAdminAccess(req: Request) {
   const isLocalAdminMode = process.env.ADMIN_MODE === 'true';
   const user = await getCurrentUser(req);
 
-  // Production or DB role check
-  if (user && user.role === 'ADMIN') {
+  const ADMIN_EMAILS = [
+    'lexinoofficial@gmail.com',
+    'admin@cupidxchat.in',
+    process.env.ADMIN_EMAIL,
+  ].filter(Boolean).map(e => e?.toLowerCase().trim());
+
+  // Production or DB role check / Admin email verification
+  const isEmailAdmin = user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase().trim());
+  if (user && (user.role === 'ADMIN' || isEmailAdmin)) {
+    if (user.role !== 'ADMIN') {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { role: 'ADMIN' },
+      }).catch(() => {});
+    }
     return {
       authorized: true,
-      user,
+      user: { ...user, role: 'ADMIN' },
       adminId: user.id,
       adminClerkUserId: user.clerkUserId || null,
       adminFirebaseUid: user.clerkUserId || user.id,
