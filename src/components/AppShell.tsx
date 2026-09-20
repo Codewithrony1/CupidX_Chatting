@@ -14,7 +14,6 @@ import {
   Sparkles,
   X,
   Menu,
-  Shield,
   LogOut,
   Flame,
   Users,
@@ -250,20 +249,6 @@ export default function AppShell({
               <span>Settings & Privacy</span>
             </Link>
 
-            {user?.role === 'ADMIN' && (
-              <Link
-                href="/admin"
-                onClick={() => setDrawerOpen(false)}
-                className={`flex items-center space-x-3 px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
-                  pathname === '/admin'
-                    ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
-                    : 'text-pink-100/80 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <Shield className="w-4 h-4 text-pink-400" />
-                <span>Admin Command Center</span>
-              </Link>
-            )}
           </nav>
         </div>
 
