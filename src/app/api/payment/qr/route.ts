@@ -34,7 +34,7 @@ export async function GET() {
     const paymentQrUrlIndiaWeekly = settingsMap.get('paymentQrUrlIndiaWeekly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaMonthly = settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaThreeMonths = settingsMap.get('paymentQrUrlIndiaThreeMonths') || settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
-    const paymentQrUrlIndiaYearly = settingsMap.get('paymentQrUrlIndiaYearly') || '/uploads/qr/payment-qr-india-199.jpg';
+    const paymentQrUrlIndiaYearly = settingsMap.get('paymentQrUrlIndiaYearly') || '/uploads/qr/payment-qr-india-yearly.jpg';
     const paymentQrUrlInternational = settingsMap.get('paymentQrUrlInternational') || '/lexino-qr.jpg';
     const storedMerchantUpiId = settingsMap.get('merchantUpiId');
     const merchantUpiId = storedMerchantUpiId && storedMerchantUpiId !== LEGACY_MERCHANT_UPI_ID
@@ -99,7 +99,7 @@ export async function GET() {
       success: true,
       paymentQrUrlIndia: '/uploads/qr/payment-qr-india.jpg',
       paymentQrUrlIndiaMonthly: '/uploads/qr/payment-qr-india.jpg',
-      paymentQrUrlIndiaYearly: '/uploads/qr/payment-qr-india-199.jpg',
+      paymentQrUrlIndiaYearly: '/uploads/qr/payment-qr-india-yearly.jpg',
       paymentQrUrlInternational: '/lexino-qr.jpg',
       merchantUpiId: DEFAULT_MERCHANT_UPI_ID,
       merchantName: 'CupidX Chat',
@@ -112,7 +112,7 @@ export async function GET() {
           yearly: 399,
           qrMonthly: '/uploads/qr/payment-qr-india.jpg',
           qrThreeMonths: '/uploads/qr/payment-qr-india.jpg',
-          qrYearly: '/uploads/qr/payment-qr-india-199.jpg',
+          qrYearly: '/uploads/qr/payment-qr-india-yearly.jpg',
         },
         international: {
           currency: 'USD',
