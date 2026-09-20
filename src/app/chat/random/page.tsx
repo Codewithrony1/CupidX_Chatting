@@ -567,20 +567,10 @@ export default function KnotChatRandomPage() {
 
   // ─── Cleanup on unmount & window unload ────────────────────────────────────
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (socket && socket.connected) {
-        socket.emit('end_random_chat');
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
+    // Do not end a user-wide match from beforeunload: another tab/socket may still be active.
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-      if (socket && socket.connected) {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (socket && socket.connected && !activeMatchIdRef.current) {
         socket.emit('leave_random_queue');
       }
     };
