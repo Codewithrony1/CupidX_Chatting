@@ -1199,7 +1199,19 @@ export default function AdminPage() {
                   onChange={(e) => setUserSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-black/40 border border-slate-800 text-xs text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
                 />
+                <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSubscriptionToggle(users.find((u) => u.username.toLowerCase() === userSearch.trim().replace(/^@/, '').toLowerCase())?.id || '', users.find((u) => u.username.toLowerCase() === userSearch.trim().replace(/^@/, '').toLowerCase())?.is_vip || false)}
+                  disabled={!userSearch.trim() || !users.some((u) => u.username.toLowerCase() === userSearch.trim().replace(/^@/, '').toLowerCase())}
+                  className="px-3 py-2.5 rounded-2xl bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-xs font-black hover:bg-yellow-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Search an exact username, then give/remove VIP"
+                >
+                  <Crown className="w-3.5 h-3.5 inline mr-1" />
+                  Give/Remove VIP
+                </button>
               </div>
+            </div>
 
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-bold text-slate-400">Plan:</span>
@@ -1242,8 +1254,16 @@ export default function AdminPage() {
                         </span>
                         <span className="text-[10px] text-slate-400">{u.fullName}</span>
                       </td>
-                      <td className="px-5 py-3.5 font-mono text-pink-300">{u.email}</td>
-                      <td className="px-5 py-3.5 font-mono text-slate-400 text-[10px]">{u.clerkUserId || 'N/A'}</td>
+                      <td className="px-5 py-3.5">
+                        {u.email ? (
+                          <span className="font-mono text-pink-300">{u.email}</span>
+                        ) : (
+                          <span className="text-slate-500">No email linked</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 font-mono text-slate-400 text-[10px]">
+                        {u.clerkUserId || 'N/A'}
+                      </td>
                       <td className="px-5 py-3.5">
                         {u.is_vip ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 font-black text-[10px] border border-yellow-500/30">
@@ -1267,6 +1287,12 @@ export default function AdminPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-right space-x-2">
+                        <button
+                          onClick={() => handleSubscriptionToggle(u.id, u.is_vip)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 cursor-pointer"
+                        >
+                          {u.is_vip ? 'Remove VIP' : 'Give VIP'}
+                        </button>
                         <button
                           onClick={() => handleToggleBan(u.id, u.isSuspended)}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 hover:border-slate-500 cursor-pointer"
