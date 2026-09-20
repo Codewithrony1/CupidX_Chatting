@@ -1199,18 +1199,7 @@ export default function AdminPage() {
                   onChange={(e) => setUserSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-black/40 border border-slate-800 text-xs text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
                 />
-                <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSubscriptionToggle(users.find((u) => u.username.toLowerCase() === userSearch.trim().replace(/^@/, '').toLowerCase())?.id || '', users.find((u) => u.username.toLowerCase() === userSearch.trim().replace(/^@/, '').toLowerCase())?.is_vip || false)}
-                  disabled={!userSearch.trim() || !users.some((u) => u.username.toLowerCase() === userSearch.trim().replace(/^@/, '').toLowerCase())}
-                  className="px-3 py-2.5 rounded-2xl bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-xs font-black hover:bg-yellow-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Search an exact username, then give/remove VIP"
-                >
-                  <Crown className="w-3.5 h-3.5 inline mr-1" />
-                  Give/Remove VIP
-                </button>
-              </div>
+
             </div>
 
               <div className="flex items-center space-x-2">
