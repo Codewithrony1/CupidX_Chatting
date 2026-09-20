@@ -1128,6 +1128,13 @@ export default function AdminPage() {
                       </td>
                       <td className="px-5 py-3.5 font-mono text-pink-300">{u.email}</td>
                       <td className="px-5 py-3.5">
+                        <div className="space-y-1">
+                          <span className="font-mono text-[10px] text-indigo-300 block">Clerk ID</span>
+                          <span className="font-mono text-[10px] text-slate-400 break-all">{u.clerkUserId || 'Not linked'}</span>
+                          <span className="font-mono text-[10px] text-pink-300 block break-all">{u.email || 'No email'}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5">
                         {u.is_vip ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/30">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
