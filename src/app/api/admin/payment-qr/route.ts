@@ -19,6 +19,9 @@ export async function POST(req: Request) {
       indiaPriceYearly,
       intlPriceMonthly,
       intlPriceYearly,
+      indiaQrMonthlyUrl,
+      indiaQrThreeMonthsUrl,
+      indiaQrYearlyUrl,
     } = body;
 
     const settingKey = region === 'international' ? 'paymentQrUrlInternational' : 'paymentQrUrlIndia';
@@ -59,6 +62,28 @@ export async function POST(req: Request) {
         create: { key: 'indiaPriceMonthly', value: indiaPriceMonthly.toString() },
       });
     }
+    if (indiaQrMonthlyUrl) {
+      await prisma.appSetting.upsert({
+        where: { key: 'paymentQrUrlIndiaMonthly' },
+        update: { value: indiaQrMonthlyUrl.toString() },
+        create: { key: 'paymentQrUrlIndiaMonthly', value: indiaQrMonthlyUrl.toString() },
+      });
+    }
+    if (indiaQrThreeMonthsUrl) {
+      await prisma.appSetting.upsert({
+        where: { key: 'paymentQrUrlIndiaThreeMonths' },
+        update: { value: indiaQrThreeMonthsUrl.toString() },
+        create: { key: 'paymentQrUrlIndiaThreeMonths', value: indiaQrThreeMonthsUrl.toString() },
+      });
+    }
+    if (indiaQrYearlyUrl) {
+      await prisma.appSetting.upsert({
+        where: { key: 'paymentQrUrlIndiaYearly' },
+        update: { value: indiaQrYearlyUrl.toString() },
+        create: { key: 'paymentQrUrlIndiaYearly', value: indiaQrYearlyUrl.toString() },
+      });
+    }
+
     if (indiaPriceYearly) {
       await prisma.appSetting.upsert({
         where: { key: 'indiaPriceYearly' },
