@@ -279,7 +279,7 @@ export default function VipPayPage() {
                       className="relative w-64 h-80 mx-auto rounded-2xl overflow-hidden shadow-xl border-4 border-slate-100 bg-white p-2 flex flex-col items-center justify-center"
                     >
                       <img
-                        src="/lexino-qr.jpg"
+                        src="/uploads/qr/99qr.jpeg"
                         alt="Lexino Enterprises QR Code"
                         className="w-full h-full object-contain rounded-xl"
                       />
