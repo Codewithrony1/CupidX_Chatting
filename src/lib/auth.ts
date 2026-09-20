@@ -58,6 +58,21 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
   });
 
   if (user) {
+    const ADMIN_EMAILS = [
+      'lexinoofficial@gmail.com',
+      'admin@cupidxchat.in',
+      process.env.ADMIN_EMAIL,
+    ].filter(Boolean).map((e) => e!.toLowerCase().trim());
+    if (user.email && ADMIN_EMAILS.includes(user.email.toLowerCase().trim()) && user.role !== 'ADMIN') {
+      try {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { role: 'ADMIN' },
+          include: { profile: true, subscription: true },
+        });
+      } catch (e) {}
+    }
+
     if (!user.clerkUserId) {
       await prisma.user.update({
         where: { id: user.id },
@@ -172,9 +187,19 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
     });
 
     if (existingByEmail) {
+      const ADMIN_EMAILS = [
+        'lexinoofficial@gmail.com',
+        'admin@cupidxchat.in',
+        process.env.ADMIN_EMAIL,
+      ].filter(Boolean).map((e) => e!.toLowerCase().trim());
+      const isAutoAdmin = email && ADMIN_EMAILS.includes(email.toLowerCase().trim());
+
       user = await prisma.user.update({
         where: { id: existingByEmail.id },
-        data: { clerkUserId: cleanId },
+        data: {
+          clerkUserId: cleanId,
+          ...(isAutoAdmin && existingByEmail.role !== 'ADMIN' ? { role: 'ADMIN' } : {}),
+        },
         include: { profile: true, subscription: true },
       });
       return user;
@@ -217,6 +242,13 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
   const timeSuffix = Date.now().toString().slice(-4);
   const cleanUsername = `${baseUsername.slice(0, 12)}_${randomSuffix}${timeSuffix}`;
 
+  const ADMIN_EMAILS = [
+    'lexinoofficial@gmail.com',
+    'admin@cupidxchat.in',
+    process.env.ADMIN_EMAIL,
+  ].filter(Boolean).map((e) => e!.toLowerCase().trim());
+  const isAutoAdmin = Boolean(email && ADMIN_EMAILS.includes(email.toLowerCase().trim()));
+
   try {
     user = await prisma.user.create({
       data: {
@@ -226,7 +258,7 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
         fullName: rawName,
         displayName: rawName,
         email,
-        role: 'USER',
+        role: isAutoAdmin ? 'ADMIN' : 'USER',
         membershipTier: isCloudVip ? 'VIP' : 'FREE',
         is_vip: isCloudVip,
         dob: cloudDob,

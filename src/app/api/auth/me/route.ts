@@ -46,6 +46,15 @@ export async function GET(req: Request) {
     }
 
     if (user) {
+      const ADMIN_EMAILS = [
+        'lexinoofficial@gmail.com',
+        'admin@cupidxchat.in',
+        process.env.ADMIN_EMAIL,
+      ].filter(Boolean).map((e) => e!.toLowerCase().trim());
+      if (user.email && ADMIN_EMAILS.includes(user.email.toLowerCase().trim())) {
+        user.role = 'ADMIN';
+      }
+
       const isVIP = isUserVip(user);
       const isProfileDone = Boolean(
         user.profileCompleted ||
