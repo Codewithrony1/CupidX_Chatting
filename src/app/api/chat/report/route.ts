@@ -128,7 +128,10 @@ export async function POST(req: Request) {
           reason: `Report: ${String(reason).slice(0, 500)}`,
         });
       } catch (moderationError) {
-        console.warn('[REPORT_MODERATION] Async analysis failed:', moderationError?.message || moderationError);
+        const moderationErrorMessage = moderationError instanceof Error
+          ? moderationError.message
+          : String(moderationError);
+        console.warn('[REPORT_MODERATION] Async analysis failed:', moderationErrorMessage);
       }
     });
 
