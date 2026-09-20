@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getCurrentUser } from '@/lib/auth';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { getAdminStorage } from '@/lib/firebaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,22 +22,6 @@ export async function POST(req: Request) {
       user.is_vip ||
       user.membershipTier === 'VIP' ||
       (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
-
-    // Self-healing check: verify Firestore Admin and Clerk metadata if not marked VIP in Prisma
-    if (!isVIP) {
-      try {
-        const adminDb = getAdminDb();
-        if (adminDb) {
-          const snap = await adminDb.collection('users').doc(user.clerkUserId || user.id).get();
-          if (snap.exists) {
-            const d = snap.data();
-            if (d?.is_vip || d?.isVIP || d?.membershipTier === 'VIP') {
-              isVIP = true;
-            }
-          }
-        }
-      } catch (e) {}
-    }
 
     if (!isVIP) {
       return NextResponse.json(
@@ -169,7 +151,7 @@ export async function POST(req: Request) {
     if (!session || session.status !== 'ACTIVE') {
       return NextResponse.json({ error: 'Chat session is not active.' }, { status: 400 });
     }
-    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    const userIds = [user.id, user.clerkUserId].filter(Boolean) as string[];
     if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
       return NextResponse.json({ error: 'Forbidden: You are not an active participant in this chat session.' }, { status: 403 });
     }
@@ -180,39 +162,15 @@ export async function POST(req: Request) {
       }
     }
 
-    // 7. Store images in durable object storage in production.
-    // Local filesystem is retained only for local development because Vercel
-    // serverless filesystems are ephemeral and not shared across instances.
+    // 7. Store images locally. Authentication/authorization remains entirely Clerk + Prisma.
+    // The generated image path is not exposed directly to users; the image route
+    // verifies the authenticated Clerk user and active chat participant.
     const randomKey = crypto.randomBytes(16).toString('hex');
     const filename = `vip_photo_${Date.now()}_${randomKey}.${ext}`;
-    const contentType = isPng ? 'image/png' : isWebp ? 'image/webp' : isGif ? 'image/gif' : 'image/jpeg';
-
-    let imageUrl: string;
-    const storage = getAdminStorage();
-
-    if (storage) {
-      const bucket = storage.bucket();
-      const objectPath = `chat-images/${filename}`;
-      const fileRef = bucket.file(objectPath);
-      await fileRef.save(buffer, {
-        resumable: false,
-        metadata: {
-          contentType,
-          cacheControl: 'private, max-age=3600',
-        },
-      });
-      imageUrl = `/api/chat/image?key=${encodeURIComponent(objectPath)}`;
-    } else if (process.env.NODE_ENV !== 'production') {
-      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'chat-images');
-      await fs.mkdir(uploadDir, { recursive: true });
-      await fs.writeFile(path.join(uploadDir, filename), buffer);
-      imageUrl = `/uploads/chat-images/${filename}`;
-    } else {
-      return NextResponse.json(
-        { error: 'Image storage is temporarily unavailable. Please try again.' },
-        { status: 503 }
-      );
-    }
+    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'chat-images');
+    await fs.mkdir(uploadDir, { recursive: true });
+    await fs.writeFile(path.join(uploadDir, filename), buffer);
+    const imageUrl = `/api/chat/image?key=${encodeURIComponent(`chat-images/${filename}`)}`;
 
     // 8. Image storage only. The canonical chat message is created by the
     // Socket.IO/HTTP message endpoint so a retry cannot create duplicates.
