@@ -89,6 +89,7 @@ export default function PremiumPage() {
   const activeAmount = selectedPlan === 'yearly' ? pricing.yearly : (selectedPlan === '3months' ? pricing.threeMonths : pricing.monthly);
   const planLabel = selectedPlan === 'yearly' ? `Yearly (₹${pricing.yearly})` : (selectedPlan === '3months' ? `3 Months (₹${pricing.threeMonths})` : `Monthly (₹${pricing.monthly})`);
   const upiPayUri = `upi://pay?pa=${pricing.merchantUpiId}&pn=${encodeURIComponent(pricing.merchantName)}&am=${activeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`CupidX VIP ${planLabel}`)}`;
+  const staticQrUrl = selectedPlan === 'monthly' ? pricing.qrMonthly : (selectedPlan === '3months' ? pricing.qrThreeMonths : pricing.qrYearly);
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiPayUri)}`;
 
   // Fetch Pricing & QR Settings
@@ -477,11 +478,11 @@ export default function PremiumPage() {
             {/* Dynamic QR Box */}
             <div className="relative w-44 h-44 shrink-0 bg-white p-2 rounded-2xl shadow-xl shadow-pink-500/20 border-2 border-pink-500/30 flex items-center justify-center">
               <img
-                src={dynamicQrUrl}
+                src={staticQrUrl}
                 alt="CupidX UPI Payment QR"
                 className="w-full h-full object-contain rounded-xl"
                 onError={(e) => {
-                  (e.target as HTMLImageElement).src = pricing.qrMonthly || '/uploads/qr/payment-qr-india.jpg';
+                  (e.target as HTMLImageElement).src = dynamicQrUrl;
                 }}
               />
             </div>
