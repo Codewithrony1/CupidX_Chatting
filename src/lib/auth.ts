@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from './prisma';
 import { auth as clerkAuth, currentUser as clerkCurrentUser, clerkClient, verifyToken as clerkVerifyToken } from '@clerk/nextjs/server';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'cupidx_fallback_jwt_secret';
+const JWT_SECRET = process.env.JWT_SECRET?.trim() || null;
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
@@ -23,10 +23,14 @@ export interface TokenPayload {
 }
 
 export function signToken(payload: TokenPayload): string {
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is required for legacy local authentication.');
+  }
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
 }
 
 export function verifyToken(token: string): TokenPayload | null {
+  if (!JWT_SECRET) return null;
   try {
     return jwt.verify(token, JWT_SECRET) as TokenPayload;
   } catch (e) {
