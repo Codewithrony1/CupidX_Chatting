@@ -3,6 +3,29 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
+export async function deleteStoredImage(imageUrlOrFilename: string | null | undefined): Promise<boolean> {
+  if (!imageUrlOrFilename) return false;
+  const raw = String(imageUrlOrFilename).split('?')[0];
+  const filename = path.basename(raw);
+  if (!filename || filename === '.' || filename === '..') return false;
+  const relative = raw.startsWith('/') ? raw.slice(1) : raw;
+  const candidates = new Set<string>([
+    path.join(process.cwd(), 'public', relative),
+    path.join(process.cwd(), relative),
+    path.join(os.tmpdir(), relative),
+  ]);
+  for (const dir of ['uploads', 'public/uploads', 'public/uploads/qr', 'public/uploads/receipts']) {
+    candidates.add(path.join(process.cwd(), dir, filename));
+    candidates.add(path.join(os.tmpdir(), dir, filename));
+  }
+  let removed = false;
+  for (const filePath of candidates) {
+    try { await fs.unlink(filePath); removed = true; }
+    catch (error: any) { if (error?.code !== 'ENOENT') console.warn('Image delete failed:', filePath, error); }
+  }
+  return removed;
+}
+
 export interface ImageUploadResult {
   success: boolean;
   url?: string;
