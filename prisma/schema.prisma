@@ -223,6 +223,26 @@ model Report {
   reported User @relation("Reported", fields: [reportedUserId], references: [id], onDelete: Cascade)
 }
 
+model ModerationEvent {
+  id                 String   @id @default(uuid())
+  userId             String
+  matchId            String?
+  messageId          String?
+  category           String
+  severity           String
+  risk               String
+  confidence         Float
+  recommendedAction  String
+  action             String
+  reason             String?
+  createdAt          DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([matchId, createdAt])
+  @@index([risk, createdAt])
+  @@index([category, createdAt])
+}
+
 model Payment {
   id                String   @id @default(uuid())
   userId            String
