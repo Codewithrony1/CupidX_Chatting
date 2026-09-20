@@ -744,7 +744,7 @@ export default function KnotChatRandomPage() {
   }, [currentUser?.id, handleStartMatch]);
 
   // ─── CANCEL SEARCH ─────────────────────────────────────────────────────────
-  const handleCancelSearch = () => {
+  const handleCancelSearch = async () => {
     isMatchmakingStartingRef.current = false;
     activeMatchIdRef.current = null;
     setConnectionState('IDLE');
@@ -757,16 +757,18 @@ export default function KnotChatRandomPage() {
       socket.emit('leave_random_queue');
     }
     const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+    const token = await getToken().catch(() => null);
     fetch('/api/matchmaking/cancel', {
       method: 'POST',
       headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
       },
     }).catch(() => {});
   };
 
   // ─── NEXT PARTNER (Requirement 3: Clean up old, brand-new room, different partner) ─
-  const handleNextPartner = () => {
+  const handleNextPartner = async () => {
     if (isSkippingRef.current) return;
     isSkippingRef.current = true;
     setTimeout(() => {
@@ -796,10 +798,12 @@ export default function KnotChatRandomPage() {
 
     if (oldMid) {
       const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+      const token = await getToken().catch(() => null);
       fetch(`/api/chat/${oldMid}/next`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
         },
       }).catch(() => {});
@@ -818,7 +822,7 @@ export default function KnotChatRandomPage() {
     }
   };
 
-  const handleEndChat = () => {
+  const handleEndChat = async () => {
     setShowOptionsMenu(false);
     const oldMid = activeMatchIdRef.current || matchId;
     activeMatchIdRef.current = null;
@@ -846,10 +850,12 @@ export default function KnotChatRandomPage() {
     }
     if (oldMid) {
       const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+      const token = await getToken().catch(() => null);
       fetch(`/api/chat/${oldMid}/end`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
         },
       }).catch(() => {});
