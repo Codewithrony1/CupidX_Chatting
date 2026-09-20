@@ -9,7 +9,6 @@ generator client {
 
 model User {
   id              String        @id @default(uuid())
-  firebaseUid     String?       @unique
   clerkUserId     String?       @unique
   username        String        @unique
   fullName        String
@@ -341,7 +340,6 @@ model VipRequest {
 model AdminLog {
   id               String   @id @default(uuid())
   adminUserId      String
-  adminFirebaseUid String?
   adminClerkId     String?
   action           String   // e.g. "APPROVE_PAYMENT", "REJECT_PAYMENT", "ACTIVATE_SUBSCRIPTION", "DEACTIVATE_SUBSCRIPTION", "UPDATE_QR"
   targetUserId String?
