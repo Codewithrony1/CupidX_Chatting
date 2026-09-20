@@ -59,7 +59,6 @@ export async function GET(req: Request) {
       },
     });
 
-    return NextResponse.json({ error: 'Image storage unavailable' }, { status: 503 });
   } catch (error) {
     console.error('[CHAT_IMAGE] Failed to serve image:', error);
     return NextResponse.json({ error: 'Image unavailable' }, { status: 404 });
