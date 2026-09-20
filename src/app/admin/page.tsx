@@ -1194,12 +1194,28 @@ export default function AdminPage() {
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search by username, email, full name..."
+                  placeholder="Search username, email, name or Clerk ID..."
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-black/40 border border-slate-800 text-xs text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
                 />
-
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-500">
+                    {userSearch.trim()
+                      ? `Found ${users.length} matching user(s)`
+                      : 'Search a user to manage VIP'}
+                  </span>
+                  {userSearch.trim() && users.length === 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleSubscriptionToggle(users[0].id, users[0].is_vip)}
+                      className="px-3 py-1.5 rounded-xl bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-[10px] font-black hover:bg-yellow-500/25"
+                    >
+                      <Crown className="w-3 h-3 inline mr-1" />
+                      {users[0].is_vip ? 'Remove VIP' : 'Give VIP'}
+                    </button>
+                  )}
+                </div>
             </div>
 
               <div className="flex items-center space-x-2">
