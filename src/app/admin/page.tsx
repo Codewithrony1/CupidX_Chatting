@@ -116,6 +116,26 @@ interface AuditLogItem {
   };
 }
 
+interface ModerationEventItem {
+  id: string;
+  userId: string;
+  matchId?: string | null;
+  messageId?: string | null;
+  category: string;
+  severity: string;
+  risk: string;
+  confidence: number;
+  recommendedAction: string;
+  action: string;
+  reason?: string | null;
+  createdAt: string;
+  user?: {
+    username?: string;
+    email?: string | null;
+    isSuspended?: boolean;
+  } | null;
+}
+
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<'PAYMENTS' | 'SUBSCRIPTIONS' | 'USERS' | 'SETTINGS' | 'AUDIT_LOGS' | 'BROADCAST'>('PAYMENTS');
 
@@ -183,6 +203,23 @@ export default function AdminPage() {
   // Audit Logs
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
+  const [moderationEvents, setModerationEvents] = useState<ModerationEventItem[]>([]);
+  const [loadingModerationEvents, setLoadingModerationEvents] = useState(false);
+
+  const fetchModerationEvents = async () => {
+    setLoadingModerationEvents(true);
+    try {
+      const res = await fetch('/api/admin/moderation?limit=100');
+      if (res.ok) {
+        const data = await res.json();
+        setModerationEvents(data.events || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingModerationEvents(false);
+    }
+  };
 
   // Broadcast
   const [broadcastMessage, setBroadcastMessage] = useState('');
@@ -354,6 +391,7 @@ export default function AdminPage() {
     fetchUsers();
     fetchQrSettings();
     fetchAuditLogs();
+    fetchModerationEvents();
     fetchRandomChat();
 
     // Auto-refresh polling every 5s for real-time payments queue
@@ -1595,6 +1633,58 @@ export default function AdminPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="p-4 rounded-3xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-white">AI Moderation Events</h4>
+                <p className="text-xs text-slate-400">Risk, category, confidence and deterministic policy actions from backend moderation.</p>
+              </div>
+              <button
+                type="button"
+                onClick={fetchModerationEvents}
+                className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold border border-white/10 cursor-pointer"
+              >
+                Refresh
+              </button>
+            </div>
+
+            <div className="rounded-3xl bg-slate-900/60 border border-slate-800 overflow-hidden shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-black/40 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="px-5 py-3.5">Timestamp</th>
+                      <th className="px-5 py-3.5">User</th>
+                      <th className="px-5 py-3.5">Risk</th>
+                      <th className="px-5 py-3.5">Category</th>
+                      <th className="px-5 py-3.5">Confidence</th>
+                      <th className="px-5 py-3.5">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    {loadingModerationEvents ? (
+                      <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Loading moderation events...</td></tr>
+                    ) : moderationEvents.length === 0 ? (
+                      <tr><td colSpan={6} className="px-5 py-8 text-center text-slate-400">No moderation events recorded yet.</td></tr>
+                    ) : (
+                      moderationEvents.map((event) => (
+                        <tr key={event.id} className="hover:bg-white/[0.02]">
+                          <td className="px-5 py-3 text-slate-400">{new Date(event.createdAt).toLocaleString()}</td>
+                          <td className="px-5 py-3 text-white font-bold">
+                            @{event.user?.username || event.userId.slice(0, 10)}
+                            {event.user?.isSuspended && <span className="ml-2 text-[9px] text-rose-300">SUSPENDED</span>}
+                          </td>
+                          <td className="px-5 py-3 font-black">{event.risk}</td>
+                          <td className="px-5 py-3 text-slate-300">{event.category}</td>
+                          <td className="px-5 py-3 text-slate-300">{Math.round(event.confidence * 100)}%</td>
+                          <td className="px-5 py-3 text-slate-300">{event.action}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
