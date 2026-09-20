@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { getAdminStorage } from '@/lib/firebaseAdmin';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -38,36 +37,27 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const storage = getAdminStorage();
-    if (storage) {
-      const [buffer] = await storage.bucket().file(key).download();
-      const ext = key.split('.').pop();
-      const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
-      return new NextResponse(new Uint8Array(buffer), {
-        status: 200,
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'private, max-age=3600',
-          'X-Content-Type-Options': 'nosniff',
-        },
-      });
-    }
+    const filename = localImageName(key);
+    if (!filename) return NextResponse.json({ error: 'Invalid image reference' }, { status: 400 });
 
-    if (process.env.NODE_ENV !== 'production') {
-      const filename = localImageName(key);
-      if (!filename) return NextResponse.json({ error: 'Invalid image reference' }, { status: 400 });
-      const buffer = await fs.readFile(path.join(process.cwd(), 'public', 'uploads', 'chat-images', filename));
-      const ext = filename.split('.').pop();
-      const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
-      return new NextResponse(buffer as any, {
-        status: 200,
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'private, max-age=3600',
-          'X-Content-Type-Options': 'nosniff',
-        },
-      });
-    }
+    const buffer = await fs.readFile(
+      path.join(process.cwd(), 'public', 'uploads', 'chat-images', filename)
+    );
+    const ext = filename.split('.').pop();
+    const contentType =
+      ext === 'png' ? 'image/png' :
+      ext === 'webp' ? 'image/webp' :
+      ext === 'gif' ? 'image/gif' :
+      'image/jpeg';
+
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'private, max-age=3600',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
 
     return NextResponse.json({ error: 'Image storage unavailable' }, { status: 503 });
   } catch (error) {
