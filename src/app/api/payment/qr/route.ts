@@ -14,6 +14,7 @@ export async function GET() {
             'paymentQrUrlIndiaWeekly',
             'paymentQrUrlIndiaMonthly',
             'paymentQrUrlIndiaYearly',
+            'paymentQrUrlIndiaThreeMonths',
             'paymentQrUrlInternational',
             'merchantUpiId',
             'merchantName',
@@ -32,6 +33,7 @@ export async function GET() {
     const paymentQrUrlIndia = settingsMap.get('paymentQrUrlIndia') || '/uploads/qr/payment-qr-india.jpg';
     const paymentQrUrlIndiaWeekly = settingsMap.get('paymentQrUrlIndiaWeekly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaMonthly = settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
+    const paymentQrUrlIndiaThreeMonths = settingsMap.get('paymentQrUrlIndiaThreeMonths') || settingsMap.get('paymentQrUrlIndiaMonthly') || paymentQrUrlIndia;
     const paymentQrUrlIndiaYearly = settingsMap.get('paymentQrUrlIndiaYearly') || '/uploads/qr/payment-qr-india-199.jpg';
     const paymentQrUrlInternational = settingsMap.get('paymentQrUrlInternational') || '/lexino-qr.jpg';
     const storedMerchantUpiId = settingsMap.get('merchantUpiId');
@@ -75,7 +77,7 @@ export async function GET() {
           threeMonths: indiaPriceThreeMonths,
           yearly: indiaPriceYearly,
           qrMonthly: paymentQrUrlIndiaMonthly,
-          qrThreeMonths: paymentQrUrlIndiaMonthly,
+          qrThreeMonths: paymentQrUrlIndiaThreeMonths,
           qrYearly: paymentQrUrlIndiaYearly,
           upiMonthly: buildUpiUri(indiaPriceMonthly, 'Monthly'),
           upiThreeMonths: buildUpiUri(indiaPriceThreeMonths, '3 Months'),
