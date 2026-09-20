@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { saveBase64Image } from '@/lib/safeImageUpload';
+import { saveBase64Image, deleteStoredImage } from '@/lib/safeImageUpload';
 
 export async function POST(req: Request) {
   try {
@@ -23,11 +23,13 @@ export async function POST(req: Request) {
 
     const settingKey = region === 'international' ? 'paymentQrUrlInternational' : 'paymentQrUrlIndia';
     let savedQrUrl = null;
+    const previousQr = await prisma.appSetting.findUnique({ where: { key: settingKey } });
 
     if (qrImageData && qrImageData.startsWith('data:image/')) {
       const uploadRes = await saveBase64Image(qrImageData, 'uploads/qr', `payment_qr_${region}`);
       if (uploadRes.success && uploadRes.url) {
         savedQrUrl = uploadRes.url;
+        if (previousQr?.value && previousQr.value !== savedQrUrl) await deleteStoredImage(previousQr.value);
         await prisma.appSetting.upsert({
           where: { key: settingKey },
           update: { value: savedQrUrl },
