@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
-import { calculateAge } from '@/lib/firestoreUser';
+import { calculateDobAge as calculateAge } from '@/lib/validation/dob';
 import { validateDob, MIN_DOB_STRING, getTodayDateString } from '@/lib/validation/dob';
 import { Heart, User, Calendar, Smile, ArrowRight, ShieldCheck, CheckCircle2, Loader2, Clock, AtSign } from 'lucide-react';
 import FloatingHearts from '@/components/FloatingHearts';
