@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
 import { isVipAvatar } from '@/lib/avatars';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 import { validateDob } from '@/lib/validation/dob';
 import { saveBase64Image, deleteStoredImage } from '@/lib/safeImageUpload';
 import { isUserVip, DEFAULT_BIO } from '@/lib/vipAuth';
@@ -345,31 +344,6 @@ export async function PUT(req: Request) {
       where: { userId: user.id },
       data: profileUpdateData,
     });
-
-    // Sync to Cloud Firestore in the background via Admin SDK
-    try {
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        const uids = Array.from(new Set([user.id, user.clerkUserId, user.firebaseUid])).filter(Boolean) as string[];
-        const fsUpdates: any = {
-          updatedAt: Date.now(),
-        };
-        if (cleanDisplayName) {
-          fsUpdates.displayName = cleanDisplayName;
-          fsUpdates.fullName = cleanDisplayName;
-        }
-        if (cleanGender && isVIP) {
-          fsUpdates.gender = cleanGender;
-        }
-        if (updatedProfile.avatarEmoji) fsUpdates['profile.avatarEmoji'] = updatedProfile.avatarEmoji;
-        if (updatedProfile.avatarType) fsUpdates['profile.avatarType'] = updatedProfile.avatarType;
-        if (updatedProfile.avatarUrl) fsUpdates['profile.avatarUrl'] = updatedProfile.avatarUrl;
-        if (cleanBio !== undefined) fsUpdates['profile.bio'] = cleanBio;
-        Promise.all(uids.map((u) => adminDb.collection('users').doc(u).set(fsUpdates, { merge: true }).catch(() => {}))).catch(() => {});
-      }
-    } catch (fsErr) {
-      console.warn('Firestore server sync notice:', fsErr);
-    }
 
     const remainingNameChanges = Math.max(0, 4 - (updatedProfile.nameChangesCount ?? 0));
 
