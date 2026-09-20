@@ -4,6 +4,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import { getAdminStorage } from '@/lib/firebaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
@@ -179,19 +180,39 @@ export async function POST(req: Request) {
       }
     }
 
-    // 7. Save image to disk securely
+    // 7. Store images in durable object storage in production.
+    // Local filesystem is retained only for local development because Vercel
+    // serverless filesystems are ephemeral and not shared across instances.
     const randomKey = crypto.randomBytes(16).toString('hex');
     const filename = `vip_photo_${Date.now()}_${randomKey}.${ext}`;
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'chat-images');
-    const altUploadDir = path.join(process.cwd(), 'uploads', 'chat-images');
-    await fs.mkdir(uploadDir, { recursive: true });
-    await fs.mkdir(altUploadDir, { recursive: true }).catch(() => {});
-    await Promise.all([
-      fs.writeFile(path.join(uploadDir, filename), buffer),
-      fs.writeFile(path.join(altUploadDir, filename), buffer).catch(() => {}),
-    ]);
+    const contentType = isPng ? 'image/png' : isWebp ? 'image/webp' : isGif ? 'image/gif' : 'image/jpeg';
 
-    const imageUrl = `/uploads/chat-images/${filename}`;
+    let imageUrl: string;
+    const storage = getAdminStorage();
+
+    if (storage) {
+      const bucket = storage.bucket();
+      const objectPath = `chat-images/${filename}`;
+      const fileRef = bucket.file(objectPath);
+      await fileRef.save(buffer, {
+        resumable: false,
+        metadata: {
+          contentType,
+          cacheControl: 'private, max-age=3600',
+        },
+      });
+      imageUrl = `/api/chat/image?key=${encodeURIComponent(objectPath)}`;
+    } else if (process.env.NODE_ENV !== 'production') {
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'chat-images');
+      await fs.mkdir(uploadDir, { recursive: true });
+      await fs.writeFile(path.join(uploadDir, filename), buffer);
+      imageUrl = `/uploads/chat-images/${filename}`;
+    } else {
+      return NextResponse.json(
+        { error: 'Image storage is temporarily unavailable. Please try again.' },
+        { status: 503 }
+      );
+    }
 
     // 8. Image storage only. The canonical chat message is created by the
     // Socket.IO/HTTP message endpoint so a retry cannot create duplicates.
