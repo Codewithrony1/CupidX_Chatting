@@ -290,6 +290,7 @@ async function getCachedUserData(userId) {
       language: userDb?.profile?.language || 'english',
       plan: isVIP ? 'vip' : 'free',
       isVIP,
+      isSuspended: Boolean(userDb?.isSuspended),
     };
 
     userCache.set(userId, { data, timestamp: Date.now() });
@@ -875,6 +876,11 @@ io.on('connection', async (socket) => {
     ]);
 
     if (!userSockets.has(userId)) return;
+    if (userData.isSuspended) {
+      matchmakingStates.set(userId, 'IDLE');
+      socket.emit('matchmaking_blocked', { reason: 'ACCOUNT_RESTRICTED' });
+      return;
+    }
     if (userActiveMatch.has(userId)) return;
 
     const country = detectCountryFromSocket(socket);
@@ -1058,6 +1064,11 @@ io.on('connection', async (socket) => {
     ]);
 
     if (!userSockets.has(userId)) return;
+    if (userData.isSuspended) {
+      matchmakingStates.set(userId, 'IDLE');
+      socket.emit('matchmaking_blocked', { reason: 'ACCOUNT_RESTRICTED' });
+      return;
+    }
     if (userActiveMatch.has(userId)) {
       teardownMatch(userActiveMatch.get(userId), 'partner_skipped', userId);
     }
