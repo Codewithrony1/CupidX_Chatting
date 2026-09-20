@@ -232,57 +232,8 @@ export async function POST(req: Request) {
           });
 
           if (callerClaim.count !== 1) {
-            return null;
+            throw new Error('caller_queue_claim_lost');
           }
-
-          // Create authoritative active ChatSession
-          await tx.matchmakingQueue.upsert({
-            where: { userId: candidate.userId },
-            update: {
-              status: 'MATCHED',
-              chatSessionId: newChatSessionId,
-              partnerUserId: user.id,
-              updatedAt: new Date(),
-            },
-            create: {
-              userId: candidate.userId,
-              status: 'MATCHED',
-              chatSessionId: newChatSessionId,
-              partnerUserId: user.id,
-              countryCode: candidate.countryCode || 'IN',
-              countryName: candidate.countryName || 'India',
-              countryFlag: candidate.countryFlag || '🇮🇳',
-            },
-          });
-
-          // Mark current caller as MATCHED
-          await tx.matchmakingQueue.upsert({
-            where: { userId: user.id },
-            update: {
-              status: 'MATCHED',
-              chatSessionId: newChatSessionId,
-              partnerUserId: candidate.userId,
-              gender,
-              preferredGender,
-              language,
-              countryCode: userCountry.countryCode,
-              countryName: userCountry.countryName,
-              countryFlag: userCountry.countryFlag,
-              updatedAt: new Date(),
-            },
-            create: {
-              userId: user.id,
-              status: 'MATCHED',
-              chatSessionId: newChatSessionId,
-              partnerUserId: candidate.userId,
-              gender,
-              preferredGender,
-              language,
-              countryCode: userCountry.countryCode,
-              countryName: userCountry.countryName,
-              countryFlag: userCountry.countryFlag,
-            },
-          });
 
           // Create authoritative active ChatSession
           return await tx.chatSession.create({
