@@ -154,7 +154,7 @@ export default function AdminPage() {
   const [qrSettings, setQrSettings] = useState({
     paymentQrUrlIndia: '/uploads/qr/payment-qr-india.jpg',
     paymentQrUrlInternational: '/lexino-qr.jpg',
-    merchantUpiId: 'cupidxchat@upi',
+    merchantUpiId: 'sumitpornsware@fam',
     receiverName: 'CupidxChat',
     indiaInstructions: 'Scan the QR code using any UPI app (GPay, PhonePe, Paytm, BHIM) and complete payment.',
     internationalMethod: 'PayPal / Wise / Cards',
@@ -165,6 +165,9 @@ export default function AdminPage() {
     indiaPriceYearly: 199,
     intlPriceMonthly: 2,
     intlPriceYearly: 12,
+    indiaQrMonthlyUrl: '/uploads/qr/payment-qr-india.jpg',
+    indiaQrThreeMonthsUrl: '/uploads/qr/payment-qr-india.jpg',
+    indiaQrYearlyUrl: '/uploads/qr/payment-qr-india-199.jpg',
   });
   const [savingQr, setSavingQr] = useState(false);
   const [qrSuccessMsg, setQrSuccessMsg] = useState('');
@@ -312,9 +315,12 @@ export default function AdminPage() {
           ...prev,
           paymentQrUrlIndia: data.paymentQrUrlIndia || '/uploads/qr/payment-qr-india.jpg',
           paymentQrUrlInternational: data.paymentQrUrlInternational || '/lexino-qr.jpg',
-          merchantUpiId: data.merchantUpiId || 'cupidxchat@upi',
+          merchantUpiId: data.merchantUpiId || 'sumitpornsware@fam',
           indiaPriceMonthly: data.pricing?.india?.monthly || 29,
-          indiaPriceYearly: data.pricing?.india?.yearly || 199,
+          indiaPriceYearly: data.pricing?.india?.yearly || 399,
+          indiaQrMonthlyUrl: data.pricing?.india?.qrMonthly || '/uploads/qr/payment-qr-india.jpg',
+          indiaQrThreeMonthsUrl: data.pricing?.india?.qrThreeMonths || '/uploads/qr/payment-qr-india.jpg',
+          indiaQrYearlyUrl: data.pricing?.india?.qrYearly || '/uploads/qr/payment-qr-india-199.jpg',
           intlPriceMonthly: data.pricing?.international?.monthly || 2,
           intlPriceYearly: data.pricing?.international?.yearly || 12,
         }));
@@ -517,6 +523,9 @@ export default function AdminPage() {
           indiaPriceYearly: qrSettings.indiaPriceYearly,
           intlPriceMonthly: qrSettings.intlPriceMonthly,
           intlPriceYearly: qrSettings.intlPriceYearly,
+          indiaQrMonthlyUrl: qrSettings.indiaQrMonthlyUrl,
+          indiaQrThreeMonthsUrl: qrSettings.indiaQrThreeMonthsUrl,
+          indiaQrYearlyUrl: qrSettings.indiaQrYearlyUrl,
         }),
       });
 
