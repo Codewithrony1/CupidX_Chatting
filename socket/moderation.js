@@ -1,22 +1,111 @@
-const DEFAULT_MODEL = process.env.MODERATION_MODEL || 'omni-moderation-latest';
-const DEFAULT_ENDPOINT = process.env.MODERATION_API_URL || 'https://api.openai.com/v1/moderations';
+// CupidxChat self-hosted moderation engine.
+// No OpenAI/Gemini/third-party moderation API is used here.
+// This module runs entirely on the backend.
 
-const CATEGORY_RULES = [
-  { category: 'SEXUAL_SOLICITATION', severity: 'HIGH_RISK', patterns: [/send\s+(?:me\s+)?(?:nudes?|pics?|photos?)/i, /(?:sex|hookup|meet)\s+(?:me|tonight|irl)/i, /onlyfans|cashapp\s+for\s+(?:sex|nudes?)/i] },
-  { category: 'THREAT', severity: 'CRITICAL', patterns: [/\b(?:kill|murder|shoot|stab|hurt)\s+(?:you|u|him|her|them)\b/i, /\bi(?:'| a)m\s+going\s+to\s+(?:kill|hurt)/i] },
-  { category: 'SCAM', severity: 'HIGH_RISK', patterns: [/send\s+(?:me\s+)?(?:money|crypto|gift\s*card)/i, /guaranteed\s+(?:profit|return)|double\s+your\s+money/i, /verify\s+your\s+account\s+(?:here|at)/i] },
-  { category: 'MALICIOUS_LINK', severity: 'HIGH_RISK', patterns: [/(?:https?:\/\/)?(?:bit\.ly|tinyurl\.com|t\.me|discord\.gg)\//i] },
-  { category: 'SPAM', severity: 'MEDIUM_RISK', patterns: [/(.{2,})\1{4,}/i, /(?:free|win|winner|click)\s+(?:now|here).{0,30}(?:free|win|offer)/i] },
-  { category: 'HARASSMENT', severity: 'MEDIUM_RISK', patterns: [/(?:idiot|stupid|moron|loser)\s+(?:you|u)/i] },
-  { category: 'HATE_ABUSE', severity: 'HIGH_RISK', patterns: [/\b(?:go\s+back|you\s+people)\b/i] },
+const RISK_RANK = {
+  SAFE: 0,
+  LOW_RISK: 1,
+  MEDIUM_RISK: 2,
+  HIGH_RISK: 3,
+  CRITICAL: 4,
+};
+
+const LEET_MAP = {
+  '0': 'o',
+  '1': 'i',
+  '3': 'e',
+  '4': 'a',
+  '5': 's',
+  '7': 't',
+  '@': 'a',
+  '$': 's',
+};
+
+const RULES = [
+  {
+    category: 'THREAT',
+    severity: 'CRITICAL',
+    patterns: [
+      /\b(?:kill|murder|shoot|stab|strangle|bomb|attack)\s+(?:you|u|him|her|them)\b/i,
+      /\b(?:i(?:'| a)m|im|i am)\s+(?:going\s+to|gonna)\s+(?:kill|hurt|murder|shoot|stab)\b/i,
+      /\b(?:you(?:'|ll| will)\s+die|death\s+threat)\b/i,
+    ],
+  },
+  {
+    category: 'SEXUAL_SOLICITATION',
+    severity: 'HIGH_RISK',
+    patterns: [
+      /\b(?:send|show)\s+(?:me\s+)?(?:your\s+)?(?:nudes?|naked\s+pics?|explicit\s+pics?|sex\s+pics?)\b/i,
+      /\b(?:sex|hookup|hook\s*up)\s+(?:with|meet)\s+(?:me|u)\b/i,
+      /\b(?:onlyfans|cashapp)\b.{0,40}\b(?:sex|nudes?|meet)\b/i,
+      /\b(?:come|meet)\s+(?:over|irl)\b.{0,30}\b(?:sex|fuck|hookup)\b/i,
+    ],
+  },
+  {
+    category: 'SCAM',
+    severity: 'HIGH_RISK',
+    patterns: [
+      /\b(?:send|pay|transfer)\s+(?:me\s+)?(?:money|cash|crypto|bitcoin|gift\s*card)\b/i,
+      /\b(?:double|triple)\s+(?:your\s+)?money\b/i,
+      /\bguaranteed\s+(?:profit|return|income)\b/i,
+      /\b(?:verify|confirm)\s+your\s+account\b.{0,50}\b(?:link|click|login|password|otp)\b/i,
+      /\b(?:otp|password|cvv|upi\s+pin)\b.{0,40}\b(?:send|share|tell|give)\b/i,
+    ],
+  },
+  {
+    category: 'MALICIOUS_LINK',
+    severity: 'HIGH_RISK',
+    patterns: [
+      /\b(?:https?:\/\/)?(?:bit\.ly|tinyurl\.com|t\.co|is\.gd|rb\.gy|cutt\.ly|grabify\.link|iplogger\.)\S*/i,
+      /\b(?:discord\.gg|t\.me|wa\.me)\/\S+/i,
+    ],
+  },
+  {
+    category: 'HATE_ABUSE',
+    severity: 'HIGH_RISK',
+    patterns: [
+      /\b(?:go\s+back|you\s+people)\b.{0,25}\b(?:race|country|religion|caste)\b/i,
+      /\b(?:hate|kill)\s+(?:all|every)\s+(?:of\s+)?(?:them|you\s+people)\b/i,
+    ],
+  },
+  {
+    category: 'HARASSMENT',
+    severity: 'MEDIUM_RISK',
+    patterns: [
+      /\b(?:idiot|stupid|moron|loser|dumb|shut\s*up)\b.{0,20}\b(?:you|u|ur)\b/i,
+      /\b(?:fuck|fck|f\*ck)\s+(?:you|u)\b/i,
+    ],
+  },
+  {
+    category: 'SPAM',
+    severity: 'MEDIUM_RISK',
+    patterns: [
+      /(.)\1{5,}/i,
+      /(?:free|win|winner|click|claim)\s+(?:now|here|today).{0,50}(?:free|win|offer|prize)/i,
+      /\b(?:dm|message)\s+me\b.{0,25}\b(?:everyone|all|100%)\b/i,
+    ],
+  },
 ];
 
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[013457@$]/g, (char) => LEET_MAP[char] || char)
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function compactText(value) {
+  return normalizeText(value).replace(/\s+/g, '');
+}
+
 function riskFromSeverity(severity, confidence) {
-  if (severity === 'CRITICAL' || confidence >= 0.92 && severity === 'HIGH_RISK') return 'CRITICAL';
-  if (severity === 'HIGH_RISK' || confidence >= 0.80) return 'HIGH_RISK';
-  if (severity === 'MEDIUM_RISK' || confidence >= 0.55) return 'MEDIUM_RISK';
-  if (confidence >= 0.25) return 'LOW_RISK';
-  return 'SAFE';
+  if (severity === 'CRITICAL') return 'CRITICAL';
+  if (severity === 'HIGH_RISK') return confidence >= 0.92 ? 'CRITICAL' : 'HIGH_RISK';
+  if (severity === 'MEDIUM_RISK') return 'MEDIUM_RISK';
+  return confidence >= 0.25 ? 'LOW_RISK' : 'SAFE';
 }
 
 function policyForRisk(risk) {
@@ -26,115 +115,129 @@ function policyForRisk(risk) {
   return 'NONE';
 }
 
-function heuristicAnalyze(text, context = {}) {
-  const normalized = String(text || '').trim();
-  let hit = null;
-  for (const rule of CATEGORY_RULES) {
-    if (rule.patterns.some((pattern) => pattern.test(normalized))) {
-      hit = rule;
-      break;
+function detectBehavior(text, context) {
+  const compact = compactText(text);
+  const normalized = normalizeText(text);
+  const recentCount = Number(context.recentMessageCount || 0);
+  const reportCount = Number(context.reportCount || 0);
+  const priorHighRiskCount = Number(context.priorHighRiskCount || 0);
+
+  if (recentCount >= 12) {
+    return {
+      category: 'MESSAGE_FLOOD',
+      severity: 'HIGH_RISK',
+      confidence: 0.90,
+      reason: 'Excessive message frequency detected.',
+    };
+  }
+
+  if (recentCount >= 7 && normalized.length <= 16) {
+    return {
+      category: 'SPAM',
+      severity: 'MEDIUM_RISK',
+      confidence: 0.78,
+      reason: 'Repeated short-message behavior detected.',
+    };
+  }
+
+  if (reportCount >= 6 || priorHighRiskCount >= 5) {
+    return {
+      category: 'REPEATED_ABUSE',
+      severity: 'HIGH_RISK',
+      confidence: 0.86,
+      reason: 'Repeated reports or high-risk moderation history detected.',
+    };
+  }
+
+  if (reportCount >= 3 || priorHighRiskCount >= 2) {
+    return {
+      category: 'BEHAVIORAL_SIGNAL',
+      severity: 'MEDIUM_RISK',
+      confidence: 0.62,
+      reason: 'Previous safety signals increased moderation risk.',
+    };
+  }
+
+  // Catch URL flooding and excessive repeated tokens locally.
+  const words = normalized.split(' ').filter(Boolean);
+  const uniqueWords = new Set(words);
+  if (words.length >= 12 && uniqueWords.size <= Math.max(3, Math.floor(words.length * 0.25))) {
+    return {
+      category: 'SPAM',
+      severity: 'MEDIUM_RISK',
+      confidence: 0.75,
+      reason: 'Highly repetitive message content detected.',
+    };
+  }
+
+  if (compact.length >= 8 && /(.)\1{5,}/i.test(compact)) {
+    return {
+      category: 'SPAM',
+      severity: 'MEDIUM_RISK',
+      confidence: 0.74,
+      reason: 'Repeated-character spam detected.',
+    };
+  }
+
+  return null;
+}
+
+function analyzeMessage(text, context = {}) {
+  const raw = String(text || '').trim();
+  if (!raw) {
+    return {
+      risk: 'SAFE',
+      category: 'NONE',
+      confidence: 1,
+      recommendedAction: 'NONE',
+      reason: null,
+    };
+  }
+
+  const normalized = normalizeText(raw);
+  const compact = compactText(raw);
+
+  // Evaluate the original, normalized and compact forms so basic evasion does not bypass rules.
+  for (const rule of RULES) {
+    if (rule.patterns.some((pattern) => pattern.test(raw) || pattern.test(normalized) || pattern.test(compact))) {
+      let confidence = rule.severity === 'CRITICAL' ? 0.99 : rule.severity === 'HIGH_RISK' ? 0.91 : 0.78;
+      let risk = riskFromSeverity(rule.severity, confidence);
+
+      // Repeated prior signals can raise a non-critical violation one level.
+      if (risk === 'MEDIUM_RISK' && (Number(context.priorHighRiskCount || 0) >= 2 || Number(context.reportCount || 0) >= 3)) {
+        risk = 'HIGH_RISK';
+        confidence = 0.88;
+      }
+
+      return {
+        risk,
+        category: rule.category,
+        confidence,
+        recommendedAction: policyForRisk(risk),
+        reason: 'Self-hosted moderation rule matched.',
+      };
     }
   }
 
-  const repeatedSpam = Number(context.recentMessageCount || 0) >= 6 && normalized.length < 12;
-  if (!hit && repeatedSpam) {
-    hit = { category: 'SPAM', severity: 'MEDIUM_RISK' };
-  }
-
-  if (!hit) {
-    let safeRisk = 'SAFE';
-    if (Number(context.priorHighRiskCount || 0) >= 3 || Number(context.reportCount || 0) >= 4) safeRisk = 'MEDIUM_RISK';
-    else if (Number(context.priorHighRiskCount || 0) >= 1 || Number(context.reportCount || 0) >= 2) safeRisk = 'LOW_RISK';
-    return {
-      risk: safeRisk,
-      category: 'BEHAVIORAL_SIGNAL',
-      confidence: safeRisk === 'SAFE' ? 0.05 : 0.45,
-      recommendedAction: policyForRisk(safeRisk),
-      reason: safeRisk === 'SAFE' ? null : 'Behavioral history increased moderation attention.',
-    };
-  }
-
-  const confidence = hit.severity === 'CRITICAL' ? 0.97 : hit.severity === 'HIGH_RISK' ? 0.88 : 0.72;
-  let risk = riskFromSeverity(hit.severity, confidence);
-  if (risk === 'MEDIUM_RISK' && (Number(context.priorHighRiskCount || 0) >= 2 || Number(context.reportCount || 0) >= 3)) risk = 'HIGH_RISK';
-  const category = risk !== 'SAFE' && hit.category === 'NONE' ? 'BEHAVIORAL_SIGNAL' : hit.category;
-  return {
-    risk,
-    category,
-    confidence: Math.min(0.99, confidence + (risk === 'HIGH_RISK' && confidence < 0.8 ? 0.08 : 0)),
-    recommendedAction: policyForRisk(risk),
-    reason: 'Safety signal evaluated with recent behavior and report history.',
-  };
-}
-
-async function aiAnalyze(text, context = {}) {
-  const apiKey = process.env.MODERATION_API_KEY || process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3500);
-
-  try {
-    const response = await fetch(DEFAULT_ENDPOINT, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: DEFAULT_MODEL,
-        input: String(text || ''),
-      }),
-    });
-
-    if (!response.ok) return null;
-    const data = await response.json();
-    const result = data?.results?.[0];
-    if (!result) return null;
-
-    const scores = result.category_scores || {};
-    const flagged = result.flagged === true;
-    const scorePairs = Object.entries(scores).sort((a, b) => Number(b[1]) - Number(a[1]));
-    const top = scorePairs[0];
-    const topCategory = top ? String(top[0]).toUpperCase() : 'NONE';
-    const topScore = top ? Number(top[1]) : 0;
-
-    let category = 'NONE';
-    if (topCategory.includes('SEXUAL')) category = 'SEXUAL_CONTENT';
-    else if (topCategory.includes('HARASSMENT')) category = 'HARASSMENT';
-    else if (topCategory.includes('HATE')) category = 'HATE_ABUSE';
-    else if (topCategory.includes('THREAT')) category = 'THREAT';
-    else if (topCategory.includes('VIOLENCE')) category = 'VIOLENCE';
-    else if (topCategory.includes('SELF_HARM')) category = 'SELF_HARM';
-    else if (topCategory.includes('ILLICIT')) category = 'ILLICIT_CONTENT';
-    else if (topCategory !== 'NONE') category = topCategory;
-
-    const severity = topScore >= 0.92 ? 'CRITICAL' : topScore >= 0.75 ? 'HIGH_RISK' : topScore >= 0.45 ? 'MEDIUM_RISK' : 'LOW_RISK';
-    const risk = flagged ? riskFromSeverity(severity, topScore) : riskFromSeverity(severity, topScore);
+  const behavior = detectBehavior(raw, context);
+  if (behavior) {
+    const risk = riskFromSeverity(behavior.severity, behavior.confidence);
     return {
       risk,
-      category,
-      confidence: Math.max(0, Math.min(1, topScore)),
+      category: behavior.category,
+      confidence: behavior.confidence,
       recommendedAction: policyForRisk(risk),
-      reason: `AI moderation model: ${DEFAULT_MODEL}`,
+      reason: behavior.reason,
     };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
-}
 
-async function analyzeMessage(text, context = {}) {
-  const heuristic = heuristicAnalyze(text, context);
-  const ai = await aiAnalyze(text, context);
-
-  // Deterministic policy engine: never downgrade a stronger local safety signal.
-  if (!ai) return heuristic;
-  const heuristicRank = { SAFE: 0, LOW_RISK: 1, MEDIUM_RISK: 2, HIGH_RISK: 3, CRITICAL: 4 };
-  const chosen = heuristicRank[heuristic.risk] > heuristicRank[ai.risk] ? heuristic : ai;
-  return chosen;
+  return {
+    risk: 'SAFE',
+    category: 'NONE',
+    confidence: 0.98,
+    recommendedAction: 'NONE',
+    reason: null,
+  };
 }
 
 async function recordModerationEvent(prisma, data) {
@@ -150,4 +253,5 @@ module.exports = {
   analyzeMessage,
   recordModerationEvent,
   policyForRisk,
+  normalizeText,
 };
