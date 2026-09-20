@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
+import { verifyAdminAccess } from '@/lib/adminAuth';
 import { prisma } from '@/lib/prisma';
 
 export async function GET(req: Request) {
   try {
-    const admin = await getCurrentUser(req);
-    if (!admin || admin.role !== 'ADMIN') {
+    const { authorized } = await verifyAdminAccess(req);
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
