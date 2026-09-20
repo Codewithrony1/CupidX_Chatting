@@ -43,7 +43,7 @@ export async function GET(req: Request) {
       const [buffer] = await storage.bucket().file(key).download();
       const ext = key.split('.').pop();
       const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
-      return new NextResponse(buffer as any, {
+      return new NextResponse(new Uint8Array(buffer), {
         status: 200,
         headers: {
           'Content-Type': contentType,
