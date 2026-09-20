@@ -42,17 +42,28 @@ function heuristicAnalyze(text, context = {}) {
   }
 
   if (!hit) {
-    return { risk: 'SAFE', category: 'NONE', confidence: 0.05, recommendedAction: 'NONE', reason: null };
+    let safeRisk = 'SAFE';
+    if (Number(context.priorHighRiskCount || 0) >= 3 || Number(context.reportCount || 0) >= 4) safeRisk = 'MEDIUM_RISK';
+    else if (Number(context.priorHighRiskCount || 0) >= 1 || Number(context.reportCount || 0) >= 2) safeRisk = 'LOW_RISK';
+    return {
+      risk: safeRisk,
+      category: 'BEHAVIORAL_SIGNAL',
+      confidence: safeRisk === 'SAFE' ? 0.05 : 0.45,
+      recommendedAction: policyForRisk(safeRisk),
+      reason: safeRisk === 'SAFE' ? null : 'Behavioral history increased moderation attention.',
+    };
   }
 
   const confidence = hit.severity === 'CRITICAL' ? 0.97 : hit.severity === 'HIGH_RISK' ? 0.88 : 0.72;
-  const risk = riskFromSeverity(hit.severity, confidence);
+  let risk = riskFromSeverity(hit.severity, confidence);
+  if (risk === 'MEDIUM_RISK' && (Number(context.priorHighRiskCount || 0) >= 2 || Number(context.reportCount || 0) >= 3)) risk = 'HIGH_RISK';
+  const category = risk !== 'SAFE' && hit.category === 'NONE' ? 'BEHAVIORAL_SIGNAL' : hit.category;
   return {
     risk,
-    category: hit.category,
-    confidence,
+    category,
+    confidence: Math.min(0.99, confidence + (risk === 'HIGH_RISK' && confidence < 0.8 ? 0.08 : 0)),
     recommendedAction: policyForRisk(risk),
-    reason: 'Deterministic safety fallback matched a moderation pattern.',
+    reason: 'Safety signal evaluated with recent behavior and report history.',
   };
 }
 
