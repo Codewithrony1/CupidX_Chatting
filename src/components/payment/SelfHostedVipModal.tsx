@@ -56,9 +56,10 @@ export default function SelfHostedVipModal({
   // Dynamic QR & Pricing configs from server
   const [paymentQrUrlIndia, setPaymentQrUrlIndia] = useState<string>('/uploads/qr/payment-qr-india.jpg');
   const [paymentQrUrlIndiaMonthly, setPaymentQrUrlIndiaMonthly] = useState<string>('/uploads/qr/payment-qr-india.jpg');
-  const [paymentQrUrlIndiaYearly, setPaymentQrUrlIndiaYearly] = useState<string>('/uploads/qr/payment-qr-india-199.jpg');
+  const [paymentQrUrlIndiaThreeMonths, setPaymentQrUrlIndiaThreeMonths] = useState<string>('/uploads/qr/payment-qr-india.jpg');
+  const [paymentQrUrlIndiaYearly, setPaymentQrUrlIndiaYearly] = useState<string>('/uploads/qr/payment-qr-india-yearly.jpg');
   const [paymentQrUrlInternational, setPaymentQrUrlInternational] = useState<string>('/lexino-qr.jpg');
-  const [merchantUpiId, setMerchantUpiId] = useState<string>('cupidxchat@upi');
+  const [merchantUpiId, setMerchantUpiId] = useState<string>('sumitpornsware@fam');
   const [merchantName, setMerchantName] = useState<string>('CupidX Chat');
   const [pricing, setPricing] = useState({
     india: { currency: 'INR', symbol: '₹', monthly: 29, threeMonths: 99, yearly: 399 },
@@ -88,7 +89,7 @@ export default function SelfHostedVipModal({
       : (selectedPlan === '3months' ? (activePricing as any).threeMonths || 99 : activePricing.monthly);
   const activeQrUrl =
     selectedRegion === 'india'
-      ? (selectedPlan === 'yearly' ? paymentQrUrlIndiaYearly : paymentQrUrlIndiaMonthly)
+      ? (selectedPlan === 'yearly' ? paymentQrUrlIndiaYearly : (selectedPlan === '3months' ? paymentQrUrlIndiaThreeMonths : paymentQrUrlIndiaMonthly))
       : paymentQrUrlInternational;
 
   // Load QR settings and existing user payment status on mount / open
@@ -100,6 +101,7 @@ export default function SelfHostedVipModal({
         const qrData = await qrRes.json();
         if (qrData.paymentQrUrlIndia) setPaymentQrUrlIndia(qrData.paymentQrUrlIndia);
         if (qrData.paymentQrUrlIndiaMonthly) setPaymentQrUrlIndiaMonthly(qrData.paymentQrUrlIndiaMonthly);
+        if (qrData.pricing?.india?.qrThreeMonths) setPaymentQrUrlIndiaThreeMonths(qrData.pricing.india.qrThreeMonths);
         if (qrData.paymentQrUrlIndiaYearly) setPaymentQrUrlIndiaYearly(qrData.paymentQrUrlIndiaYearly);
         if (qrData.paymentQrUrlInternational) setPaymentQrUrlInternational(qrData.paymentQrUrlInternational);
         if (qrData.merchantUpiId) setMerchantUpiId(qrData.merchantUpiId);
