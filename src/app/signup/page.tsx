@@ -41,7 +41,11 @@ export default function SignupPage() {
       return;
     }
 
-    if (confirmPassword && password !== confirmPassword) {
+    if (!confirmPassword) {
+      setError('Please confirm your password.');
+      return;
+    }
+    if (password !== confirmPassword) {
       setError('Passwords do not match.');
       return;
     }
@@ -184,6 +188,7 @@ export default function SignupPage() {
               </label>
               <input
                 type="password"
+                required
                 placeholder="••••••••"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
