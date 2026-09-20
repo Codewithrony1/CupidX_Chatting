@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 import {
   getActiveUserSession,
   acquireDistributedMatch,
   releaseDistributedSession,
-  setFirestoreUserSearching,
 } from '@/lib/matchmakingLock';
 import crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 
 export async function POST(req: Request) {
   try {
@@ -121,6 +120,35 @@ export async function POST(req: Request) {
       ])
     ).filter(Boolean) as string[];
 
+    // Claim a WAITING row for the current caller before evaluating candidates.
+    // This gives both sides a database row that can be conditionally claimed atomically.
+    await prisma.matchmakingQueue.upsert({
+      where: { userId: user.id },
+      update: {
+        status: 'WAITING',
+        chatSessionId: null,
+        partnerUserId: null,
+        gender,
+        preferredGender,
+        language,
+        countryCode: userCountry.countryCode,
+        countryName: userCountry.countryName,
+        countryFlag: userCountry.countryFlag,
+        joinedAt: new Date(),
+        updatedAt: new Date(),
+      },
+      create: {
+        userId: user.id,
+        status: 'WAITING',
+        gender,
+        preferredGender,
+        language,
+        countryCode: userCountry.countryCode,
+        countryName: userCountry.countryName,
+        countryFlag: userCountry.countryFlag,
+      },
+    });
+
     // 6. Find all active WAITING candidates currently on the website
     const candidates = await prisma.matchmakingQueue.findMany({
       where: {
@@ -130,48 +158,6 @@ export async function POST(req: Request) {
       },
       take: 20,
     });
-
-    // Cross-container serverless fallback: also check Firestore searching candidates
-    try {
-      const adminDb = getAdminDb();
-      if (adminDb && candidates.length < 5) {
-        const firestoreQueueSnap = await adminDb
-          .collection('matchmaking')
-          .where('status', '==', 'searching')
-          .limit(20)
-          .get();
-
-        const firestoreNow = Date.now();
-        for (const doc of firestoreQueueSnap.docs) {
-          const d = doc.data();
-          const cUid = d.userId || d.uid;
-          const isRecentlyActive = firestoreNow - (d.updatedAt || d.joinedAt || 0) < 30000;
-          if (
-            cUid &&
-            isRecentlyActive &&
-            !excludeUserIds.includes(cUid) &&
-            !candidates.some((c) => c.userId === cUid)
-          ) {
-            candidates.push({
-              userId: cUid,
-              status: 'WAITING',
-              gender: d.gender || 'unspecified',
-              preferredGender: d.preferredGender || 'auto',
-              language: d.language || 'english',
-              countryCode: d.countryCode || 'IN',
-              countryName: d.countryName || 'India',
-              countryFlag: d.countryFlag || '🇮🇳',
-              chatSessionId: null,
-              partnerUserId: null,
-              joinedAt: new Date(d.joinedAt || firestoreNow),
-              updatedAt: new Date(d.updatedAt || firestoreNow),
-            } as any);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Firestore candidate scan notice:', e);
-    }
 
     // Randomly shuffle eligible candidates for unpredictable, genuine random matching
     const candidatesToEvaluate = [...candidates].sort(() => Math.random() - 0.5);
@@ -187,7 +173,7 @@ export async function POST(req: Request) {
 
       const newChatSessionId = crypto.randomUUID();
 
-      // Step 7a: Distributed atomic lock via Cloud Firestore transaction
+      // Step 7a: Fast Prisma preflight; the DB transaction below performs the atomic claim.
       const lockResult = await acquireDistributedMatch({
         userAId: user.id,
         userBId: candidate.userId,
@@ -201,27 +187,55 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // Step 7b: Local atomic match via Prisma $transaction
+      // Step 7b: Atomic Prisma transaction. Both queue rows must still be WAITING.
       try {
         const matchResult = await prisma.$transaction(async (tx) => {
-          // Double-check active sessions inside transaction
-          const existingSession = await tx.chatSession.findFirst({
+          // Conditionally claim the candidate. If another request claimed them first,
+          // count will be 0 and this transaction is rolled back.
+          const candidateClaim = await tx.matchmakingQueue.updateMany({
             where: {
-              status: 'ACTIVE',
-              OR: [
-                { userAId: user.id },
-                { userBId: user.id },
-                { userAId: candidate.userId },
-                { userBId: candidate.userId },
-              ],
+              userId: candidate.userId,
+              status: 'WAITING',
+              updatedAt: { gte: STALE_THRESHOLD },
+            },
+            data: {
+              status: 'MATCHED',
+              chatSessionId: newChatSessionId,
+              partnerUserId: user.id,
+              updatedAt: new Date(),
             },
           });
 
-          if (existingSession) {
-            return null; // Violates MAX ACTIVE SESSIONS PER USER = 1
+          if (candidateClaim.count !== 1) {
+            return null;
           }
 
-          // Mark candidate as MATCHED
+          // Claim the current caller at the same time. This prevents A<->B
+          // double-matching when both users click Join concurrently.
+          const callerClaim = await tx.matchmakingQueue.updateMany({
+            where: {
+              userId: user.id,
+              status: 'WAITING',
+            },
+            data: {
+              status: 'MATCHED',
+              chatSessionId: newChatSessionId,
+              partnerUserId: candidate.userId,
+              gender,
+              preferredGender,
+              language,
+              countryCode: userCountry.countryCode,
+              countryName: userCountry.countryName,
+              countryFlag: userCountry.countryFlag,
+              updatedAt: new Date(),
+            },
+          });
+
+          if (callerClaim.count !== 1) {
+            return null;
+          }
+
+          // Create authoritative active ChatSession
           await tx.matchmakingQueue.upsert({
             where: { userId: candidate.userId },
             update: {
@@ -279,6 +293,10 @@ export async function POST(req: Request) {
               status: 'ACTIVE',
             },
           });
+        }, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 5000,
+          timeout: 10000,
         });
 
         if (matchResult) {
@@ -361,16 +379,6 @@ export async function POST(req: Request) {
         joinedAt: new Date(),
         updatedAt: new Date(),
       },
-    });
-
-    // Mirror to Firestore searching status
-    await setFirestoreUserSearching(user.id, {
-      gender,
-      preferredGender,
-      language,
-      countryCode: userCountry.countryCode,
-      countryName: userCountry.countryName,
-      countryFlag: userCountry.countryFlag,
     });
 
     return NextResponse.json({
