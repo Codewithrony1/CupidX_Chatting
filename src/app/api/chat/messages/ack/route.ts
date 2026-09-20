@@ -16,6 +16,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'messageId or clientMessageId is required' }, { status: 400 });
     }
 
+    if (!chatSessionId) return NextResponse.json({ error: 'chatSessionId is required' }, { status: 400 });
+    const ackMessage = await prisma.message.findFirst({
+      where: { ...(messageId ? { id: messageId } : { clientMessageId }), chatSessionId },
+      include: { chatSession: true },
+    });
+    if (!ackMessage) return NextResponse.json({ error: 'Message not found' }, { status: 404 });
+    if (ackMessage.chatSession.status !== 'ACTIVE') return NextResponse.json({ error: 'Chat session is no longer active' }, { status: 400 });
+    if (ackMessage.senderId === user.id) return NextResponse.json({ error: 'Sender cannot acknowledge their own message' }, { status: 403 });
+    if (![ackMessage.chatSession.userAId, ackMessage.chatSession.userBId].includes(user.id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
     const now = new Date();
     const nowIso = now.toISOString();
 
