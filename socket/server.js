@@ -981,9 +981,20 @@ io.on('connection', async (socket) => {
     recentMatchMessageCounts.set(matchId, (recentMatchMessageCounts.get(matchId) || 0) + 1);
     setImmediate(async () => {
       try {
+        const [reportCount, priorHighRiskCount] = await Promise.all([
+          prisma.report.count({ where: { reportedUserId: userId } }).catch(() => 0),
+          prisma.moderationEvent.count({
+            where: {
+              userId,
+              risk: { in: ['HIGH_RISK', 'CRITICAL'] },
+              createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+            },
+          }).catch(() => 0),
+        ]);
         const result = await analyzeMessage(messageObj.content, {
           recentMessageCount: recentMatchMessageCounts.get(matchId) || 0,
-          reportCount: await prisma.report.count({ where: { reportedUserId: userId } }).catch(() => 0),
+          reportCount,
+          priorHighRiskCount,
           matchId,
         });
         const action = result.risk === 'CRITICAL' ? 'MATCH_TERMINATED_PENDING_REVIEW' : result.risk === 'HIGH_RISK' ? 'FLAGGED_FOR_ADMIN_REVIEW' : result.risk === 'MEDIUM_RISK' ? 'MONITOR' : 'NONE';
