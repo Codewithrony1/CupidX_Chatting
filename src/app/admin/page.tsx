@@ -162,12 +162,12 @@ export default function AdminPage() {
     internationalCurrency: 'USD',
     internationalInstructions: 'Scan international QR or send via PayPal, then submit transaction ID.',
     indiaPriceMonthly: 29,
-    indiaPriceYearly: 199,
+    indiaPriceYearly: 399,
     intlPriceMonthly: 2,
     intlPriceYearly: 12,
     indiaQrMonthlyUrl: '/uploads/qr/payment-qr-india.jpg',
     indiaQrThreeMonthsUrl: '/uploads/qr/payment-qr-india.jpg',
-    indiaQrYearlyUrl: '/uploads/qr/payment-qr-india-199.jpg',
+    indiaQrYearlyUrl: '/uploads/qr/payment-qr-india-yearly.jpg',
   });
   const [savingQr, setSavingQr] = useState(false);
   const [qrSuccessMsg, setQrSuccessMsg] = useState('');
@@ -320,7 +320,7 @@ export default function AdminPage() {
           indiaPriceYearly: data.pricing?.india?.yearly || 399,
           indiaQrMonthlyUrl: data.pricing?.india?.qrMonthly || '/uploads/qr/payment-qr-india.jpg',
           indiaQrThreeMonthsUrl: data.pricing?.india?.qrThreeMonths || '/uploads/qr/payment-qr-india.jpg',
-          indiaQrYearlyUrl: data.pricing?.india?.qrYearly || '/uploads/qr/payment-qr-india-199.jpg',
+          indiaQrYearlyUrl: data.pricing?.india?.qrYearly || '/uploads/qr/payment-qr-india-yearly.jpg',
           intlPriceMonthly: data.pricing?.international?.monthly || 2,
           intlPriceYearly: data.pricing?.international?.yearly || 12,
         }));
