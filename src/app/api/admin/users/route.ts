@@ -40,6 +40,8 @@ export async function GET(req: Request) {
         isSuspended: u.isSuspended,
         createdAt: u.createdAt,
         profile: u.profile,
+        avatarUrl: u.profile?.avatarUrl || null,
+        avatarType: u.profile?.avatarType || null,
         subscription: u.subscription,
       };
     });
