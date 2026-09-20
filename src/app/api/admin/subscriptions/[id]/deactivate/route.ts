@@ -49,6 +49,24 @@ export async function POST(
       },
     });
 
+    // Keep Clerk user metadata in sync so the UI immediately reflects VIP removal.
+    try {
+      const targetClerkId = user.clerkUserId || user.id;
+      if (targetClerkId) {
+        const { clerkClient } = await import('@clerk/nextjs/server');
+        const client = await clerkClient();
+        await client.users.updateUserMetadata(targetClerkId, {
+          publicMetadata: {
+            is_vip: false,
+            membershipTier: 'FREE',
+            vip_expires_at: null,
+          },
+        });
+      }
+    } catch (clerkSyncErr) {
+      console.warn('Clerk metadata sync warning during VIP removal:', clerkSyncErr);
+    }
+
     await prisma.adminLog.create({
       data: {
         adminUserId: admin?.id || 'admin',
