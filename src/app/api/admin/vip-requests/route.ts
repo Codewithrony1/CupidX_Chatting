@@ -38,8 +38,8 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser(req);
-    if (!user || user.role !== 'ADMIN') {
+    const { authorized, user } = await verifyAdminAccess(req);
+    if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
