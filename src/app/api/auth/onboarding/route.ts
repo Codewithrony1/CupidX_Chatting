@@ -46,7 +46,6 @@ export async function GET(req: Request) {
   }
 }
 
-import { getAdminDb } from '@/lib/firebaseAdmin';
 import { validateDob } from '@/lib/validation/dob';
 import { MINIMUM_LEGAL_AGE, CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION } from '@/lib/config/policy';
 
@@ -318,40 +317,7 @@ export async function POST(req: Request) {
 
     const isVIP = updatedUser.membershipTier === 'VIP' || (updatedUser.subscription?.isActive === true && updatedUser.subscription?.plan === 'VIP');
 
-    // 2. Server-side Cloud Firestore sync via Firebase Admin (Guaranteed Cloud Persistence)
-    try {
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        const firestoreData = {
-          fullName: cleanDisplayName,
-          displayName: cleanDisplayName,
-          gender: cleanGender,
-          dateOfBirth: parsedDob.toISOString().slice(0, 10),
-          profileCompleted: true,
-          profileLocked: true,
-          genderDobLocked: true,
-          updatedAt: Date.now(),
-          profile: {
-            fullName: cleanDisplayName,
-            displayName: cleanDisplayName,
-            gender: cleanGender,
-            dateOfBirth: parsedDob.toISOString().slice(0, 10),
-            age: calculatedAge,
-            avatarEmoji: selectedEmoji,
-            avatarType: 'EMOJI',
-            profileCompleted: true,
-            profileLocked: true,
-            ageGenderConfirmed: true,
-          },
-        };
-        const uids = Array.from(new Set([user.id, user.clerkUserId, user.firebaseUid, updatedUser?.id, updatedUser?.clerkUserId])).filter(Boolean) as string[];
-        await Promise.all(uids.map((u) => adminDb.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
-      }
-    } catch (fsErr) {
-      console.warn('Firestore server sync notice:', fsErr);
-    }
-
-    // 3. Save to Clerk User publicMetadata for permanent cross-session cloud persistence
+    // 2. Save to Clerk User publicMetadata for permanent cross-session cloud persistence
     try {
       const targetClerkId = user.clerkUserId || user.id;
       if (targetClerkId) {

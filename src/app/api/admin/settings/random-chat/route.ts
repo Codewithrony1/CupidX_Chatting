@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAdminAccess } from '@/lib/adminAuth';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,24 +47,7 @@ export async function POST(req: Request) {
       create: { key: 'randomChatEnabled', value: valueStr },
     });
 
-    // 2. Sync to Firestore settings/global for instant real-time client reflection
-    try {
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        await adminDb.collection('settings').doc('global').set(
-          {
-            randomChatEnabled: enabled,
-            updatedAt: Date.now(),
-            updatedBy: admin?.username || admin?.id || 'admin',
-          },
-          { merge: true }
-        );
-      }
-    } catch (fsErr) {
-      console.warn('Firestore global settings sync notice:', fsErr);
-    }
-
-    // 3. Write Admin Audit Log
+    // 2. Write Admin Audit Log
     try {
       await prisma.adminLog.create({
         data: {

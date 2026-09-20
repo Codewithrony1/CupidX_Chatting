@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     await prisma.adminLog.create({
       data: {
         adminUserId: user?.id || 'admin',
-        adminFirebaseUid: adminFirebaseUid || null,
+        adminClerkId: user?.clerkUserId || null,
         action: isSuspended ? 'BAN_USER' : 'UNBAN_USER',
         targetUserId: userId,
         details: `${isSuspended ? 'Suspended' : 'Unbanned'} user @${targetUser.username}`,

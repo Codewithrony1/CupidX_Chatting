@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAdminAccess } from '@/lib/adminAuth';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(req: Request) {
   try {
@@ -20,7 +19,7 @@ export async function POST(req: Request) {
 
     const targetUser = await prisma.user.findFirst({
       where: {
-        OR: [{ id: userId }, { clerkUserId: userId }, { firebaseUid: userId }],
+        OR: [{ id: userId }, { clerkUserId: userId }],
       },
     });
 
@@ -79,7 +78,6 @@ export async function POST(req: Request) {
       await prisma.adminLog.create({
         data: {
           adminUserId: user?.id || 'admin',
-          adminFirebaseUid: adminFirebaseUid || null,
           adminClerkId: user?.clerkUserId || null,
           action: 'GRANT_VIP',
           targetUserId: targetUser.id,
@@ -89,24 +87,19 @@ export async function POST(req: Request) {
         },
       });
 
-      // Sync Cloud Firestore
+      // Sync to Clerk User publicMetadata
       try {
-        const db = getAdminDb();
-        if (db) {
-          const firestoreData = {
-            is_vip: true,
-            isVIP: true,
-            membershipTier: 'VIP',
-            vip_expires_at: expiresAt.toISOString(),
-            subscription: {
-              isActive: true,
-              plan: 'VIP',
-              endDate: expiresAt.toISOString(),
+        const targetClerkId = targetUser.clerkUserId || targetUser.id;
+        if (targetClerkId) {
+          const { clerkClient } = await import('@clerk/nextjs/server');
+          const client = await clerkClient();
+          await client.users.updateUserMetadata(targetClerkId, {
+            publicMetadata: {
+              is_vip: true,
+              membershipTier: 'VIP',
+              vip_expires_at: expiresAt.toISOString(),
             },
-            updatedAt: now.toISOString(),
-          };
-          const uids = Array.from(new Set([targetUser.id, targetUser.clerkUserId, targetUser.firebaseUid])).filter(Boolean) as string[];
-          await Promise.all(uids.map((u) => db.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
+          });
         }
       } catch (e) {}
 
@@ -158,7 +151,6 @@ export async function POST(req: Request) {
       await prisma.adminLog.create({
         data: {
           adminUserId: user?.id || 'admin',
-          adminFirebaseUid: adminFirebaseUid || null,
           adminClerkId: user?.clerkUserId || null,
           action: 'REVOKE_VIP',
           targetUserId: targetUser.id,
@@ -168,24 +160,19 @@ export async function POST(req: Request) {
         },
       });
 
-      // Sync Cloud Firestore
+      // Sync to Clerk User publicMetadata
       try {
-        const db = getAdminDb();
-        if (db) {
-          const firestoreData = {
-            is_vip: false,
-            isVIP: false,
-            membershipTier: 'FREE',
-            vip_expires_at: null,
-            subscription: {
-              isActive: false,
-              plan: 'FREE',
-              endDate: null,
+        const targetClerkId = targetUser.clerkUserId || targetUser.id;
+        if (targetClerkId) {
+          const { clerkClient } = await import('@clerk/nextjs/server');
+          const client = await clerkClient();
+          await client.users.updateUserMetadata(targetClerkId, {
+            publicMetadata: {
+              is_vip: false,
+              membershipTier: 'FREE',
+              vip_expires_at: null,
             },
-            updatedAt: now.toISOString(),
-          };
-          const uids = Array.from(new Set([targetUser.id, targetUser.clerkUserId, targetUser.firebaseUid])).filter(Boolean) as string[];
-          await Promise.all(uids.map((u) => db.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
+          });
         }
       } catch (e) {}
 

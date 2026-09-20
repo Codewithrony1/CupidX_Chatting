@@ -35,7 +35,7 @@ export async function GET(req: Request) {
 
       return {
         id: u.id,
-        firebaseUid: u.firebaseUid,
+        firebaseUid: (u as any).firebaseUid || null,
         clerkUserId,
         username: u.username || 'user',
         vipUsername: u.vipUsername || null,

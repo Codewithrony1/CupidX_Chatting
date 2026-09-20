@@ -19,7 +19,7 @@ export async function POST(
 
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ id }, { firebaseUid: id }, { clerkUserId: id }],
+        OR: [{ id }, { clerkUserId: id }],
       },
     });
 
@@ -66,7 +66,6 @@ export async function POST(
     await prisma.adminLog.create({
       data: {
         adminUserId: admin?.id || 'admin',
-        adminFirebaseUid: adminFirebaseUid || null,
         adminClerkId: admin?.clerkUserId || null,
         action: 'ACTIVATE_SUBSCRIPTION',
         targetUserId: user.id,
@@ -75,28 +74,6 @@ export async function POST(
         details: `Activated VIP for ${user.username} (${days} days) until ${expiresAt.toISOString()}`,
       },
     });
-
-    // Sync Firestore
-    try {
-      const { getAdminDb } = await import('@/lib/firebaseAdmin');
-      const db = getAdminDb();
-      if (db) {
-        const firestoreData = {
-          is_vip: true,
-          isVIP: true,
-          membershipTier: 'VIP',
-          vip_expires_at: expiresAt.toISOString(),
-          subscription: {
-            isActive: true,
-            plan: 'VIP',
-            endDate: expiresAt.toISOString(),
-          },
-          updatedAt: now.toISOString(),
-        };
-        const uids = Array.from(new Set([user.id, user.clerkUserId, user.firebaseUid])).filter(Boolean) as string[];
-        await Promise.all(uids.map((u) => db.collection('users').doc(u).set(firestoreData, { merge: true }).catch(() => {})));
-      }
-    } catch (e) {}
 
     // Sync Clerk metadata
     try {

@@ -88,7 +88,6 @@ export async function POST(req: Request) {
         OR: [
           { id: rawTargetId },
           { clerkUserId: rawTargetId },
-          { firebaseUid: rawTargetId },
           { username: rawTargetId },
         ],
       },

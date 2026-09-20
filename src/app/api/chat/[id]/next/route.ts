@@ -30,7 +30,7 @@ export async function POST(
       return NextResponse.json({ message: 'Session already ended or deleted' }, { status: 200 });
     }
 
-    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    const userIds = [user.id, user.clerkUserId].filter(Boolean) as string[];
     if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
       return NextResponse.json({ error: 'Forbidden: You are not a participant' }, { status: 403 });
     }
@@ -66,22 +66,6 @@ export async function POST(
       userBId: session.userBId,
       endedBy: user.id,
     });
-
-    // Delete ephemeral messages from Firestore
-    try {
-      const { getAdminDb } = await import('@/lib/firebaseAdmin');
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        const msgsSnap = await adminDb.collection('matches').doc(chatSessionId).collection('messages').get();
-        if (!msgsSnap.empty) {
-          const batch = adminDb.batch();
-          msgsSnap.docs.forEach((d) => batch.delete(d.ref));
-          await batch.commit().catch(() => {});
-        }
-      }
-    } catch (e) {
-      console.warn('Firestore next partner sync notice:', e);
-    }
 
     return NextResponse.json({
       success: true,

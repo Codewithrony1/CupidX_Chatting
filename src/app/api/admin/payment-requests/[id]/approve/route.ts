@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyAdminAccess } from '@/lib/adminAuth';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(
   req: Request,
@@ -113,7 +112,6 @@ export async function POST(
       prisma.adminLog.create({
         data: {
           adminUserId: admin?.id || 'admin',
-          adminFirebaseUid: adminFirebaseUid || null,
           adminClerkId: admin?.clerkUserId || null,
           action: 'APPROVE_PAYMENT',
           targetUserId: paymentRequest.userId,
@@ -124,42 +122,7 @@ export async function POST(
       }),
     ]);
 
-    // 2. Sync Cloud Firestore for instant real-time client reflection
-    try {
-      const db = getAdminDb();
-      if (db) {
-        const firestoreData = {
-          is_vip: true,
-          isVIP: true,
-          membershipTier: 'VIP',
-          vip_expires_at: newExpiresAt.toISOString(),
-          subscription: {
-            isActive: true,
-            plan: 'VIP',
-            endDate: newExpiresAt.toISOString(),
-          },
-          updatedAt: now.toISOString(),
-        };
-
-        const uidsToSync = Array.from(new Set([
-          paymentRequest.userId,
-          targetUser.id,
-          targetUser.clerkUserId,
-          paymentRequest.clerkUserId,
-          targetUser.firebaseUid,
-        ])).filter(Boolean) as string[];
-
-        await Promise.all(
-          uidsToSync.map((uid) =>
-            db.collection('users').doc(uid).set(firestoreData, { merge: true }).catch(() => {})
-          )
-        );
-      }
-    } catch (fsErr) {
-      console.warn('Firestore sync warning during payment approval (non-critical):', fsErr);
-    }
-
-    // 3. Sync to Clerk User publicMetadata
+    // 2. Sync to Clerk User publicMetadata
     try {
       const targetClerkId = targetUser.clerkUserId || paymentRequest.clerkUserId || targetUser.id;
       if (targetClerkId) {

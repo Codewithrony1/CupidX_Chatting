@@ -55,7 +55,6 @@ export async function POST(
       prisma.adminLog.create({
         data: {
           adminUserId: admin?.id || 'admin',
-          adminFirebaseUid: adminFirebaseUid || null,
           adminClerkId: admin?.clerkUserId || null,
           action: 'REJECT_PAYMENT',
           targetUserId: paymentRequest.userId,

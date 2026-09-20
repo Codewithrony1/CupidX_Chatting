@@ -36,7 +36,6 @@ export async function GET(req: Request) {
         user: {
           select: {
             id: true,
-            firebaseUid: true,
             clerkUserId: true,
             username: true,
             fullName: true,

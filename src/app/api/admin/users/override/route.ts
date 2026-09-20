@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     await prisma.adminLog.create({
       data: {
         adminUserId: admin?.id || 'admin',
-        adminFirebaseUid: adminFirebaseUid || null,
+        adminClerkId: admin?.clerkUserId || null,
         action: 'OVERRIDE_USER_ATTRIBUTES',
         targetUserId: userId,
         entityType: 'USER',

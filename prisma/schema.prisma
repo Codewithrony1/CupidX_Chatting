@@ -42,7 +42,6 @@ model User {
   adminLogs         AdminLog[]
 
   sentMessages     Message[]     @relation("SentMessages")
-  receivedMessages Message[]     @relation("ReceivedMessages")
 
   chatSessionsA    ChatSession[] @relation("ChatSessionUserA")
   chatSessionsB    ChatSession[] @relation("ChatSessionUserB")
@@ -165,7 +164,6 @@ model Message {
 
   chatSession ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
   sender      User        @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  recipient   User?       @relation("ReceivedMessages", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([chatSessionId, createdAt])
   @@index([clientMessageId])

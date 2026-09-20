@@ -86,48 +86,10 @@ export async function POST(req: Request) {
     });
 
     if (!session) {
-      // Cross-container serverless fallback: check Firestore for active match
-      try {
-        const { getAdminDb } = await import('@/lib/firebaseAdmin');
-        const adminDb = getAdminDb();
-        if (adminDb) {
-          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
-          if (snap.exists) {
-            const matchDoc = snap.data();
-            if (matchDoc && (matchDoc.status === 'active' || matchDoc.status === 'ACTIVE')) {
-              const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
-              const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
-              const [canonicalA, canonicalB] = await Promise.all([
-                resolveCanonicalUserId(uAId, matchDoc.user1DisplayName || 'Stranger'),
-                resolveCanonicalUserId(uBId, matchDoc.user2DisplayName || 'Stranger'),
-              ]);
-              session = await prisma.chatSession.upsert({
-                where: { id: chatSessionId },
-                update: { status: 'ACTIVE' },
-                create: {
-                  id: chatSessionId,
-                  userAId: canonicalA,
-                  userBId: canonicalB,
-                  status: 'ACTIVE',
-                },
-                include: {
-                  userA: { select: { id: true, clerkUserId: true } },
-                  userB: { select: { id: true, clerkUserId: true } },
-                },
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[MESSAGES_POST] Firestore fallback check error:', e);
-      }
-    }
-
-    if (!session) {
       return NextResponse.json({ error: 'Chat session not found' }, { status: 404 });
     }
 
-    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    const userIds = [user.id, user.clerkUserId].filter(Boolean) as string[];
     const isParticipant =
       userIds.includes(session.userAId) ||
       userIds.includes(session.userBId) ||
@@ -139,30 +101,7 @@ export async function POST(req: Request) {
     }
 
     if (session.status !== 'ACTIVE') {
-      // Cross-verify with Firestore before rejecting as ended
-      let isStillActiveInCloud = false;
-      try {
-        const { getAdminDb } = await import('@/lib/firebaseAdmin');
-        const adminDb = getAdminDb();
-        if (adminDb) {
-          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
-          if (snap.exists) {
-            const m = snap.data();
-            if (m && (m.status === 'active' || m.status === 'ACTIVE')) {
-              isStillActiveInCloud = true;
-              await prisma.chatSession.update({
-                where: { id: chatSessionId },
-                data: { status: 'ACTIVE' },
-              });
-              session.status = 'ACTIVE';
-            }
-          }
-        }
-      } catch (e) {}
-
-      if (!isStillActiveInCloud) {
-        return NextResponse.json({ error: 'Chat session has already ended' }, { status: 400 });
-      }
+      return NextResponse.json({ error: 'Chat session has already ended' }, { status: 400 });
     }
 
     // 4. VIP Image Verification & Secure Image Processing
@@ -263,35 +202,6 @@ export async function POST(req: Request) {
     const senderDisplayName = user.displayName || user.fullName || user.username || 'Stranger';
     const messageDocId = message.id || clientMessageId || `msg_${nowMs}`;
 
-    // 7. Sync to shared ephemeral Firestore matches/{chatSessionId}/messages for cross-container synchronization
-    try {
-      const { getAdminDb } = await import('@/lib/firebaseAdmin');
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        await adminDb
-          .collection('matches')
-          .doc(chatSessionId)
-          .collection('messages')
-          .doc(messageDocId)
-          .set({
-            id: messageDocId,
-            clientMessageId: clientMessageId || messageDocId,
-            chatSessionId,
-            senderId: user.id,
-            senderUid: user.id,
-            senderUsername: senderDisplayName,
-            content: (content || '').trim(),
-            imageUrl: finalImageUrl,
-            sequenceNumber: nowMs,
-            status: 'SENT',
-            deliveredAt: null,
-            createdAt: nowMs,
-          });
-      }
-    } catch (e) {
-      console.warn('Firestore message sync error:', e);
-    }
-
     return NextResponse.json({
       success: true,
       message: {
@@ -337,48 +247,10 @@ export async function GET(req: Request) {
     });
 
     if (!session) {
-      // Cross-container serverless fallback: check Firestore for active match
-      try {
-        const { getAdminDb } = await import('@/lib/firebaseAdmin');
-        const adminDb = getAdminDb();
-        if (adminDb) {
-          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
-          if (snap.exists) {
-            const matchDoc = snap.data();
-            if (matchDoc && (matchDoc.status === 'active' || matchDoc.status === 'ACTIVE')) {
-              const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
-              const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
-              const [canonicalA, canonicalB] = await Promise.all([
-                resolveCanonicalUserId(uAId, matchDoc.user1DisplayName || 'Stranger'),
-                resolveCanonicalUserId(uBId, matchDoc.user2DisplayName || 'Stranger'),
-              ]);
-              session = await prisma.chatSession.upsert({
-                where: { id: chatSessionId },
-                update: { status: 'ACTIVE' },
-                create: {
-                  id: chatSessionId,
-                  userAId: canonicalA,
-                  userBId: canonicalB,
-                  status: 'ACTIVE',
-                },
-                include: {
-                  userA: { include: { profile: true } },
-                  userB: { include: { profile: true } },
-                },
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[MESSAGES_GET] Firestore fallback check error:', e);
-      }
-    }
-
-    if (!session) {
       return NextResponse.json({ error: 'Chat session not found', sessionStatus: 'PENDING' }, { status: 404 });
     }
 
-    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    const userIds = [user.id, user.clerkUserId].filter(Boolean) as string[];
     const isParticipant =
       userIds.includes(session.userAId) ||
       userIds.includes(session.userBId) ||
@@ -389,117 +261,42 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Forbidden: Access denied' }, { status: 403 });
     }
 
-    // Self-heal active status from cloud if local DB was out of sync
-    if (session.status !== 'ACTIVE') {
-      try {
-        const { getAdminDb } = await import('@/lib/firebaseAdmin');
-        const adminDb = getAdminDb();
-        if (adminDb) {
-          const snap = await adminDb.collection('matches').doc(chatSessionId).get();
-          if (snap.exists) {
-            const m = snap.data();
-            if (m && (m.status === 'active' || m.status === 'ACTIVE')) {
-              await prisma.chatSession.update({
-                where: { id: chatSessionId },
-                data: { status: 'ACTIVE' },
-              });
-              session.status = 'ACTIVE';
-            }
-          }
-        }
-      } catch (e) {}
-    }
-
     const isUserA = userIds.includes(session.userAId) || (session.userA && (userIds.includes(session.userA.id) || (session.userA.clerkUserId && userIds.includes(session.userA.clerkUserId))));
     const partner = isUserA ? session.userB : session.userA;
     const isPartnerVIP = Boolean(partner?.membershipTier === 'VIP' || partner?.is_vip);
 
-    // 1. Query shared ephemeral Firestore collection first for cross-container serverless synchronization
-    let firestoreMessages: any[] = [];
-    try {
-      const { getAdminDb } = await import('@/lib/firebaseAdmin');
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        const msgsSnap = await adminDb
-          .collection('matches')
-          .doc(chatSessionId)
-          .collection('messages')
-          .orderBy('createdAt', 'asc')
-          .limit(200)
-          .get();
-
-        if (!msgsSnap.empty) {
-          firestoreMessages = msgsSnap.docs.map((docSnap) => {
-            const data = docSnap.data();
-            const createdAtStr =
-              typeof data.createdAt === 'number'
-                ? new Date(data.createdAt).toISOString()
-                : data.createdAt?.toDate
-                ? data.createdAt.toDate().toISOString()
-                : new Date().toISOString();
-
-            return {
-              id: docSnap.id,
-              clientMessageId: data.clientMessageId || docSnap.id,
-              chatSessionId: data.chatSessionId || chatSessionId,
-              senderId: data.senderUid || data.senderId,
-              senderUsername: data.senderUsername || 'Stranger',
-              content: data.content || '',
-              imageUrl: data.imageUrl || null,
-              sequenceNumber: data.sequenceNumber || data.createdAt || 0,
-              status: data.deliveredAt ? 'DELIVERED' : (data.status || 'SENT'),
-              deliveredAt: data.deliveredAt
-                ? typeof data.deliveredAt === 'number'
-                  ? new Date(data.deliveredAt).toISOString()
-                  : data.deliveredAt
-                : null,
-              createdAt: createdAtStr,
-            };
-          });
-        }
+    const messageWhere: any = { chatSessionId };
+    if (since) {
+      const sinceDate = new Date(since);
+      if (!isNaN(sinceDate.getTime())) {
+        messageWhere.createdAt = { gt: sinceDate };
       }
-    } catch (fsErr) {
-      console.warn('[MESSAGES_GET] Firestore read notice:', fsErr);
     }
 
-    let finalMessages: any[] = [];
-    if (firestoreMessages.length > 0) {
-      finalMessages = firestoreMessages;
-    } else {
-      // 2. Fallback to local SQLite database if Firestore has no records
-      const messageWhere: any = { chatSessionId };
-      if (since) {
-        const sinceDate = new Date(since);
-        if (!isNaN(sinceDate.getTime())) {
-          messageWhere.createdAt = { gt: sinceDate };
-        }
-      }
-
-      const rawMessages = await prisma.message.findMany({
-        where: messageWhere,
-        orderBy: { createdAt: 'desc' },
-        take: 200,
-        include: {
-          sender: {
-            select: { username: true, displayName: true, fullName: true },
-          },
+    const rawMessages = await prisma.message.findMany({
+      where: messageWhere,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        sender: {
+          select: { username: true, displayName: true, fullName: true },
         },
-      });
+      },
+    });
 
-      finalMessages = rawMessages.reverse().map((m) => ({
-        id: m.id,
-        clientMessageId: m.clientMessageId,
-        chatSessionId: m.chatSessionId,
-        senderId: m.senderId,
-        senderUsername: m.sender.displayName || m.sender.fullName || m.sender.username || 'Stranger',
-        content: m.content,
-        imageUrl: m.imageUrl,
-        sequenceNumber: m.createdAt.getTime(),
-        status: m.deliveredAt ? 'DELIVERED' : m.status,
-        deliveredAt: m.deliveredAt ? m.deliveredAt.toISOString() : null,
-        createdAt: m.createdAt.toISOString(),
-      }));
-    }
+    const finalMessages = rawMessages.reverse().map((m) => ({
+      id: m.id,
+      clientMessageId: m.clientMessageId,
+      chatSessionId: m.chatSessionId,
+      senderId: m.senderId,
+      senderUsername: m.sender.displayName || m.sender.fullName || m.sender.username || 'Stranger',
+      content: m.content,
+      imageUrl: m.imageUrl,
+      sequenceNumber: m.createdAt.getTime(),
+      status: m.deliveredAt ? 'DELIVERED' : m.status,
+      deliveredAt: m.deliveredAt ? m.deliveredAt.toISOString() : null,
+      createdAt: m.createdAt.toISOString(),
+    }));
 
     return NextResponse.json({
       success: true,

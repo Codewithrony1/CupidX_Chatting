@@ -80,23 +80,6 @@ async function performAccountDeletion(req: Request) {
           })
           .catch(() => {});
 
-        try {
-          const { getAdminDb } = await import('@/lib/firebaseAdmin');
-          const adminDb = getAdminDb();
-          if (adminDb) {
-            await adminDb
-              .collection('matches')
-              .doc(session.id)
-              .set(
-                {
-                  status: 'ended',
-                  endedAt: Date.now(),
-                },
-                { merge: true }
-              )
-              .catch(() => {});
-          }
-        } catch (e) {}
       }
     } catch (chatErr) {
       console.warn('Active chat cleanup notice during deletion:', chatErr);
@@ -105,12 +88,6 @@ async function performAccountDeletion(req: Request) {
     // 2. Remove user from matchmaking queues
     try {
       await prisma.matchmakingQueue.deleteMany({ where: { userId } }).catch(() => {});
-      const { getAdminDb } = await import('@/lib/firebaseAdmin');
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        await adminDb.collection('matchmaking').doc(userId).delete().catch(() => {});
-        await adminDb.collection('users').doc(userId).delete().catch(() => {});
-      }
     } catch (queueErr) {
       console.warn('Queue cleanup notice during deletion:', queueErr);
     }

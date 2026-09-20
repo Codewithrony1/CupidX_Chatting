@@ -20,7 +20,6 @@ export default async function AuthCallbackPage() {
       OR: [
         { clerkUserId: userId },
         { id: userId },
-        { firebaseUid: userId },
       ],
     },
     include: { profile: true },
