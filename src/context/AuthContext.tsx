@@ -3,13 +3,64 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useUser, useClerk, useAuth as useClerkAuth, useSignIn, useSignUp } from '@clerk/nextjs';
-import {
-  getOrCreateFirestoreUser,
-  updateFirestoreUserProfile,
-  setFirestoreUserPresence,
-  calculateAge,
-  type UserProfile,
-} from '@/lib/firestoreUser';
+import { calculateDobAge } from '@/lib/validation/dob';
+
+export interface UserProfile {
+  id: string;
+  uid: string;
+  clerkUserId?: string | null;
+  username: string;
+  usernameLower: string;
+  fullName: string;
+  displayName: string;
+  email: string | null;
+  role: 'USER' | 'ADMIN';
+  membershipTier: 'FREE' | 'VIP' | string;
+  is_vip: boolean;
+  isVIP?: boolean;
+  vipUsername?: string | null;
+  vipUsernameClaimedAt?: string | null;
+  vip_expires_at?: string | null;
+  vip_started_at?: string | null;
+  online: boolean;
+  status: 'active' | 'suspended';
+  profileCompleted: boolean;
+  profileLocked?: boolean;
+  genderDobLocked?: boolean;
+  dateOfBirth?: string | null;
+  gender: string;
+  createdAt: number;
+  updatedAt: number;
+  profile: {
+    bio: string;
+    showBio?: boolean;
+    dateOfBirth?: string | null;
+    age: number;
+    gender: string;
+    showGender?: boolean;
+    preferredGender?: string;
+    personalityPreferences?: string;
+    mood?: string;
+    showMood?: boolean;
+    moodExpiresAt?: string | null;
+    language?: string;
+    saveChatHistory?: boolean;
+    interests: string;
+    avatarType?: string;
+    avatarEmoji?: string;
+    avatarUrl?: string | null;
+    themePreference: string;
+    randomChatIntroSeen?: boolean;
+    ageGenderConfirmed?: boolean;
+    ageGenderChangesCount?: number;
+    nameChangesCount?: number;
+  };
+  subscription?: {
+    isActive: boolean;
+    plan: string;
+    endDate?: string;
+  };
+}
 
 export type User = UserProfile;
 
@@ -59,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
-   * Initializes user profile by syncing canonical backend user (/api/auth/me) and Firestore
+   * Initializes user profile from the canonical Clerk + Prisma backend (/api/auth/me)
    */
   const initializeUserSession = async (cUser: any): Promise<UserProfile | null> => {
     if (!cUser) {
@@ -77,7 +128,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const email = cUser.primaryEmailAddress?.emailAddress || null;
       const displayName = cUser.fullName || cUser.username || cUser.firstName || 'User';
-      const photoURL = cUser.imageUrl || null;
 
       // Obtain verified Clerk session token if available
       const token = await getToken().catch(() => null);
@@ -88,29 +138,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         authHeaders['Authorization'] = `Bearer ${token}`;
       }
 
-      // Parallel fetch: Canonical backend DB (/api/auth/me) + Firestore document
-      const [backendRes, firestoreProfile] = await Promise.all([
-        fetch('/api/auth/me', {
-          headers: authHeaders,
-          credentials: 'include',
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null),
-        getOrCreateFirestoreUser({
-          uid: cUser.id,
-          displayName,
-          email,
-          photoURL,
-        }).catch(() => null),
-      ]);
+      // Canonical backend DB (Prisma/Supabase) is the only profile source.
+      const backendRes = await fetch('/api/auth/me', {
+        headers: authHeaders,
+        credentials: 'include',
+      }).then((res) => (res.ok ? res.json() : null)).catch(() => null);
 
       const backendUser = backendRes?.user;
 
-      const baseProfile: UserProfile = firestoreProfile || {
+      const baseProfile: UserProfile = {
         id: cUser.id,
         uid: cUser.id,
         clerkUserId: cUser.id,
-        firebaseUid: cUser.id,
         username: cUser.username || `user_${cUser.id.slice(-5)}`,
         usernameLower: (cUser.username || `user_${cUser.id.slice(-5)}`).toLowerCase(),
         fullName: displayName,
@@ -192,7 +231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             baseProfile.profile?.ageGenderConfirmed ||
             backendUser?.genderDobLocked
           ),
-          age: backendUser?.dob ? calculateAge(backendUser.dob) : baseProfile.profile?.age,
+          age: backendUser?.dob ? calculateDobAge(backendUser.dob) : baseProfile.profile?.age,
         },
         subscription: backendUser?.subscription || baseProfile.subscription,
       };
@@ -541,10 +580,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── 6. Logout via Clerk ───────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
-      if (clerkUser?.id) {
-        setFirestoreUserPresence(clerkUser.id, false).catch(() => {});
-      }
-
       try {
         await fetch('/api/auth/logout', { method: 'POST' });
       } catch (logoutApiErr) {
