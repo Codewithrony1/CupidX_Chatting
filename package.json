@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "cross-env ADMIN_MODE=true next dev -H 127.0.0.1 -p 3000",
     "admin": "cross-env ADMIN_MODE=true next dev -H 127.0.0.1 -p 3001",
     "build": "node prisma/ensure-schema.js && prisma generate && next build",
     "postinstall": "prisma generate",
