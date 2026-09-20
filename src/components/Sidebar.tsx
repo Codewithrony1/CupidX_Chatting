@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { detectUserCountry } from '@/lib/countryFlag';
-import { Heart, Home, Sparkles, LogOut, Shield, MessageSquare, User, Settings, MapPin, Crown, Users } from 'lucide-react';
+import { Heart, Home, Sparkles, LogOut, MessageSquare, User, Settings, MapPin, Crown, Users } from 'lucide-react';
 import UserAvatar from '@/components/UserAvatar';
 
 export default function Sidebar({
