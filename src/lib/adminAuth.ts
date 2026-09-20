@@ -3,8 +3,8 @@ import { prisma } from '@/lib/prisma';
 
 /**
  * Admin is intentionally LOCAL-ONLY.
- * The admin UI/API must only run from the dedicated npm run admin
- * development server on localhost:3001. Production users never receive
+ * The admin UI/API must only run from a local development server
+ * with ADMIN_MODE enabled (localhost:3000 or localhost:3001). Production users never receive
  * admin authorization, even if their database role/email says ADMIN.
  */
 function isLocalAdminRequest(req: Request): boolean {
@@ -39,7 +39,7 @@ export async function verifyAdminAccess(req: Request) {
 
   const user = await getCurrentUser(req);
 
-  // Local development admin mode (npm run admin on localhost:3001).
+  // Local development admin mode (npm run dev or npm run admin).
   if (user) {
     return {
       authorized: true,
