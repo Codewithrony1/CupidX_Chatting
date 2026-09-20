@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   History,
   ShieldCheck,
+  Trash2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -65,7 +66,8 @@ interface UserItem {
   isSuspended: boolean;
   role: string;
   gender: string;
-  avatarUrl: string;
+  avatarUrl?: string | null;
+  avatarType?: string | null;
   createdAt: string;
 }
 
@@ -448,6 +450,17 @@ export default function AdminPage() {
   };
 
   // Toggle User Ban
+  const handleDeleteUserAvatar = async (userId: string, username: string) => {
+    if (!window.confirm(`Delete the profile photo for @${username}? This removes the stored image and clears the profile photo.`)) return;
+    try {
+      const res = await fetch('/api/admin/users/delete-avatar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId }),
+      });
+      if (res.ok) { fetchUsers(); fetchAuditLogs(); }
+      else { const data = await res.json().catch(() => ({})); alert(data.error || 'Failed to delete profile photo.'); }
+    } catch (e) { console.error(e); alert('Network error deleting profile photo.'); }
+  };
+
   const handleToggleBan = async (userId: string, currentSuspended: boolean) => {
     try {
       const res = await fetch('/api/admin/users/ban', {
@@ -1086,6 +1099,27 @@ export default function AdminPage() {
                         <span className="font-bold text-white block">@{u.username}</span>
                         <span className="text-[10px] text-slate-400">{u.fullName}</span>
                       </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 border border-white/10 flex items-center justify-center">
+                            {u.avatarUrl ? (
+                              <img src={u.avatarUrl} alt={u.username} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-lg">😊</span>
+                            )}
+                          </div>
+                          {u.avatarUrl && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteUserAvatar(u.id, u.username)}
+                              className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 cursor-pointer"
+                              title="Delete profile photo and free storage"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-5 py-3.5 font-mono text-pink-300">{u.email}</td>
                       <td className="px-5 py-3.5">
                         {u.is_vip ? (
@@ -1161,6 +1195,7 @@ export default function AdminPage() {
                 <thead className="bg-black/40 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
                   <tr>
                     <th className="px-5 py-3.5">User</th>
+                    <th className="px-5 py-3.5">Photo</th>
                     <th className="px-5 py-3.5">Email (Clerk)</th>
                     <th className="px-5 py-3.5">Clerk User ID</th>
                     <th className="px-5 py-3.5">Plan</th>
