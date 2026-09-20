@@ -57,7 +57,7 @@ export default function PremiumPage() {
     merchantName: 'CupidX Chat',
     qrMonthly: '/uploads/qr/payment-qr-india.jpg',
     qrThreeMonths: '/uploads/qr/payment-qr-india.jpg',
-    qrYearly: '/uploads/qr/payment-qr-india-199.jpg',
+    qrYearly: '/uploads/qr/payment-qr-india-yearly.jpg',
   });
 
   const [copiedUpi, setCopiedUpi] = useState<boolean>(false);
@@ -107,7 +107,7 @@ export default function PremiumPage() {
             merchantName: data.merchantName || 'CupidX Chat',
             qrMonthly: data.pricing.india.qrMonthly || '/uploads/qr/payment-qr-india.jpg',
             qrThreeMonths: data.pricing.india.qrThreeMonths || '/uploads/qr/payment-qr-india.jpg',
-            qrYearly: data.pricing.india.qrYearly || '/uploads/qr/payment-qr-india-199.jpg',
+            qrYearly: data.pricing.india.qrYearly || '/uploads/qr/payment-qr-india-yearly.jpg',
           });
         }
       }
