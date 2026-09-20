@@ -193,50 +193,8 @@ export async function POST(req: Request) {
 
     const imageUrl = `/uploads/chat-images/${filename}`;
 
-    // 8. Database Record & Real-time Delivery
-    let messageId: string | null = null;
-    if (matchId) {
-      // A. Prisma message persistence
-      try {
-        const { prisma } = await import('@/lib/prisma');
-        const session = await prisma.chatSession.findUnique({ where: { id: matchId } });
-        if (session) {
-          const dbMsg = await prisma.message.create({
-            data: {
-              chatSessionId: matchId,
-              clientMessageId,
-              senderId: user.id,
-              content: content.trim().slice(0, 2000),
-              imageUrl,
-            },
-          });
-          messageId = dbMsg.id;
-        }
-      } catch (dbErr) {
-        console.warn('Prisma message persistence notice:', dbErr);
-      }
-
-      // B. Firestore real-time push delivery via Admin SDK
-      try {
-        const adminDb = getAdminDb();
-        if (adminDb) {
-          const docRef = await adminDb
-            .collection('matches')
-            .doc(matchId)
-            .collection('messages')
-            .add({
-              senderUid: user.id,
-              senderUsername: user.displayName || user.fullName || 'Stranger',
-              content: content.trim(),
-              imageUrl,
-              createdAt: Date.now(),
-            });
-          if (!messageId) messageId = docRef.id;
-        }
-      } catch (err) {
-        console.warn('Firestore message add sync error:', err);
-      }
-    }
+    // 8. Image storage only. The canonical chat message is created by the
+    // Socket.IO/HTTP message endpoint so a retry cannot create duplicates.
 
     return NextResponse.json({
       success: true,
