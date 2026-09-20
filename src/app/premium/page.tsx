@@ -103,7 +103,7 @@ export default function PremiumPage() {
             monthly: data.pricing.india.monthly || 29,
             threeMonths: data.pricing.india.threeMonths || 99,
             yearly: data.pricing.india.yearly || 399,
-            merchantUpiId: data.merchantUpiId || 'cupidxchat@upi',
+            merchantUpiId: data.merchantUpiId || 'sumitpornsware@fam',
             merchantName: data.merchantName || 'CupidX Chat',
             qrMonthly: data.pricing.india.qrMonthly || '/uploads/qr/payment-qr-india.jpg',
             qrThreeMonths: data.pricing.india.qrThreeMonths || '/uploads/qr/payment-qr-india.jpg',
