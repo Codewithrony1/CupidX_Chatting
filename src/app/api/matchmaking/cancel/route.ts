@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
-import { getActiveUserSession, removeFirestoreUserSearching } from '@/lib/matchmakingLock';
+import { getActiveUserSession, removeUserSearching } from '@/lib/matchmakingLock';
 
 export async function POST(req: Request) {
   try {
@@ -31,8 +31,8 @@ export async function POST(req: Request) {
       },
     }).catch(() => {});
 
-    // Remove from Firestore matchmaking queue doc
-    await removeFirestoreUserSearching(user.id);
+    // Release Prisma/Supabase matchmaking queue state
+    await removeUserSearching(user.id);
 
     return NextResponse.json({
       success: true,
