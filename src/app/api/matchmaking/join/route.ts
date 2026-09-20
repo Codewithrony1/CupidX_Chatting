@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { getAdminDb } from '@/lib/firebaseAdmin';
+import {
+  getActiveUserSession,
+  acquireDistributedMatch,
+  releaseDistributedSession,
+  setFirestoreUserSearching,
+} from '@/lib/matchmakingLock';
 import crypto from 'crypto';
 
 export async function POST(req: Request) {
@@ -13,7 +20,6 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const { skipCurrentMatch = false, excludePartnerId = null } = body;
     const userProfile = user.profile;
-    const isVIP = user.membershipTier === 'VIP' || (user.subscription?.isActive === true && user.subscription?.plan === 'VIP');
 
     const gender = body.gender || userProfile?.gender || user.gender || 'unspecified';
     const preferredGender = body.preferredGender || userProfile?.preferredGender || 'auto';
@@ -21,62 +27,57 @@ export async function POST(req: Request) {
 
     const userCountry = (await import('@/lib/countryDetection')).detectCountryFromHeaders(req.headers);
 
-    // 1. Check if user already belongs to an active match (Requirement 6: ONE USER = ONE ACTIVE MATCH)
-    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    // 1. Authoritative check: Does the user already belong to an active match?
+    // Enforcing Invariant: ONE USER = ONE ACTIVE CHAT SESSION
+    const activeSession = await getActiveUserSession(user.id);
 
-    if (!skipCurrentMatch) {
-      const existingSession = await prisma.chatSession.findFirst({
-        where: {
-          status: 'ACTIVE',
-          OR: [{ userAId: { in: userIds } }, { userBId: { in: userIds } }],
-        },
-        include: {
-          userA: { include: { profile: true } },
-          userB: { include: { profile: true } },
-          messages: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
-        },
+    if (activeSession && !skipCurrentMatch) {
+      // User is already in an active session: return it immediately
+      const partnerUser = await prisma.user.findUnique({
+        where: { id: activeSession.partnerId },
+        include: { profile: true },
       });
 
-      if (existingSession) {
-        const isUserA = userIds.includes(existingSession.userAId);
-        const partner = isUserA ? existingSession.userB : existingSession.userA;
-
-        // Verify session freshness: created or has message within last 10 minutes
-        const lastActivity = existingSession.messages[0]?.createdAt || existingSession.startedAt;
-        const isFresh = Date.now() - new Date(lastActivity).getTime() < 10 * 60 * 1000;
-
-        if (isFresh) {
-          return NextResponse.json({
-            matched: true,
-            chatSessionId: existingSession.id,
-            partner: {
-              id: partner.id,
-              displayName: partner.displayName || partner.fullName || 'Stranger',
-              avatarUrl: partner.profile?.avatarUrl || null,
-              avatarEmoji: partner.profile?.avatarEmoji || '😊',
-              gender: partner.profile?.gender || partner.gender || 'unspecified',
-              mood: partner.profile?.mood || '',
-              bio: partner.profile?.bio || '',
-              isVIP: partner.membershipTier === 'VIP' || partner.is_vip,
+      return NextResponse.json({
+        matched: true,
+        chatSessionId: activeSession.chatSessionId,
+        partner: partnerUser
+          ? {
+              id: partnerUser.id,
+              displayName: partnerUser.displayName || partnerUser.fullName || 'Stranger',
+              avatarUrl: partnerUser.profile?.avatarUrl || null,
+              avatarEmoji: partnerUser.profile?.avatarEmoji || '😊',
+              gender: partnerUser.profile?.gender || partnerUser.gender || 'unspecified',
+              mood: partnerUser.profile?.mood || '',
+              bio: partnerUser.profile?.bio || '',
+              isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
               countryCode: userCountry.countryCode,
               countryName: userCountry.countryName,
               countryFlag: userCountry.countryFlag,
-            },
-          });
-        } else {
-          // Stale / abandoned session: mark ended and add anti-rematch
-          await prisma.chatSession.update({
-            where: { id: existingSession.id },
-            data: { status: 'ENDED', endedAt: new Date() },
-          });
-        }
-      }
+            }
+          : null,
+      });
     }
 
-    // 2. Check if Random Chat is enabled globally before allowing new entrants
+    // 2. If user explicitly skipped current match, cleanly release prior active session
+    if (activeSession && skipCurrentMatch) {
+      const { addRematchExclusion } = await import('@/lib/antiRematch');
+      await addRematchExclusion(user.id, activeSession.partnerId, 60000);
+
+      await releaseDistributedSession({
+        sessionId: activeSession.chatSessionId,
+        userAId: user.id,
+        userBId: activeSession.partnerId,
+        endedBy: user.id,
+      });
+
+      await prisma.chatSession.updateMany({
+        where: { id: activeSession.chatSessionId },
+        data: { status: 'ENDED', endedAt: new Date() },
+      }).catch(() => {});
+    }
+
+    // 3. Check if Random Chat is enabled globally
     const chatSetting = await prisma.appSetting.findUnique({
       where: { key: 'randomChatEnabled' },
     });
@@ -91,31 +92,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (skipCurrentMatch) {
-      // User explicitly skipped / requested next match: terminate prior active sessions
-      const oldSessions = await prisma.chatSession.findMany({
-        where: {
-          status: 'ACTIVE',
-          OR: [{ userAId: { in: userIds } }, { userBId: { in: userIds } }],
-        },
-      });
-
-      const { addRematchExclusion } = await import('@/lib/antiRematch');
-      for (const s of oldSessions) {
-        const partnerId = userIds.includes(s.userAId) ? s.userBId : s.userAId;
-        await addRematchExclusion(user.id, partnerId, 60000);
-      }
-
-      await prisma.chatSession.updateMany({
-        where: {
-          status: 'ACTIVE',
-          OR: [{ userAId: { in: userIds } }, { userBId: { in: userIds } }],
-        },
-        data: { status: 'ENDED', endedAt: new Date() },
-      });
-    }
-
-    // 3. Clean up stale WAITING queue entries (>25s inactive)
+    // 4. Clean up stale WAITING queue entries (>25s inactive)
     const STALE_THRESHOLD = new Date(Date.now() - 25 * 1000);
     await prisma.matchmakingQueue.updateMany({
       where: {
@@ -123,9 +100,9 @@ export async function POST(req: Request) {
         updatedAt: { lt: STALE_THRESHOLD },
       },
       data: { status: 'EXPIRED' },
-    });
+    }).catch(() => {});
 
-    // 4. Find list of blocked user IDs + 60-Second Anti-Rematch Excluded partner IDs
+    // 5. Exclude self, blocked users, and 60-Second Anti-Rematch Excluded partners
     const [blockedRelations, antiRematchExcludedIds] = await Promise.all([
       prisma.block.findMany({
         where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
@@ -137,13 +114,14 @@ export async function POST(req: Request) {
     const excludeUserIds = Array.from(
       new Set([
         user.id,
+        user.clerkUserId,
         ...blockedUserIds,
         ...antiRematchExcludedIds,
         ...(excludePartnerId ? [excludePartnerId] : []),
       ])
-    );
+    ).filter(Boolean) as string[];
 
-    // 5. Find all active WAITING candidates currently on the website
+    // 6. Find all active WAITING candidates currently on the website
     const candidates = await prisma.matchmakingQueue.findMany({
       where: {
         status: 'WAITING',
@@ -153,34 +131,117 @@ export async function POST(req: Request) {
       take: 20,
     });
 
+    // Cross-container serverless fallback: also check Firestore searching candidates
+    try {
+      const adminDb = getAdminDb();
+      if (adminDb && candidates.length < 5) {
+        const firestoreQueueSnap = await adminDb
+          .collection('matchmaking')
+          .where('status', '==', 'searching')
+          .limit(20)
+          .get();
+
+        const firestoreNow = Date.now();
+        for (const doc of firestoreQueueSnap.docs) {
+          const d = doc.data();
+          const cUid = d.userId || d.uid;
+          const isRecentlyActive = firestoreNow - (d.updatedAt || d.joinedAt || 0) < 30000;
+          if (
+            cUid &&
+            isRecentlyActive &&
+            !excludeUserIds.includes(cUid) &&
+            !candidates.some((c) => c.userId === cUid)
+          ) {
+            candidates.push({
+              userId: cUid,
+              status: 'WAITING',
+              gender: d.gender || 'unspecified',
+              preferredGender: d.preferredGender || 'auto',
+              language: d.language || 'english',
+              countryCode: d.countryCode || 'IN',
+              countryName: d.countryName || 'India',
+              countryFlag: d.countryFlag || '🇮🇳',
+              chatSessionId: null,
+              partnerUserId: null,
+              joinedAt: new Date(d.joinedAt || firestoreNow),
+              updatedAt: new Date(d.updatedAt || firestoreNow),
+            } as any);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Firestore candidate scan notice:', e);
+    }
+
     // Randomly shuffle eligible candidates for unpredictable, genuine random matching
     const candidatesToEvaluate = [...candidates].sort(() => Math.random() - 0.5);
 
-    // 6. Try to atomically match with an eligible candidate
+    // 7. Atomically match with an eligible candidate enforcing:
+    // ONE USER -> ONE ACTIVE CHAT SESSION -> EXACTLY TWO USERS
     for (const candidate of candidatesToEvaluate) {
+      // Invariant check: Verify candidate does NOT already have an active session
+      const candidateActive = await getActiveUserSession(candidate.userId);
+      if (candidateActive) {
+        continue;
+      }
+
       const newChatSessionId = crypto.randomUUID();
 
+      // Step 7a: Distributed atomic lock via Cloud Firestore transaction
+      const lockResult = await acquireDistributedMatch({
+        userAId: user.id,
+        userBId: candidate.userId,
+        sessionId: newChatSessionId,
+        userAData: { countryCode: userCountry.countryCode, countryFlag: userCountry.countryFlag },
+        userBData: { countryCode: candidate.countryCode, countryFlag: candidate.countryFlag },
+      });
+
+      if (!lockResult.success) {
+        // Contention or candidate already claimed: try next candidate
+        continue;
+      }
+
+      // Step 7b: Local atomic match via Prisma $transaction
       try {
         const matchResult = await prisma.$transaction(async (tx) => {
-          // Verify candidate is still WAITING inside transaction
-          const updatedCandidate = await tx.matchmakingQueue.updateMany({
+          // Double-check active sessions inside transaction
+          const existingSession = await tx.chatSession.findFirst({
             where: {
-              userId: candidate.userId,
-              status: 'WAITING',
+              status: 'ACTIVE',
+              OR: [
+                { userAId: user.id },
+                { userBId: user.id },
+                { userAId: candidate.userId },
+                { userBId: candidate.userId },
+              ],
             },
-            data: {
+          });
+
+          if (existingSession) {
+            return null; // Violates MAX ACTIVE SESSIONS PER USER = 1
+          }
+
+          // Mark candidate as MATCHED
+          await tx.matchmakingQueue.upsert({
+            where: { userId: candidate.userId },
+            update: {
               status: 'MATCHED',
               chatSessionId: newChatSessionId,
               partnerUserId: user.id,
               updatedAt: new Date(),
             },
+            create: {
+              userId: candidate.userId,
+              status: 'MATCHED',
+              chatSessionId: newChatSessionId,
+              partnerUserId: user.id,
+              countryCode: candidate.countryCode || 'IN',
+              countryName: candidate.countryName || 'India',
+              countryFlag: candidate.countryFlag || '🇮🇳',
+            },
           });
 
-          if (updatedCandidate.count === 0) {
-            return null; // Candidate was claimed by someone else in a race condition
-          }
-
-          // Mark current user as MATCHED
+          // Mark current caller as MATCHED
           await tx.matchmakingQueue.upsert({
             where: { userId: user.id },
             update: {
@@ -209,8 +270,8 @@ export async function POST(req: Request) {
             },
           });
 
-          // Create active ChatSession
-          const session = await tx.chatSession.create({
+          // Create authoritative active ChatSession
+          return await tx.chatSession.create({
             data: {
               id: newChatSessionId,
               userAId: user.id,
@@ -218,8 +279,6 @@ export async function POST(req: Request) {
               status: 'ACTIVE',
             },
           });
-
-          return session;
         });
 
         if (matchResult) {
@@ -256,13 +315,25 @@ export async function POST(req: Request) {
                 }
               : null,
           });
+        } else {
+          // Prisma transaction aborted: rollback distributed lock
+          await releaseDistributedSession({
+            sessionId: newChatSessionId,
+            userAId: user.id,
+            userBId: candidate.userId,
+          });
         }
       } catch (err) {
         console.warn('Matchmaking contention, checking next candidate:', err);
+        await releaseDistributedSession({
+          sessionId: newChatSessionId,
+          userAId: user.id,
+          userBId: candidate.userId,
+        });
       }
     }
 
-    // 7. No immediate candidate available: Put user into WAITING queue
+    // 8. No immediate candidate matched: Put user into WAITING queue
     await prisma.matchmakingQueue.upsert({
       where: { userId: user.id },
       update: {
@@ -292,25 +363,15 @@ export async function POST(req: Request) {
       },
     });
 
-    // Mirror to Firestore queue entry
-    try {
-      const { getAdminDb } = await import('@/lib/firebaseAdmin');
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        await adminDb.collection('matchmaking').doc(user.id).set(
-          {
-            uid: user.id,
-            userId: user.id,
-            status: 'searching',
-            matchId: null,
-            partnerUid: null,
-            joinedAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-          { merge: true }
-        );
-      }
-    } catch (e) {}
+    // Mirror to Firestore searching status
+    await setFirestoreUserSearching(user.id, {
+      gender,
+      preferredGender,
+      language,
+      countryCode: userCountry.countryCode,
+      countryName: userCountry.countryName,
+      countryFlag: userCountry.countryFlag,
+    });
 
     return NextResponse.json({
       matched: false,

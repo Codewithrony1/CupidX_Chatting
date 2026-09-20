@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
+import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getActiveUserSession } from '@/lib/matchmakingLock';
 
 async function resolveCanonicalUserId(identifier: string, displayName = 'Stranger'): Promise<string> {
   if (!identifier) return identifier;
@@ -47,7 +49,68 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 1. Check user's MatchmakingQueue entry
+    // 1. Authoritatively check active session lock (Distributed Firestore & Local DB)
+    const activeSession = await getActiveUserSession(user.id);
+    if (activeSession && activeSession.active) {
+      // User is authoritatively matched in an active session!
+      // Synchronize local Prisma chat session if cross-container cache missed
+      let session = await prisma.chatSession.findUnique({
+        where: { id: activeSession.chatSessionId },
+      });
+
+      if (!session) {
+        const [canonicalA, canonicalB] = await Promise.all([
+          resolveCanonicalUserId(user.id, user.displayName || user.fullName || 'Stranger'),
+          resolveCanonicalUserId(activeSession.partnerId, 'Stranger'),
+        ]);
+
+        session = await prisma.chatSession.upsert({
+          where: { id: activeSession.chatSessionId },
+          update: { status: 'ACTIVE' },
+          create: {
+            id: activeSession.chatSessionId,
+            userAId: canonicalA,
+            userBId: canonicalB,
+            status: 'ACTIVE',
+          },
+        }).catch(() => null);
+      }
+
+      if (session && session.status === 'ACTIVE') {
+        const [partnerUser, partnerQueue] = await Promise.all([
+          prisma.user.findUnique({
+            where: { id: activeSession.partnerId },
+            include: { profile: true },
+          }),
+          prisma.matchmakingQueue.findUnique({
+            where: { userId: activeSession.partnerId },
+            select: { countryCode: true, countryName: true, countryFlag: true },
+          }),
+        ]);
+
+        return NextResponse.json({
+          matched: true,
+          chatSessionId: activeSession.chatSessionId,
+          partner: partnerUser
+            ? {
+                id: partnerUser.id,
+                displayName: partnerUser.displayName || partnerUser.fullName || 'Stranger',
+                avatarUrl: partnerUser.profile?.avatarUrl || null,
+                avatarEmoji: partnerUser.profile?.avatarEmoji || '😊',
+                gender: partnerUser.profile?.gender || partnerUser.gender || 'unspecified',
+                mood: partnerUser.profile?.mood || '',
+                bio: partnerUser.profile?.bio || '',
+                isVIP: partnerUser.membershipTier === 'VIP' || partnerUser.is_vip,
+                countryCode: partnerQueue?.countryCode || 'IN',
+                countryName: partnerQueue?.countryName || 'India',
+                countryFlag: partnerQueue?.countryFlag || '🇮🇳',
+              }
+            : null,
+        });
+      }
+    }
+
+    // 2. Check user's MatchmakingQueue entry
     let userQueue = await prisma.matchmakingQueue.findUnique({
       where: { userId: user.id },
     });
@@ -55,7 +118,6 @@ export async function GET(req: Request) {
     // Cross-container serverless fallback: check Firestore matchmaking queue entry
     if (!userQueue || userQueue.status === 'IDLE') {
       try {
-        const { getAdminDb } = await import('@/lib/firebaseAdmin');
         const adminDb = getAdminDb();
         if (adminDb) {
           const queueSnap = await adminDb.collection('matchmaking').doc(user.id).get();
@@ -87,7 +149,7 @@ export async function GET(req: Request) {
           }
         }
       } catch (e) {
-        console.warn('[STATUS_ROUTE] Firestore queue fallback error:', e);
+        console.warn('[STATUS_ROUTE] Firestore queue fallback notice:', e);
       }
     }
 
@@ -95,45 +157,11 @@ export async function GET(req: Request) {
       return NextResponse.json({ matched: false, status: 'IDLE' });
     }
 
-    // 2. If already MATCHED, verify active session, fetch partner details and return
+    // 3. If local queue says MATCHED: resolve partner details
     if (userQueue.status === 'MATCHED' && userQueue.chatSessionId) {
-      let session = await prisma.chatSession.findUnique({
+      const session = await prisma.chatSession.findUnique({
         where: { id: userQueue.chatSessionId },
       });
-
-      if (!session) {
-        // Cross-container serverless fallback: check Firestore matches collection
-        try {
-          const { getAdminDb } = await import('@/lib/firebaseAdmin');
-          const adminDb = getAdminDb();
-          if (adminDb) {
-            const snap = await adminDb.collection('matches').doc(userQueue.chatSessionId).get();
-            if (snap.exists) {
-              const matchDoc = snap.data();
-              if (matchDoc && matchDoc.status === 'active') {
-                const uAId = matchDoc.user1DbId || matchDoc.user1Uid;
-                const uBId = matchDoc.user2DbId || matchDoc.user2Uid;
-                const [canonicalA, canonicalB] = await Promise.all([
-                  resolveCanonicalUserId(uAId, matchDoc.user1DisplayName || 'Stranger'),
-                  resolveCanonicalUserId(uBId, matchDoc.user2DisplayName || 'Stranger'),
-                ]);
-                session = await prisma.chatSession.upsert({
-                  where: { id: userQueue.chatSessionId },
-                  update: { status: 'ACTIVE' },
-                  create: {
-                    id: userQueue.chatSessionId,
-                    userAId: canonicalA,
-                    userBId: canonicalB,
-                    status: 'ACTIVE',
-                  },
-                });
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('[STATUS_ROUTE] Firestore match fallback error:', e);
-        }
-      }
 
       if (session && session.status === 'ACTIVE') {
         const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
@@ -170,25 +198,19 @@ export async function GET(req: Request) {
             : null,
         });
       } else if (session && session.status === 'ENDED') {
-        // Session explicitly confirmed ENDED in database
         return NextResponse.json({ matched: false, status: 'ENDED' });
-      } else {
-        // Session is not yet synced in local container cache: keep waiting, DO NOT emit premature ENDED
-        return NextResponse.json({ matched: false, status: 'WAITING' });
       }
     }
 
-    // 3. If user is WAITING in queue: pure heartbeat & read
+    // 4. If user is WAITING in queue: heartbeat & keep searching state fresh
     if (userQueue.status === 'WAITING') {
       const now = new Date();
-      // Keep updatedAt fresh so user is not pruned by stale candidate filters
       await prisma.matchmakingQueue.update({
         where: { userId: user.id },
         data: { updatedAt: now },
-      });
+      }).catch(() => {});
 
       try {
-        const { getAdminDb } = await import('@/lib/firebaseAdmin');
         const adminDb = getAdminDb();
         if (adminDb) {
           await adminDb.collection('matchmaking').doc(user.id).set(
@@ -196,9 +218,7 @@ export async function GET(req: Request) {
             { merge: true }
           );
         }
-      } catch (e) {
-        // Firestore is non-blocking
-      }
+      } catch (e) {}
 
       return NextResponse.json({ matched: false, status: 'WAITING' });
     }
@@ -213,4 +233,3 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Failed to fetch matchmaking status' }, { status: 500 });
   }
 }
-

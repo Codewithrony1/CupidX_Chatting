@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { releaseDistributedSession } from '@/lib/matchmakingLock';
 
 export async function POST(
   req: Request,
@@ -20,6 +21,12 @@ export async function POST(
     });
 
     if (!session) {
+      // Even if session is not in local SQLite, release distributed Firestore locks
+      await releaseDistributedSession({
+        sessionId: chatSessionId,
+        userAId: user.id,
+        endedBy: user.id,
+      });
       return NextResponse.json({ message: 'Session already ended or deleted' }, { status: 200 });
     }
 
@@ -28,16 +35,13 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: You are not a participant' }, { status: 403 });
     }
 
-    if (session.status === 'ENDED') {
-      return NextResponse.json({ message: 'Session already ended' }, { status: 200 });
-    }
+    const partnerId = session.userAId === user.id ? session.userBId : session.userAId;
 
     // Enforce 60-Second Anti-Rematch Exclusion
-    const partnerId = session.userAId === user.id ? session.userBId : session.userAId;
     const { addRematchExclusion } = await import('@/lib/antiRematch');
     await addRematchExclusion(user.id, partnerId, 60000);
 
-    // Atomically transition match to ENDED and delete ephemeral messages (Requirement 3 & 10)
+    // Atomically transition match to ENDED and delete ephemeral messages
     await prisma.$transaction([
       prisma.chatSession.update({
         where: { id: chatSessionId },
@@ -55,22 +59,19 @@ export async function POST(
       }),
     ]);
 
+    // Release distributed active_sessions locks in Cloud Firestore
+    await releaseDistributedSession({
+      sessionId: chatSessionId,
+      userAId: session.userAId,
+      userBId: session.userBId,
+      endedBy: user.id,
+    });
 
-    // Also sync to Firestore so partner client receives 'ended' status immediately & delete ephemeral messages
+    // Delete ephemeral messages from Firestore
     try {
       const { getAdminDb } = await import('@/lib/firebaseAdmin');
       const adminDb = getAdminDb();
       if (adminDb) {
-        await adminDb.collection('matches').doc(chatSessionId).set(
-          {
-            status: 'ended',
-            endedAt: Date.now(),
-            endedBy: user.id,
-          },
-          { merge: true }
-        );
-
-        // Permanently delete all ephemeral messages from shared store for this session
         const msgsSnap = await adminDb.collection('matches').doc(chatSessionId).collection('messages').get();
         if (!msgsSnap.empty) {
           const batch = adminDb.batch();
@@ -79,12 +80,12 @@ export async function POST(
         }
       }
     } catch (e) {
-      console.warn('Firestore next partner sync error:', e);
+      console.warn('Firestore next partner sync notice:', e);
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Chat session and temporary data permanently deleted on server',
+      message: 'Chat session ended and temporary data permanently deleted on server',
     });
   } catch (error) {
     console.error('Error ending chat session via NEXT:', error);

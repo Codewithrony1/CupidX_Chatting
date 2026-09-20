@@ -46,6 +46,19 @@ try {
 const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
 const prisma = new PrismaClient({ adapter });
 
+let adminDb = null;
+try {
+  const admin = require('firebase-admin');
+  if (admin.apps && admin.apps.length === 0) {
+    admin.initializeApp({
+      projectId: process.env.FIREBASE_PROJECT_ID || 'cupidxchat-3dee5',
+    });
+  }
+  adminDb = admin.firestore();
+} catch (e) {
+  // Graceful fallback if firebase-admin not initialized
+}
+
 // ── In-Memory Realtime Architecture ──────────────────────────────────────────
 // userSockets: userId -> Set<socketId>
 const userSockets = new Map();
@@ -399,6 +412,11 @@ function calculateMatchScore(candidateA, candidateB, now) {
     return { canMatch: false, score: -1 };
   }
 
+  // Invariant: MAX ACTIVE SESSIONS PER USER = 1
+  if (userActiveMatch.has(candidateA.userId) || userActiveMatch.has(candidateB.userId)) {
+    return { canMatch: false, score: -1 };
+  }
+
   // 60-Second Anti-Rematch Exclusion Guard
   if (isRematchExcluded(candidateA.userId, candidateB.userId)) {
     return { canMatch: false, score: -1 };
@@ -462,6 +480,9 @@ function calculateMatchScore(candidateA, candidateB, now) {
 
 // ── In-Memory Queue Matcher (Atomic & Random Selection) ──────────────────────
 function processMatchQueue() {
+  // Prune any candidates already in an active match
+  randomMatchQueue = randomMatchQueue.filter((c) => !userActiveMatch.has(c.userId));
+
   if (randomMatchQueue.length < 2) return;
 
   const now = Date.now();
@@ -475,8 +496,11 @@ function processMatchQueue() {
 
   for (let i = 0; i < candidatesShuffled.length; i++) {
     const candidateA = candidatesShuffled[i];
+    if (userActiveMatch.has(candidateA.userId)) continue;
+
     for (let j = i + 1; j < candidatesShuffled.length; j++) {
       const candidateB = candidatesShuffled[j];
+      if (userActiveMatch.has(candidateB.userId)) continue;
 
       const { canMatch, score } = calculateMatchScore(candidateA, candidateB, now);
       if (canMatch && score > highestScore) {
@@ -489,7 +513,16 @@ function processMatchQueue() {
   if (bestPair) {
     const [candidateA, candidateB] = bestPair;
 
-    // Requirement 1 & 6: Remove both users from waiting queue atomically
+    // Concurrency guard: verify neither candidate was matched in the interim
+    if (userActiveMatch.has(candidateA.userId) || userActiveMatch.has(candidateB.userId)) {
+      randomMatchQueue = randomMatchQueue.filter((c) => !userActiveMatch.has(c.userId));
+      if (randomMatchQueue.length >= 2) {
+        setImmediate(processMatchQueue);
+      }
+      return;
+    }
+
+    // Invariant: Remove both users from waiting queue atomically
     randomMatchQueue = randomMatchQueue.filter(
       (c) => c.userId !== candidateA.userId && c.userId !== candidateB.userId
     );
@@ -508,6 +541,61 @@ function processMatchQueue() {
     activeMatches.set(matchId, matchRecord);
     userActiveMatch.set(candidateA.userId, matchId);
     userActiveMatch.set(candidateB.userId, matchId);
+
+    // Sync active match across database and distributed Firestore store
+    setImmediate(async () => {
+      try {
+        await prisma.chatSession.upsert({
+          where: { id: matchId },
+          update: { status: 'ACTIVE' },
+          create: {
+            id: matchId,
+            userAId: candidateA.userId,
+            userBId: candidateB.userId,
+            status: 'ACTIVE',
+          },
+        });
+        await prisma.matchmakingQueue.updateMany({
+          where: { userId: candidateA.userId },
+          data: { status: 'MATCHED', chatSessionId: matchId, partnerUserId: candidateB.userId },
+        });
+        await prisma.matchmakingQueue.updateMany({
+          where: { userId: candidateB.userId },
+          data: { status: 'MATCHED', chatSessionId: matchId, partnerUserId: candidateA.userId },
+        });
+      } catch (e) {}
+
+      if (adminDb) {
+        try {
+          const nowMs = Date.now();
+          const batch = adminDb.batch();
+          batch.set(adminDb.collection('active_sessions').doc(candidateA.userId), {
+            userId: candidateA.userId,
+            chatSessionId: matchId,
+            partnerId: candidateB.userId,
+            status: 'ACTIVE',
+            createdAt: nowMs,
+            updatedAt: nowMs,
+          });
+          batch.set(adminDb.collection('active_sessions').doc(candidateB.userId), {
+            userId: candidateB.userId,
+            chatSessionId: matchId,
+            partnerId: candidateA.userId,
+            status: 'ACTIVE',
+            createdAt: nowMs,
+            updatedAt: nowMs,
+          });
+          batch.set(adminDb.collection('matches').doc(matchId), {
+            matchId,
+            user1Id: candidateA.userId,
+            user2Id: candidateB.userId,
+            status: 'active',
+            createdAt: nowMs,
+          });
+          await batch.commit().catch(() => {});
+        } catch (e) {}
+      }
+    });
 
     console.log(`[MATCH_SUCCESS] Matched ${candidateA.userId} (${candidateA.username}) <-> ${candidateB.userId} (${candidateB.username})`);
     console.log(`[SESSION_CREATED] Room: ${roomId} for Match: ${matchId}`);
@@ -661,6 +749,20 @@ function teardownMatch(matchId, reason, triggeringUserId) {
         }),
       ]);
     } catch {}
+
+    if (adminDb) {
+      try {
+        const batch = adminDb.batch();
+        batch.delete(adminDb.collection('active_sessions').doc(userA.userId));
+        batch.delete(adminDb.collection('active_sessions').doc(userB.userId));
+        batch.set(
+          adminDb.collection('matches').doc(matchId),
+          { status: 'ended', endedAt: Date.now(), endedBy: triggeringUserId || null },
+          { merge: true }
+        );
+        await batch.commit().catch(() => {});
+      } catch (e) {}
+    }
   });
 }
 

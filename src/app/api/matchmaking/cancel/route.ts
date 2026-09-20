@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { getActiveUserSession, removeFirestoreUserSearching } from '@/lib/matchmakingLock';
 
 export async function POST(req: Request) {
   try {
@@ -10,24 +11,15 @@ export async function POST(req: Request) {
     }
 
     // Check race condition: did a match succeed right before cancellation arrived?
-    const currentQueue = await prisma.matchmakingQueue.findUnique({
-      where: { userId: user.id },
-    });
-
-    if (currentQueue?.status === 'MATCHED' && currentQueue.chatSessionId) {
-      const session = await prisma.chatSession.findUnique({
-        where: { id: currentQueue.chatSessionId },
+    const activeSession = await getActiveUserSession(user.id);
+    if (activeSession && activeSession.active) {
+      // Match won the race condition: inform client so both stay connected
+      return NextResponse.json({
+        success: false,
+        matched: true,
+        chatSessionId: activeSession.chatSessionId,
+        message: 'Match already established.',
       });
-
-      if (session && session.status === 'ACTIVE') {
-        // Match won the race condition: inform client so both stay connected
-        return NextResponse.json({
-          success: false,
-          matched: true,
-          chatSessionId: session.id,
-          message: 'Match already established.',
-        });
-      }
     }
 
     // Cancel wins: remove from queue and mark CANCELLED
@@ -37,16 +29,10 @@ export async function POST(req: Request) {
         status: 'CANCELLED',
         updatedAt: new Date(),
       },
-    });
+    }).catch(() => {});
 
-    // Mirror cancellation to Firestore queue doc
-    try {
-      const { getAdminDb } = await import('@/lib/firebaseAdmin');
-      const adminDb = getAdminDb();
-      if (adminDb) {
-        await adminDb.collection('matchmaking').doc(user.id).delete();
-      }
-    } catch (e) {}
+    // Remove from Firestore matchmaking queue doc
+    await removeFirestoreUserSearching(user.id);
 
     return NextResponse.json({
       success: true,

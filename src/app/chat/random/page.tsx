@@ -308,6 +308,7 @@ export default function KnotChatRandomPage() {
   const activeMatchIdRef = useRef<string | null>(null);
   const autoStartExecutedRef = useRef(false);
   const serverlessPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isMatchmakingStartingRef = useRef(false);
 
   const isVIP = Boolean(
     (!currentUser?.vip_expires_at || new Date(currentUser.vip_expires_at).getTime() > Date.now()) &&
@@ -386,6 +387,7 @@ export default function KnotChatRandomPage() {
       reconnected?: boolean;
     }) => {
       console.log('[RANDOM_CHAT] Match established via Socket.IO:', data.matchId);
+      isMatchmakingStartingRef.current = false;
       if (serverlessPollIntervalRef.current) {
         clearInterval(serverlessPollIntervalRef.current);
         serverlessPollIntervalRef.current = null;
@@ -584,10 +586,13 @@ export default function KnotChatRandomPage() {
     };
   }, [socket]);
 
-  // ─── START MATCHMAKING ─────────────────────────────────────────────────────
-  // ─── START MATCHMAKING (Dual-Transport Resilient) ──────────────────────────
+  // ─── START MATCHMAKING (Single-Transport Priority) ────────────────────────
   const handleStartMatch = useCallback(
     async (skipCurrent = false) => {
+      // Concurrency Guard: Prevent double-click or simultaneous multi-match triggers
+      if (isMatchmakingStartingRef.current) return;
+      isMatchmakingStartingRef.current = true;
+
       setConnectionState('SEARCHING');
       setMatchStatus('searching');
       setPartner(null);
@@ -609,12 +614,15 @@ export default function KnotChatRandomPage() {
         language: currentUser?.profile?.language || 'english',
       };
 
-      // 1. If Socket is connected, join queue via high-speed WebSockets
+      // 1. Single-Transport Priority:
+      // If WebSocket is connected and live, use Socket queue exclusively
       if (socket && socket.connected) {
         socket.emit('join_random_queue', preferences);
+        isMatchmakingStartingRef.current = false;
+        return;
       }
 
-      // 2. Dual-Transport: Call serverless matchmaking API in parallel
+      // 2. HTTP Fallback: Call serverless matchmaking API when Socket is unavailable
       try {
         const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
         const token = await getToken().catch(() => null);
@@ -639,6 +647,7 @@ export default function KnotChatRandomPage() {
             setSearchError('Random Chat is currently unavailable. Please try again later.');
             setConnectionState('ERROR');
             setMatchStatus('idle');
+            isMatchmakingStartingRef.current = false;
             return;
           }
         } else {
@@ -656,14 +665,17 @@ export default function KnotChatRandomPage() {
             setConnectionState('CONNECTED');
             setReconnecting(false);
             setMessages([]);
+            isMatchmakingStartingRef.current = false;
             return;
           }
         }
       } catch (e) {
         console.warn('API matchmaking join notice:', e);
+      } finally {
+        isMatchmakingStartingRef.current = false;
       }
 
-      // 3. Fallback polling on /api/matchmaking/status if socket is not connected
+      // 3. Status Polling if socket remains unavailable
       if (!socket || !socket.connected) {
         serverlessPollIntervalRef.current = setInterval(async () => {
           if (activeMatchIdRef.current) {
@@ -743,6 +755,7 @@ export default function KnotChatRandomPage() {
 
   // ─── CANCEL SEARCH ─────────────────────────────────────────────────────────
   const handleCancelSearch = () => {
+    isMatchmakingStartingRef.current = false;
     activeMatchIdRef.current = null;
     setConnectionState('IDLE');
     setMatchStatus('idle');
