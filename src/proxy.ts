@@ -44,6 +44,9 @@ export default clerkMiddleware(async (auth, req) => {
   if (isAdminPath) {
     const host = req.headers.get('host')?.toLowerCase() || '';
     const isLocalAdminServer = process.env.ADMIN_MODE === 'true' && (
+      host === 'localhost:3000' ||
+      host === '127.0.0.1:3000' ||
+      host === '[::1]:3000' ||
       host === 'localhost:3001' ||
       host === '127.0.0.1:3001' ||
       host === '[::1]:3001'
