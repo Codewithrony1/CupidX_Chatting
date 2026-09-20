@@ -87,6 +87,9 @@ interface PaymentRequestItem {
   paymentId?: string | null;
   screenshotUrl?: string | null;
   screenshotKey?: string | null;
+  utrNumber?: string | null;
+  proofUrl?: string | null;
+  paymentScreenshotUrl?: string | null;
   status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'pending' | 'approved' | 'rejected';
   rejectionReason?: string | null;
   createdAt: string;
@@ -562,6 +565,9 @@ export default function AdminPage() {
   };
 
   // Filter requests by search
+  const getPaymentUtr = (r: PaymentRequestItem) => r.paymentId || r.utrNumber || null;
+  const getPaymentScreenshot = (r: PaymentRequestItem) => r.screenshotUrl || r.proofUrl || r.paymentScreenshotUrl || null;
+
   const filteredRequests = requests.filter((r) => {
     if (!requestSearch) return true;
     const term = requestSearch.toLowerCase();
@@ -570,7 +576,7 @@ export default function AdminPage() {
       (r.userEmail || '').toLowerCase().includes(term) ||
       (r.userName || '').toLowerCase().includes(term) ||
       r.username.toLowerCase().includes(term) ||
-      (r.paymentId || '').toLowerCase().includes(term) ||
+      (getPaymentUtr(r) || '').toLowerCase().includes(term) ||
       (r.clerkUserId || '').toLowerCase().includes(term)
     );
   });
@@ -946,11 +952,11 @@ export default function AdminPage() {
                         </span>
                       </div>
 
-                      {req.paymentId && (
+                      {getPaymentUtr(req) && (
                         <div className="col-span-2 pt-1 border-t border-white/5 flex items-center justify-between">
                           <div>
                             <span className="text-[9px] font-bold text-slate-400 block uppercase">UTR / Transaction ID</span>
-                            <span className="font-mono font-bold text-yellow-400 text-xs">{req.paymentId}</span>
+                            <span className="font-mono font-bold text-yellow-400 text-xs">{getPaymentUtr(req)}</span>
                           </div>
                           <button
                             onClick={() => copyToClipboard(req.paymentId!, req.id)}
@@ -983,17 +989,17 @@ export default function AdminPage() {
                     )}
 
                     {/* Screenshot Preview */}
-                    {req.screenshotUrl && (
+                    {getPaymentScreenshot(req) && (
                       <div className="space-y-1">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Payment Screenshot (Secure Viewer)
                         </span>
                         <div
-                          onClick={() => setSelectedFullImage(req.screenshotUrl!)}
+                          onClick={() => setSelectedFullImage(getPaymentScreenshot(req)!)}
                           className="relative w-full h-36 rounded-2xl overflow-hidden border border-white/10 cursor-pointer group bg-black"
                         >
                           <img
-                            src={req.screenshotUrl}
+                            src={getPaymentScreenshot(req)!}
                             alt="Receipt"
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                           />
