@@ -55,6 +55,7 @@ export async function POST(req: Request) {
     let ext = 'jpg';
     let matchId = '';
     let content = '';
+  let clientMessageId: string | null = null;
 
     const contentType = req.headers.get('content-type') || '';
 
@@ -62,6 +63,7 @@ export async function POST(req: Request) {
       const body = await req.json().catch(() => ({}));
       matchId = body.matchId || '';
       content = body.content || '';
+      clientMessageId = typeof body.clientMessageId === 'string' ? body.clientMessageId.trim() : null;
       const imageData = body.imageData;
 
       if (!imageData || typeof imageData !== 'string') {
@@ -87,6 +89,7 @@ export async function POST(req: Request) {
       const file = formData.get('file') as File | null;
       matchId = (formData.get('matchId') as string) || '';
       content = (formData.get('content') as string) || '';
+      clientMessageId = ((formData.get('clientMessageId') as string) || '').trim() || null;
 
       if (!file) {
         return NextResponse.json({ error: 'No image file uploaded.' }, { status: 400 });
@@ -156,19 +159,23 @@ export async function POST(req: Request) {
 
     ext = isPng ? 'png' : isWebp ? 'webp' : (isGif ? 'gif' : 'jpg');
 
-    // 6. Access Control: Verify caller is an active participant in matchId
-    if (matchId) {
-      const { prisma } = await import('@/lib/prisma');
-      const session = await prisma.chatSession.findUnique({
-        where: { id: matchId },
-      }).catch(() => null);
-
-      const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
-      if (session && !userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
-        return NextResponse.json(
-          { error: 'Forbidden: You are not an active participant in this chat session.' },
-          { status: 403 }
-        );
+    // 6. Strict access control: uploads require an active session and participant.
+    if (!matchId) {
+      return NextResponse.json({ error: 'An active chat session is required for photo uploads.' }, { status: 400 });
+    }
+    const { prisma } = await import('@/lib/prisma');
+    const session = await prisma.chatSession.findUnique({ where: { id: matchId } }).catch(() => null);
+    if (!session || session.status !== 'ACTIVE') {
+      return NextResponse.json({ error: 'Chat session is not active.' }, { status: 400 });
+    }
+    const userIds = [user.id, user.clerkUserId, (user as any).firebaseUid].filter(Boolean) as string[];
+    if (!userIds.includes(session.userAId) && !userIds.includes(session.userBId)) {
+      return NextResponse.json({ error: 'Forbidden: You are not an active participant in this chat session.' }, { status: 403 });
+    }
+    if (clientMessageId) {
+      const existing = await prisma.message.findFirst({ where: { clientMessageId, chatSessionId: matchId, senderId: user.id } }).catch(() => null);
+      if (existing) {
+        return NextResponse.json({ success: true, alreadyProcessed: true, imageUrl: existing.imageUrl, messageId: existing.id });
       }
     }
 
@@ -197,8 +204,9 @@ export async function POST(req: Request) {
           const dbMsg = await prisma.message.create({
             data: {
               chatSessionId: matchId,
+              clientMessageId,
               senderId: user.id,
-              content: content.trim(),
+              content: content.trim().slice(0, 2000),
               imageUrl,
             },
           });
