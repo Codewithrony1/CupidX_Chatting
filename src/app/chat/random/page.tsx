@@ -935,6 +935,7 @@ export default function KnotChatRandomPage() {
             matchId: activeMid,
             content: textToSend,
             imageData: imageToSend,
+            clientMessageId: tempId,
           }),
         });
 
@@ -976,14 +977,29 @@ export default function KnotChatRandomPage() {
             }
           );
         } else {
+          // Socket unavailable: persist the uploaded image through the canonical message API.
+          const token = await getToken().catch(() => null);
+          const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+          const postRes = await fetch('/api/chat/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+            },
+            body: JSON.stringify({
+              chatSessionId: activeMid,
+              content: textToSend,
+              imageUrl: uploadData.imageUrl || null,
+              clientMessageId: tempId,
+            }),
+          });
+          if (!postRes.ok) throw new Error((await postRes.json().catch(() => ({}))).error || 'Failed to send photo.');
+          const postData = await postRes.json().catch(() => ({}));
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === tempId
-                ? {
-                    ...m,
-                    id: uploadData.message?.id || tempId,
-                    status: 'SENT' as const,
-                  }
+              m.id === tempId || m.clientMessageId === tempId
+                ? { ...m, id: postData.message?.id || tempId, status: 'SENT' as const }
                 : m
             )
           );
