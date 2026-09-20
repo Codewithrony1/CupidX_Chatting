@@ -199,7 +199,6 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       imageUrl,
-      messageId,
     });
   } catch (error: any) {
     console.error('VIP Image Upload Error:', error);
