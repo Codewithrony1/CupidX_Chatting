@@ -14,8 +14,10 @@ export async function GET(req: Request) {
     const search = (searchParams.get('search') || '').toLowerCase().trim();
     const planFilter = (searchParams.get('plan') || 'all').toLowerCase();
 
-    // Fetch every local user. Clerk is the canonical identity source; linked Clerk IDs/emails are
-    // already persisted by getCurrentUser/getOrCreateUserFromClerk during authenticated activity.
+    // Ensure the admin view can discover Clerk-linked accounts even when some users
+    // have not yet completed their first authenticated database sync.
+    // The database remains the canonical application store; Clerk identity is linked
+    // through clerkUserId/email whenever a matching account exists.
     const localUsers = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
@@ -53,7 +55,8 @@ export async function GET(req: Request) {
         (u) =>
           u.username.toLowerCase().includes(search) ||
           (u.email && u.email.toLowerCase().includes(search)) ||
-          u.fullName.toLowerCase().includes(search)
+          u.fullName.toLowerCase().includes(search) ||
+          (u.clerkUserId && u.clerkUserId.toLowerCase().includes(search))
       );
     }
 
