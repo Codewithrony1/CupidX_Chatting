@@ -16,6 +16,7 @@ export async function POST(req: Request) {
       qrImageData,
       upiId,
       indiaPriceMonthly,
+      indiaPriceThreeMonths,
       indiaPriceYearly,
       intlPriceMonthly,
       intlPriceYearly,
@@ -60,6 +61,13 @@ export async function POST(req: Request) {
         where: { key: 'indiaPriceMonthly' },
         update: { value: indiaPriceMonthly.toString() },
         create: { key: 'indiaPriceMonthly', value: indiaPriceMonthly.toString() },
+      });
+    }
+    if (indiaPriceThreeMonths) {
+      await prisma.appSetting.upsert({
+        where: { key: 'indiaPriceThreeMonths' },
+        update: { value: indiaPriceThreeMonths.toString() },
+        create: { key: 'indiaPriceThreeMonths', value: indiaPriceThreeMonths.toString() },
       });
     }
     if (indiaQrMonthlyUrl) {
