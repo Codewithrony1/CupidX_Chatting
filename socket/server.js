@@ -3,9 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
-const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
 const { analyzeMessage, recordModerationEvent } = require('./moderation');
-const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -13,41 +11,67 @@ const os = require('os');
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET && process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET is required in production.');
 const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'cupidx-development-only-secret';
-const PORT = process.env.SOCKET_PORT || 3001;
+const PORT = process.env.PORT || process.env.SOCKET_PORT || 3001;
 const CLIENT_URL = process.env.NEXT_PUBLIC_CLIENT_URL || 'http://localhost:3000';
 
-// Database setup with SQLite WAL mode and busy timeout
-const defaultDbPath = path.join(__dirname, '..', 'prisma', 'dev.db');
-let dbPath = defaultDbPath;
+// ── Database Setup: PostgreSQL (production) or SQLite (local dev) ─────────────
+// DEPLOY-001 FIX: When DATABASE_URL is a PostgreSQL connection string (as used on
+// Render/Fly.io), use the @prisma/adapter-pg adapter instead of SQLite. This
+// allows the socket server to connect to the same PostgreSQL database as the
+// Next.js app, ensuring matchmaking state and chat records are shared.
+let prisma;
 
-if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  const tmpPath = path.join(os.tmpdir(), 'dev.db');
-  try {
-    if (!fs.existsSync(tmpPath)) {
-      if (fs.existsSync(defaultDbPath)) {
-        fs.copyFileSync(defaultDbPath, tmpPath);
-      } else {
-        fs.writeFileSync(tmpPath, '');
+const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL_NON_POOLING || '';
+const isPostgres = databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://');
+
+if (isPostgres) {
+  // Production: PostgreSQL via @prisma/adapter-pg
+  const { PrismaPg } = require('@prisma/adapter-pg');
+  const { Pool } = require('pg');
+  const pool = new Pool({ connectionString: databaseUrl });
+  const adapter = new PrismaPg(pool);
+  prisma = new PrismaClient({ adapter });
+  console.log('[DB] Connected to PostgreSQL (production mode)');
+} else {
+  // Local dev: SQLite via @prisma/adapter-better-sqlite3
+  const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
+  const Database = require('better-sqlite3');
+
+  const defaultDbPath = path.join(__dirname, '..', 'prisma', 'dev.db');
+  let dbPath = defaultDbPath;
+
+  // Handle read-only filesystems (lambda-like environments)
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const tmpPath = path.join(os.tmpdir(), 'dev.db');
+    try {
+      if (!fs.existsSync(tmpPath)) {
+        if (fs.existsSync(defaultDbPath)) {
+          fs.copyFileSync(defaultDbPath, tmpPath);
+        } else {
+          fs.writeFileSync(tmpPath, '');
+        }
       }
+      dbPath = tmpPath;
+    } catch (e) {
+      console.warn('Failed to copy SQLite database:', e);
     }
-    dbPath = tmpPath;
-  } catch (e) {
-    console.warn('Failed to copy SQLite database in socket server:', e);
   }
+
+  try {
+    const sqliteDb = new Database(dbPath);
+    sqliteDb.pragma('journal_mode = WAL');
+    sqliteDb.pragma('busy_timeout = 5000');
+    sqliteDb.pragma('synchronous = NORMAL');
+    sqliteDb.close();
+  } catch (e) {
+    console.warn('Could not set WAL pragma on SQLite:', e.message);
+  }
+
+  const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
+  prisma = new PrismaClient({ adapter });
+  console.log(`[DB] Connected to SQLite (local dev): ${dbPath}`);
 }
 
-try {
-  const sqliteDb = new Database(dbPath);
-  sqliteDb.pragma('journal_mode = WAL');
-  sqliteDb.pragma('busy_timeout = 5000');
-  sqliteDb.pragma('synchronous = NORMAL');
-  sqliteDb.close();
-} catch (e) {
-  console.warn('Could not set WAL pragma on SQLite:', e.message);
-}
-
-const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-const prisma = new PrismaClient({ adapter });
 
 
 
@@ -340,7 +364,22 @@ const server = http.createServer((req, res) => {
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      const allowedOrigins = new Set(['https://cupidxchat.in','https://www.cupidxchat.in',CLIENT_URL,'http://localhost:3000','http://127.0.0.1:3000']);
+      // DEPLOY-001: CORS origins are now env-driven.
+      // Set ALLOWED_ORIGINS as a comma-separated list, e.g.:
+      //   ALLOWED_ORIGINS=https://cupidxchat.in,https://your-app.vercel.app
+      // Defaults include the hardcoded production domains for zero-config deploys.
+      const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean);
+      const allowedOrigins = new Set([
+        'https://cupidxchat.in',
+        'https://www.cupidxchat.in',
+        CLIENT_URL,
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        ...extraOrigins,
+      ]);
       if (!origin || allowedOrigins.has(origin)) return callback(null, true);
       return callback(new Error('Origin not allowed'));
     },
@@ -1349,7 +1388,9 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 server.listen(PORT, () => {
+  const dbMode = isPostgres ? 'PostgreSQL' : 'SQLite (local dev)';
   console.log(`⚡ CupidX Production Realtime Socket.IO Server running on port ${PORT}`);
   console.log(`   - HTTP Health Check: http://localhost:${PORT}/health`);
-  console.log(`   - SQLite Storage: ${dbPath} (WAL Mode enabled)`);
+  console.log(`   - Database: ${dbMode}`);
+  console.log(`   - Environment: ${process.env.NODE_ENV || 'development'}`);
 });
