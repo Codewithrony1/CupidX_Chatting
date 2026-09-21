@@ -19,25 +19,25 @@ export default function Home() {
   const { user, loading } = useAuth();
 
   const isAuthenticated = !loading && !!user;
-  const needsOnboarding = isAuthenticated && user && (!user.profileCompleted || !user.username);
+  const needsOnboarding = isAuthenticated && user && (!user.profileCompleted || !user.username || user.username.startsWith('user_'));
 
   // Authentication-aware routing URLs
   const startChattingUrl = isAuthenticated
     ? needsOnboarding
       ? '/setup-profile'
-      : '/dashboard'
+      : '/chat'
     : '/login';
 
   const loginUrl = isAuthenticated
     ? needsOnboarding
       ? '/setup-profile'
-      : '/dashboard'
+      : '/chat'
     : '/login';
 
   const joinNowUrl = isAuthenticated
     ? needsOnboarding
       ? '/setup-profile'
-      : '/dashboard'
+      : '/chat'
     : '/signup';
 
   return (

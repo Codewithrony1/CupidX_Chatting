@@ -74,11 +74,15 @@ export default function DashboardPage() {
   const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
 
   const isProfileComplete = Boolean(
-    user?.profileCompleted ||
-    user?.profileLocked ||
-    user?.genderDobLocked ||
-    user?.profile?.ageGenderConfirmed ||
-    ((user?.dateOfBirth || user?.profile?.dateOfBirth) && user?.gender && user?.gender !== 'unspecified' && (user?.fullName || user?.displayName))
+    user &&
+    user.username &&
+    !user.username.startsWith('user_') &&
+    (user.profileCompleted ||
+     user.profileLocked ||
+     user.genderDobLocked ||
+     (user.profile as any)?.profileCompleted ||
+     user.profile?.ageGenderConfirmed ||
+     ((user?.dateOfBirth || user?.profile?.dateOfBirth) && user?.gender && user?.gender !== 'unspecified' && (user?.fullName || user?.displayName)))
   );
 
   useEffect(() => {

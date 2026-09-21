@@ -57,7 +57,7 @@ export async function POST(
       }),
     ]);
 
-    // Release distributed active_sessions locks in Cloud Firestore
+    // Release distributed active session state
     await releaseDistributedSession({
       sessionId: chatSessionId,
       userAId: session.userAId,

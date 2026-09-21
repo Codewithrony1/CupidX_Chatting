@@ -46,7 +46,7 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
   const cleanId = clerkId.trim();
   if (!cleanId) return null;
 
-  // 1. Check if user exists in database by clerkUserId, id, or firebaseUid
+  // 1. Check if user exists in database by clerkUserId or id
   let user = await prisma.user.findFirst({
     where: {
       OR: [
@@ -386,9 +386,21 @@ export async function getCurrentUser(req?: Request) {
       }
     }
 
-    // 5. If Clerk user ID was cryptographically verified, resolve or provision user
+    // 5. If Clerk user ID was cryptographically verified, resolve existing user from Supabase/Prisma
     if (resolvedClerkId) {
-      const user = await getOrCreateUserFromClerk(resolvedClerkId);
+      const user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { clerkUserId: resolvedClerkId },
+            { id: resolvedClerkId },
+          ],
+        },
+        include: {
+          profile: true,
+          subscription: true,
+        },
+      });
+
       if (user && !user.isSuspended) {
         // Auto-expire VIP/Premium if expired
         if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= Date.now()) {

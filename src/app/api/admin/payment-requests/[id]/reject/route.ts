@@ -7,7 +7,7 @@ export async function POST(
   props: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { authorized, user: admin, adminFirebaseUid } = await verifyAdminAccess(req);
+    const { authorized, user: admin, adminClerkUserId } = await verifyAdminAccess(req);
 
     if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
@@ -32,7 +32,7 @@ export async function POST(
     }
 
     const now = new Date();
-    const adminIdentifier = admin?.username || adminFirebaseUid || 'admin';
+    const adminIdentifier = admin?.username || adminClerkUserId || admin?.id || 'admin';
 
     // Update request to REJECTED and create notification
     await prisma.$transaction([

@@ -7,7 +7,7 @@ export async function POST(
   props: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { authorized, user: admin, adminFirebaseUid } = await verifyAdminAccess(req);
+    const { authorized, user: admin, adminClerkUserId } = await verifyAdminAccess(req);
 
     if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });

@@ -60,7 +60,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     let isDisposed = false;
 
     const flushQueue = (sock: Socket) => {
-      let queue: OfflineMessage[] = [...offlineQueueRef.current];
+      const queue: OfflineMessage[] = [...offlineQueueRef.current];
       if (typeof window !== 'undefined') {
         try {
           const stored = sessionStorage.getItem(storageKey);

@@ -18,7 +18,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing targetUserId or reason' }, { status: 400 });
     }
 
-    // Resolve target User by id, clerkUserId, or firebaseUid
+    // Resolve target User by id or clerkUserId
     const targetUser = await prisma.user.findFirst({
       where: {
         OR: [

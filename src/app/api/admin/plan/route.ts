@@ -4,7 +4,7 @@ import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function POST(req: Request) {
   try {
-    const { authorized, user, adminFirebaseUid } = await verifyAdminAccess(req);
+    const { authorized, user, adminClerkUserId } = await verifyAdminAccess(req);
 
     if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     }
 
     const now = new Date();
-    const adminIdentifier = user?.username || adminFirebaseUid || user?.id || 'admin';
+    const adminIdentifier = user?.username || adminClerkUserId || user?.id || 'admin';
 
     if (action === 'grant') {
       const grantDays = parseInt(days.toString(), 10) || 30;

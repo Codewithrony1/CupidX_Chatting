@@ -7,7 +7,7 @@ export async function POST(
   props: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { authorized, user: admin, adminFirebaseUid } = await verifyAdminAccess(req);
+    const { authorized, user: admin, adminClerkUserId } = await verifyAdminAccess(req);
 
     if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
@@ -58,7 +58,7 @@ export async function POST(
     }
 
     const newExpiresAt = new Date(baseExpiryDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
-    const adminIdentifier = admin?.username || adminFirebaseUid || admin?.id || 'admin';
+    const adminIdentifier = admin?.username || adminClerkUserId || admin?.id || 'admin';
     const formattedExpiryDate = newExpiresAt.toLocaleDateString('en-IN', {
       day: 'numeric',
       month: 'short',

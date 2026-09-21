@@ -4,7 +4,7 @@ import { verifyAdminAccess } from '@/lib/adminAuth';
 
 export async function POST(req: Request) {
   try {
-    const { authorized, user: admin, adminFirebaseUid } = await verifyAdminAccess(req);
+    const { authorized, user: admin } = await verifyAdminAccess(req);
 
     if (!authorized) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });

@@ -21,7 +21,7 @@ export async function POST(
     });
 
     if (!session) {
-      // Even if session is not in local SQLite, release distributed Firestore locks
+      // Release distributed active session state
       await releaseDistributedSession({
         sessionId: chatSessionId,
         userAId: user.id,
@@ -59,7 +59,7 @@ export async function POST(
       }),
     ]);
 
-    // Release distributed active_sessions locks in Cloud Firestore
+    // Release distributed active session state
     await releaseDistributedSession({
       sessionId: chatSessionId,
       userAId: session.userAId,

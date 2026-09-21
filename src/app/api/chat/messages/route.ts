@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser, getOrCreateUserFromClerk } from '@/lib/auth';
+import { sanitizeMessage, MAX_MESSAGE_LENGTH } from '@/lib/sanitize';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
@@ -38,6 +39,7 @@ async function resolveCanonicalUserId(identifier: string, displayName = 'Strange
     });
     return created.id;
   } catch (e) {
+    console.error('[resolveCanonicalUserId] Error resolving/creating user:', e);
     const fallback = await prisma.user.findFirst({
       where: { OR: [{ id: identifier }, { clerkUserId: identifier }] },
       select: { id: true },
@@ -74,6 +76,17 @@ export async function POST(req: Request) {
 
     if (!chatSessionId || (!content?.trim() && !rawImageUrl && !imageData)) {
       return NextResponse.json({ error: 'Chat session ID and content or image are required' }, { status: 400 });
+    }
+
+    // MSG-001: Enforce message length limit and sanitize before ANY further processing.
+    // The 2000-char cap matches what socket/server.js enforces on the WebSocket path.
+    if (content !== undefined && content !== null && typeof content === 'string') {
+      if (content.trim().length > MAX_MESSAGE_LENGTH) {
+        return NextResponse.json(
+          { error: `Message too long. Maximum length is ${MAX_MESSAGE_LENGTH} characters.` },
+          { status: 400 }
+        );
+      }
     }
 
     // 3. Strict IDOR Check: Verify ChatSession exists and user is a participant
@@ -182,13 +195,22 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6. Create Message record in DB
+    // 6. Sanitize message content (MSG-001: prevent stored XSS)
+    const { safe: safeContent, tooLong } = sanitizeMessage(content);
+    if (tooLong) {
+      return NextResponse.json(
+        { error: `Message too long. Maximum length is ${MAX_MESSAGE_LENGTH} characters.` },
+        { status: 400 }
+      );
+    }
+
+    // 7. Create Message record in DB
     const message = await prisma.message.create({
       data: {
         chatSessionId,
         clientMessageId: clientMessageId || null,
         senderId: user.id,
-        content: (content || '').trim(),
+        content: safeContent,
         imageUrl: finalImageUrl,
       },
       include: {

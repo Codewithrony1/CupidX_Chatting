@@ -49,18 +49,7 @@ try {
 const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
 const prisma = new PrismaClient({ adapter });
 
-let adminDb = null;
-try {
-  const admin = require('firebase-admin');
-  if (admin.apps && admin.apps.length === 0) {
-    admin.initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || 'cupidxchat-3dee5',
-    });
-  }
-  adminDb = admin.firestore();
-} catch (e) {
-  // Graceful fallback if firebase-admin not initialized
-}
+
 
 // ── In-Memory Realtime Architecture ──────────────────────────────────────────
 // userSockets: userId -> Set<socketId>
@@ -368,32 +357,17 @@ const io = new Server(server, {
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
-    const isTestAllowed = process.env.NODE_ENV !== 'production';
-    const isTest = isTestAllowed && (socket.handshake.auth?.isLoadTest || socket.handshake.query?.isLoadTest);
-    const testUserId = socket.handshake.auth?.userId || socket.handshake.query?.userId;
 
+    // WS-001 SECURITY FIX: The previous load-test bypass allowed any client
+    // to impersonate an arbitrary userId in non-production environments by
+    // setting isLoadTest=true with no token. This is removed. Load tests MUST
+    // use real JWT tokens issued by the authentication system.
     if (!token) {
-      if (isTest && testUserId) {
-        socket.user = {
-          userId: String(testUserId),
-          username: socket.handshake.auth?.username || socket.handshake.query?.username || `tester_${testUserId}`,
-          role: 'USER',
-        };
-        return next();
-      }
       return next(new Error('Authentication token required'));
     }
 
     jwt.verify(token, EFFECTIVE_JWT_SECRET, (err, decoded) => {
       if (err) {
-        if (isTest && testUserId) {
-          socket.user = {
-            userId: String(testUserId),
-            username: socket.handshake.auth?.username || `tester_${testUserId}`,
-            role: 'USER',
-          };
-          return next();
-        }
         return next(new Error('Invalid token'));
       }
       socket.user = decoded;
@@ -590,37 +564,9 @@ function processMatchQueue() {
         });
       } catch (e) {}
 
-      if (adminDb) {
-        try {
-          const nowMs = Date.now();
-          const batch = adminDb.batch();
-          batch.set(adminDb.collection('active_sessions').doc(candidateA.userId), {
-            userId: candidateA.userId,
-            chatSessionId: matchId,
-            partnerId: candidateB.userId,
-            status: 'ACTIVE',
-            createdAt: nowMs,
-            updatedAt: nowMs,
-          });
-          batch.set(adminDb.collection('active_sessions').doc(candidateB.userId), {
-            userId: candidateB.userId,
-            chatSessionId: matchId,
-            partnerId: candidateA.userId,
-            status: 'ACTIVE',
-            createdAt: nowMs,
-            updatedAt: nowMs,
-          });
-          batch.set(adminDb.collection('matches').doc(matchId), {
-            matchId,
-            user1Id: candidateA.userId,
-            user2Id: candidateB.userId,
-            status: 'active',
-            createdAt: nowMs,
-          });
-          await batch.commit().catch(() => {});
-        } catch (e) {}
-      }
-    });
+      // adminDb (Firebase) block removed — see WS-001 fix.
+      // Prisma sync above is the canonical record of active sessions.
+
 
     console.log(`[MATCH_SUCCESS] Matched ${candidateA.userId} (${candidateA.username}) <-> ${candidateB.userId} (${candidateB.username})`);
     console.log(`[SESSION_CREATED] Room: ${roomId} for Match: ${matchId}`);

@@ -217,7 +217,7 @@ export default function ProfilePage() {
     setSaveSuccess(false);
 
     try {
-      // Save directly to Authoritative Database API (which also syncs Firestore server-side)
+      // Save directly to Authoritative Database API
       const effectiveClerkId = user?.clerkUserId || user?.id || user?.uid;
       const token = await getToken().catch(() => null);
       const res = await fetch('/api/profile', {

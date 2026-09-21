@@ -152,24 +152,27 @@ export default function OnboardingPage() {
   }, [user, directClerkUser, clerkUser]);
 
   const isProfileComplete = Boolean(
-    user?.profileCompleted ||
-    (user as any)?.genderDobLocked ||
-    user?.profile?.ageGenderConfirmed ||
-    ((user?.dateOfBirth || user?.profile?.dateOfBirth) && user?.gender && user?.gender !== 'unspecified' && (user?.fullName || user?.displayName))
+    user &&
+    user.username &&
+    !user.username.startsWith('user_') &&
+    (user.profileCompleted ||
+     (user as any)?.genderDobLocked ||
+     user?.profile?.ageGenderConfirmed ||
+     ((user?.dateOfBirth || user?.profile?.dateOfBirth) && user?.gender && user?.gender !== 'unspecified' && (user?.fullName || user?.displayName)))
   );
 
-  // If not authenticated, redirect to login
+  // If not authenticated, redirect to login only after auth has loaded
   useEffect(() => {
-    if (!authLoading && !user && !directClerkUser) {
+    if (!authLoading && !user && !directClerkUser && !clerkUser) {
       router.replace('/login');
     }
-  }, [authLoading, user, directClerkUser, router]);
+  }, [authLoading, user, directClerkUser, clerkUser, router]);
 
-  // If already complete, redirect to dashboard
+  // If already complete, redirect to /chat
   useEffect(() => {
     if (!authLoading && user) {
       if (isProfileComplete && !submitting) {
-        router.replace('/dashboard');
+        router.replace('/chat');
       }
     }
   }, [user, authLoading, isProfileComplete, submitting, router]);
@@ -179,6 +182,7 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
 
     const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
     if (!cleanUsername) {
@@ -268,7 +272,7 @@ export default function OnboardingPage() {
       }
 
       await refreshUser();
-      router.replace('/dashboard');
+      router.replace('/chat');
     } catch (err: any) {
       console.error('Onboarding save error:', err);
       setErrorMsg(err?.message || 'Failed to complete profile setup. Please try again.');
@@ -285,7 +289,7 @@ export default function OnboardingPage() {
         </div>
         <div className="flex items-center space-x-2 text-pink-300 text-xs font-bold mt-4 z-10">
           <Loader2 className="w-4 h-4 animate-spin" />
-          <span>{isProfileComplete ? 'Opening dashboard...' : 'Loading CupidX...'}</span>
+          <span>{isProfileComplete ? 'Opening chat...' : 'Loading CupidX...'}</span>
         </div>
       </div>
     );

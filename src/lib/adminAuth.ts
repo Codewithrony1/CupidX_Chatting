@@ -1,19 +1,27 @@
 import { getCurrentUser } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
 
 /**
  * Admin is intentionally LOCAL-ONLY.
  * The admin UI/API must only run from a local development server
  * with ADMIN_MODE enabled (localhost:3000 or localhost:3001). Production users never receive
  * admin authorization, even if their database role/email says ADMIN.
+ *
+ * SECURITY (ADM-001): This function uses ONLY the server-controlled `host` header
+ * for locality verification. The `x-forwarded-host` header is explicitly excluded
+ * because it is client-supplied and trivially spoofable by any attacker.
+ *
+ * Additionally, all admin API requests may require an X-Admin-Secret header if
+ * ADMIN_SECRET is set in the environment (enforced at middleware level).
  */
 function isLocalAdminRequest(req: Request): boolean {
   const adminMode = process.env.ADMIN_MODE === 'true';
   if (!adminMode) return false;
 
+  // SECURITY: Read ONLY from the `host` header — never from `x-forwarded-host`.
+  // Middleware (src/middleware.ts) has already validated the host before any admin
+  // request reaches this function, so this is a defence-in-depth check only.
   const url = new URL(req.url);
-  const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
-  const host = (forwardedHost || req.headers.get('host') || url.host || '').toLowerCase();
+  const host = (req.headers.get('host') || url.host || '').toLowerCase();
 
   return (
     host === 'localhost:3000' ||
@@ -25,7 +33,18 @@ function isLocalAdminRequest(req: Request): boolean {
   );
 }
 
-export async function verifyAdminAccess(req: Request) {
+/**
+ * Discriminated union return type for verifyAdminAccess.
+ *
+ * When `authorized` is true, `user`, `adminId`, and `adminClerkUserId` are
+ * all guaranteed to be non-null so callers can safely access them without
+ * optional chaining after an `if (!authorized) return` guard.
+ */
+export type AdminAccessResult =
+  | { authorized: true; user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>; adminId: string; adminClerkUserId: string | null }
+  | { authorized: false; user: null; adminId: null; adminClerkUserId: null };
+
+export async function verifyAdminAccess(req: Request): Promise<AdminAccessResult> {
   // Hard security boundary: ADMIN_MODE + loopback host are both required.
   if (!isLocalAdminRequest(req)) {
     return {
@@ -33,52 +52,28 @@ export async function verifyAdminAccess(req: Request) {
       user: null,
       adminId: null,
       adminClerkUserId: null,
-      adminFirebaseUid: null,
     };
   }
 
+  // SECURITY (ADM-001): An authenticated Clerk session is REQUIRED.
+  // The previous unauthenticated fallback (which granted ADMIN to unauthenticated
+  // localhost requests or to the first user in the DB) has been removed because
+  // it allowed any process running on localhost to gain admin access without credentials.
   const user = await getCurrentUser(req);
 
-  // Local development admin mode (npm run dev or npm run admin).
-  if (user) {
+  if (!user) {
     return {
-      authorized: true,
-      user: { ...user, role: 'ADMIN' },
-      adminId: user.id,
-      adminClerkUserId: user.clerkUserId || null,
-      adminFirebaseUid: user.clerkUserId || user.id,
+      authorized: false,
+      user: null,
+      adminId: null,
+      adminClerkUserId: null,
     };
   }
-
-  // Fallback admin user for local headless testing without an auth cookie.
-  try {
-    const existingAdmin = await prisma.user.findFirst({
-      where: { role: 'ADMIN' },
-    }) || await prisma.user.findFirst();
-
-    if (existingAdmin) {
-      return {
-        authorized: true,
-        user: { ...existingAdmin, role: 'ADMIN' },
-        adminId: existingAdmin.id,
-        adminClerkUserId: existingAdmin.clerkUserId || null,
-        adminFirebaseUid: existingAdmin.clerkUserId || existingAdmin.id,
-      };
-    }
-  } catch (e) {}
 
   return {
     authorized: true,
-    user: {
-      id: 'admin_local_dev',
-      clerkUserId: 'admin_local_dev',
-      username: 'admin',
-      email: 'admin@cupidxchat.in',
-      role: 'ADMIN',
-      is_vip: true,
-    } as any,
-    adminId: 'admin_local_dev',
-    adminClerkUserId: 'admin_local_dev',
-    adminFirebaseUid: 'admin_local_dev',
+    user: { ...user, role: 'ADMIN' } as NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>,
+    adminId: user.id,
+    adminClerkUserId: user.clerkUserId || null,
   };
 }

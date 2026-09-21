@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { usernameSchema } from '@/lib/validation/username';
-import { signToken, getCurrentUser, getOrCreateUserFromClerk, getAuthCookieOptions } from '@/lib/auth';
+import { validateDob } from '@/lib/validation/dob';
+import { MINIMUM_LEGAL_AGE, CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION } from '@/lib/config/policy';
+import { signToken, getCurrentUser, getAuthCookieOptions } from '@/lib/auth';
 
 export async function GET(req: Request) {
   try {
@@ -28,6 +30,20 @@ export async function GET(req: Request) {
       if (u) currentUserId = u.id;
     } catch {}
 
+    if (!currentUserId) {
+      try {
+        const { auth: clerkAuth } = await import('@clerk/nextjs/server');
+        const session = await clerkAuth();
+        if (session?.userId) {
+          const dbUser = await prisma.user.findFirst({
+            where: { clerkUserId: session.userId },
+            select: { id: true },
+          });
+          if (dbUser) currentUserId = dbUser.id;
+        }
+      } catch {}
+    }
+
     const existing = await prisma.user.findFirst({
       where: {
         username: cleanUsername,
@@ -46,9 +62,6 @@ export async function GET(req: Request) {
   }
 }
 
-import { validateDob } from '@/lib/validation/dob';
-import { MINIMUM_LEGAL_AGE, CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION } from '@/lib/config/policy';
-
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -65,61 +78,80 @@ export async function POST(req: Request) {
       marketingConsent,
     } = body;
 
-    let user = await getCurrentUser(req);
-    let clerkEmail: string | null = null;
+    // 1. Authoritative Server-Side Identity Check (NEVER trust body.userId)
+    let clerkUserId: string | null = null;
+    let clerkDetail: any = null;
 
-    if (!user) {
-      try {
-        const { auth: clerkAuth, currentUser: clerkCurrentUser } = await import('@clerk/nextjs/server');
-        const clerkSession = await clerkAuth();
-        if (clerkSession?.userId) {
-          const cUser = await clerkCurrentUser().catch(() => null);
-          clerkEmail =
-            cUser?.primaryEmailAddress?.emailAddress ||
-            cUser?.emailAddresses?.[0]?.emailAddress ||
-            null;
-
-          const { getOrCreateUserFromClerk } = await import('@/lib/auth');
-          try {
-            user = await getOrCreateUserFromClerk(clerkSession.userId);
-          } catch (clerkErr: any) {
-            if (clerkErr?.isDeletionLocked) {
-              return NextResponse.json(
-                {
-                  error:
-                    'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
-                  isDeletionLocked: true,
-                  expiresAt: clerkErr.expiresAt,
-                  remainingHours: clerkErr.remainingHours,
-                },
-                { status: 403 }
-              );
-            }
-            throw clerkErr;
-          }
-        }
-      } catch (e: any) {
-        if (e?.isDeletionLocked) {
-          return NextResponse.json(
-            {
-              error:
-                'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
-              isDeletionLocked: true,
-              expiresAt: e.expiresAt,
-              remainingHours: e.remainingHours,
-            },
-            { status: 403 }
-          );
-        }
+    try {
+      const { auth: clerkAuth, currentUser: clerkCurrentUser } = await import('@clerk/nextjs/server');
+      const clerkSession = await clerkAuth();
+      if (clerkSession?.userId) {
+        clerkUserId = clerkSession.userId;
+        clerkDetail = await clerkCurrentUser().catch(() => null);
       }
+    } catch (e) {}
+
+    let existingUser = await getCurrentUser(req);
+    if (existingUser?.clerkUserId) {
+      clerkUserId = existingUser.clerkUserId;
     }
 
-    if (!user) {
+    if (!existingUser && clerkUserId) {
+      existingUser = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { clerkUserId },
+            { id: clerkUserId },
+          ],
+        },
+        include: { profile: true, subscription: true, consent: true },
+      });
+    }
+
+    if (!clerkUserId && !existingUser) {
       return NextResponse.json({ error: 'Unauthorized. Please log in first.' }, { status: 401 });
     }
 
-    // Check verified email against 48-hour deletion cooldown
-    const checkEmail = user.email || clerkEmail;
+    // 2. Idempotency Check: if profile is already complete, return existing profile safely
+    if (
+      existingUser &&
+      existingUser.profileCompleted &&
+      existingUser.username &&
+      !existingUser.username.startsWith('user_')
+    ) {
+      const isVIP =
+        existingUser.membershipTier === 'VIP' ||
+        (existingUser.subscription?.isActive === true && existingUser.subscription?.plan === 'VIP');
+
+      return NextResponse.json({
+        success: true,
+        message: 'Profile already onboarded',
+        user: {
+          id: existingUser.id,
+          clerkUserId: existingUser.clerkUserId,
+          username: existingUser.username,
+          fullName: existingUser.fullName,
+          displayName: existingUser.displayName,
+          email: existingUser.email,
+          role: existingUser.role,
+          membershipTier: isVIP ? 'VIP' : 'FREE',
+          is_vip: isVIP,
+          profileCompleted: true,
+          profileLocked: true,
+          profile: existingUser.profile,
+          subscription: existingUser.subscription,
+          consent: (existingUser as any).consent || null,
+        },
+      });
+    }
+
+    // 3. Check 48-Hour Deletion Cooldown Lock
+    const checkEmail =
+      existingUser?.email ||
+      clerkDetail?.primaryEmailAddress?.emailAddress ||
+      clerkDetail?.emailAddresses?.[0]?.emailAddress ||
+      null;
+
     if (checkEmail) {
       const { checkDeletionLock } = await import('@/lib/deletionLock');
       const lockStatus = await checkDeletionLock(checkEmail);
@@ -137,7 +169,44 @@ export async function POST(req: Request) {
       }
     }
 
-    const cleanDisplayName = (displayName || '').trim();
+    // 4. Server-Side Username Validation
+    const cleanUsername = (body.username ? String(body.username) : '')
+      .trim()
+      .toLowerCase()
+      .replace(/^@/, '');
+
+    if (!cleanUsername) {
+      return NextResponse.json(
+        { error: 'Please choose a username.' },
+        { status: 400 }
+      );
+    }
+
+    const usernameValidation = usernameSchema.safeParse(cleanUsername);
+    if (!usernameValidation.success) {
+      return NextResponse.json(
+        { error: usernameValidation.error.issues[0]?.message || 'Username must be 3-20 characters (letters, numbers, and underscores).' },
+        { status: 400 }
+      );
+    }
+
+    // Check collision against other users
+    const usernameConflict = await prisma.user.findFirst({
+      where: {
+        username: cleanUsername,
+        ...(existingUser ? { NOT: { id: existingUser.id } } : {}),
+      },
+    });
+
+    if (usernameConflict) {
+      return NextResponse.json(
+        { error: 'Username is already taken. Please choose another username.' },
+        { status: 400 }
+      );
+    }
+
+    // 5. Full Name Validation
+    const cleanDisplayName = (displayName || clerkDetail?.fullName || cleanUsername).trim();
     if (cleanDisplayName.length < 2 || cleanDisplayName.length > 50) {
       return NextResponse.json(
         { error: 'Please enter a valid full name (2 to 50 characters).' },
@@ -145,37 +214,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Authoritative Server-side Username Validation
-    const rawUsername = body.username ? String(body.username).trim().toLowerCase().replace(/^@/, '') : null;
-    let finalUsername = user.username;
-
-    if (rawUsername) {
-      const usernameValidation = usernameSchema.safeParse(rawUsername);
-      if (!usernameValidation.success) {
-        return NextResponse.json(
-          { error: usernameValidation.error.issues[0]?.message || 'Invalid username format (3-20 letters, numbers, or underscores).' },
-          { status: 400 }
-        );
-      }
-
-      const existingUserWithUsername = await prisma.user.findFirst({
-        where: {
-          username: rawUsername,
-          NOT: { id: user.id },
-        },
-      });
-
-      if (existingUserWithUsername) {
-        return NextResponse.json(
-          { error: 'Username is already taken. Please choose another username.' },
-          { status: 400 }
-        );
-      }
-
-      finalUsername = rawUsername;
-    }
-
-    // Authoritative Server-side Consent Validation
+    // 6. Server-Side Consent Validation
     if (!termsAccepted) {
       return NextResponse.json(
         { error: 'You must review and agree to the Terms & Conditions.' },
@@ -207,7 +246,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Authoritative Server-side DOB & 18+ Age Validation
+    // 7. Server-Side DOB & 18+ Age Validation
     const dobValidation = validateDob(dob);
     if (!dobValidation.valid) {
       return NextResponse.json(
@@ -234,92 +273,289 @@ export async function POST(req: Request) {
     const selectedEmoji = avatarEmoji || '😊';
     const consentNow = new Date();
 
-    // 1. Atomic Transaction: Update User, Upsert Profile, Upsert UserConsent
-    const [updatedUser] = await prisma.$transaction([
-      prisma.user.update({
-        where: { id: user.id },
-        data: {
-          username: finalUsername,
-          fullName: cleanDisplayName,
-          displayName: cleanDisplayName,
-          gender: cleanGender,
-          dob: parsedDob,
-          genderDobLocked: true, // Permanent lock for identity
-          profileCompleted: true,
-          profileLocked: true,
-        },
-        include: { profile: true, subscription: true, consent: true },
-      }),
-      prisma.profile.upsert({
-        where: { userId: user.id },
-        update: {
-          avatarType: 'EMOJI',
-          avatarEmoji: selectedEmoji,
-          age: calculatedAge,
-          gender: cleanGender,
-          dob: parsedDob,
-          ageGenderConfirmed: true, // Permanent lock
-          profileCompleted: true,
-          profileLocked: true,
-        },
-        create: {
-          userId: user.id,
-          avatarType: 'EMOJI',
-          avatarEmoji: selectedEmoji,
-          age: calculatedAge,
-          gender: cleanGender,
-          dob: parsedDob,
-          ageGenderConfirmed: true, // Permanent lock
-          profileCompleted: true,
-          profileLocked: true,
-          bio: 'Hey there! I am using CupidX.',
-        },
-      }),
-      prisma.userConsent.upsert({
-        where: { userId: user.id },
-        update: {
-          termsAccepted: true,
-          termsAcceptedAt: consentNow,
-          privacyAcknowledged: true,
-          privacyAcknowledgedAt: consentNow,
-          ageConfirmed: true,
-          ageConfirmedAt: consentNow,
-          randomChatAcknowledged: true,
-          randomChatAcknowledgedAt: consentNow,
-          locationProcessingAcknowledged: true,
-          locationProcessingAcknowledgedAt: consentNow,
-          marketingConsent: Boolean(marketingConsent),
-          marketingConsentUpdatedAt: marketingConsent ? consentNow : null,
-          termsVersion: CURRENT_TERMS_VERSION,
-          privacyVersion: CURRENT_PRIVACY_VERSION,
-          consentTimestamp: consentNow,
-        },
-        create: {
-          userId: user.id,
-          termsAccepted: true,
-          termsAcceptedAt: consentNow,
-          privacyAcknowledged: true,
-          privacyAcknowledgedAt: consentNow,
-          ageConfirmed: true,
-          ageConfirmedAt: consentNow,
-          randomChatAcknowledged: true,
-          randomChatAcknowledgedAt: consentNow,
-          locationProcessingAcknowledged: true,
-          locationProcessingAcknowledgedAt: consentNow,
-          marketingConsent: Boolean(marketingConsent),
-          marketingConsentUpdatedAt: marketingConsent ? consentNow : null,
-          termsVersion: CURRENT_TERMS_VERSION,
-          privacyVersion: CURRENT_PRIVACY_VERSION,
-          consentTimestamp: consentNow,
-        },
-      }),
-    ]);
+    const ADMIN_EMAILS = [
+      'lexinoofficial@gmail.com',
+      'admin@cupidxchat.in',
+      process.env.ADMIN_EMAIL,
+    ].filter(Boolean).map((e) => e!.toLowerCase().trim());
+    const isAutoAdmin = Boolean(checkEmail && ADMIN_EMAILS.includes(checkEmail.toLowerCase().trim()));
 
-    const isVIP = updatedUser.membershipTier === 'VIP' || (updatedUser.subscription?.isActive === true && updatedUser.subscription?.plan === 'VIP');
-
-    // 2. Save to Clerk User publicMetadata for permanent cross-session cloud persistence
+    // 8. Atomic Database Creation or Update
+    let updatedUser: any;
     try {
-      const targetClerkId = user.clerkUserId || user.id;
+      if (existingUser) {
+        // User already has an existing DB row (e.g. from previous email match or uncompleted session)
+        const [u] = await prisma.$transaction([
+          prisma.user.update({
+            where: { id: existingUser.id },
+            data: {
+              ...(clerkUserId ? { clerkUserId } : {}),
+              username: cleanUsername,
+              fullName: cleanDisplayName,
+              displayName: cleanDisplayName,
+              gender: cleanGender,
+              dob: parsedDob,
+              genderDobLocked: true,
+              profileCompleted: true,
+              profileLocked: true,
+              ...(isAutoAdmin ? { role: 'ADMIN' } : {}),
+            },
+            include: { profile: true, subscription: true, consent: true },
+          }),
+          prisma.profile.upsert({
+            where: { userId: existingUser.id },
+            update: {
+              avatarType: 'EMOJI',
+              avatarEmoji: selectedEmoji,
+              age: calculatedAge,
+              gender: cleanGender,
+              dob: parsedDob,
+              ageGenderConfirmed: true,
+              profileCompleted: true,
+              profileLocked: true,
+            },
+            create: {
+              userId: existingUser.id,
+              avatarType: 'EMOJI',
+              avatarEmoji: selectedEmoji,
+              age: calculatedAge,
+              gender: cleanGender,
+              dob: parsedDob,
+              ageGenderConfirmed: true,
+              profileCompleted: true,
+              profileLocked: true,
+              bio: 'Hey there! I am using CupidX.',
+            },
+          }),
+          prisma.userConsent.upsert({
+            where: { userId: existingUser.id },
+            update: {
+              termsAccepted: true,
+              termsAcceptedAt: consentNow,
+              privacyAcknowledged: true,
+              privacyAcknowledgedAt: consentNow,
+              ageConfirmed: true,
+              ageConfirmedAt: consentNow,
+              randomChatAcknowledged: true,
+              randomChatAcknowledgedAt: consentNow,
+              locationProcessingAcknowledged: true,
+              locationProcessingAcknowledgedAt: consentNow,
+              marketingConsent: Boolean(marketingConsent),
+              marketingConsentUpdatedAt: marketingConsent ? consentNow : null,
+              termsVersion: CURRENT_TERMS_VERSION,
+              privacyVersion: CURRENT_PRIVACY_VERSION,
+              consentTimestamp: consentNow,
+            },
+            create: {
+              userId: existingUser.id,
+              termsAccepted: true,
+              termsAcceptedAt: consentNow,
+              privacyAcknowledged: true,
+              privacyAcknowledgedAt: consentNow,
+              ageConfirmed: true,
+              ageConfirmedAt: consentNow,
+              randomChatAcknowledged: true,
+              randomChatAcknowledgedAt: consentNow,
+              locationProcessingAcknowledged: true,
+              locationProcessingAcknowledgedAt: consentNow,
+              marketingConsent: Boolean(marketingConsent),
+              marketingConsentUpdatedAt: marketingConsent ? consentNow : null,
+              termsVersion: CURRENT_TERMS_VERSION,
+              privacyVersion: CURRENT_PRIVACY_VERSION,
+              consentTimestamp: consentNow,
+            },
+          }),
+        ]);
+        updatedUser = u;
+      } else {
+        // Brand new user: link to Clerk userId as identity reference
+        const finalClerkId = clerkUserId!;
+
+        // Check if an unlinked user already exists with this email address
+        if (checkEmail) {
+          const matchedByEmail = await prisma.user.findFirst({
+            where: { email: checkEmail },
+          });
+          if (matchedByEmail) {
+            const [u] = await prisma.$transaction([
+              prisma.user.update({
+                where: { id: matchedByEmail.id },
+                data: {
+                  clerkUserId: finalClerkId,
+                  username: cleanUsername,
+                  fullName: cleanDisplayName,
+                  displayName: cleanDisplayName,
+                  gender: cleanGender,
+                  dob: parsedDob,
+                  genderDobLocked: true,
+                  profileCompleted: true,
+                  profileLocked: true,
+                  ...(isAutoAdmin ? { role: 'ADMIN' } : {}),
+                },
+                include: { profile: true, subscription: true, consent: true },
+              }),
+              prisma.profile.upsert({
+                where: { userId: matchedByEmail.id },
+                update: {
+                  avatarType: 'EMOJI',
+                  avatarEmoji: selectedEmoji,
+                  age: calculatedAge,
+                  gender: cleanGender,
+                  dob: parsedDob,
+                  ageGenderConfirmed: true,
+                  profileCompleted: true,
+                  profileLocked: true,
+                },
+                create: {
+                  userId: matchedByEmail.id,
+                  avatarType: 'EMOJI',
+                  avatarEmoji: selectedEmoji,
+                  age: calculatedAge,
+                  gender: cleanGender,
+                  dob: parsedDob,
+                  ageGenderConfirmed: true,
+                  profileCompleted: true,
+                  profileLocked: true,
+                  bio: 'Hey there! I am using CupidX.',
+                },
+              }),
+              prisma.userConsent.upsert({
+                where: { userId: matchedByEmail.id },
+                update: {
+                  termsAccepted: true,
+                  termsAcceptedAt: consentNow,
+                  privacyAcknowledged: true,
+                  privacyAcknowledgedAt: consentNow,
+                  ageConfirmed: true,
+                  ageConfirmedAt: consentNow,
+                  randomChatAcknowledged: true,
+                  randomChatAcknowledgedAt: consentNow,
+                  locationProcessingAcknowledged: true,
+                  locationProcessingAcknowledgedAt: consentNow,
+                  marketingConsent: Boolean(marketingConsent),
+                  termsVersion: CURRENT_TERMS_VERSION,
+                  privacyVersion: CURRENT_PRIVACY_VERSION,
+                  consentTimestamp: consentNow,
+                },
+                create: {
+                  userId: matchedByEmail.id,
+                  termsAccepted: true,
+                  termsAcceptedAt: consentNow,
+                  privacyAcknowledged: true,
+                  privacyAcknowledgedAt: consentNow,
+                  ageConfirmed: true,
+                  ageConfirmedAt: consentNow,
+                  randomChatAcknowledged: true,
+                  randomChatAcknowledgedAt: consentNow,
+                  locationProcessingAcknowledged: true,
+                  locationProcessingAcknowledgedAt: consentNow,
+                  marketingConsent: Boolean(marketingConsent),
+                  termsVersion: CURRENT_TERMS_VERSION,
+                  privacyVersion: CURRENT_PRIVACY_VERSION,
+                  consentTimestamp: consentNow,
+                },
+              }),
+            ]);
+            updatedUser = u;
+          }
+        }
+
+        if (!updatedUser) {
+          // Pure new user creation with nested profile and consent
+          updatedUser = await prisma.user.create({
+            data: {
+              id: finalClerkId,
+              clerkUserId: finalClerkId,
+              username: cleanUsername,
+              fullName: cleanDisplayName,
+              displayName: cleanDisplayName,
+              email: checkEmail,
+              role: isAutoAdmin ? 'ADMIN' : 'USER',
+              membershipTier: 'FREE',
+              is_vip: false,
+              dob: parsedDob,
+              gender: cleanGender,
+              genderDobLocked: true,
+              profileCompleted: true,
+              profileLocked: true,
+              profile: {
+                create: {
+                  avatarType: 'EMOJI',
+                  avatarEmoji: selectedEmoji,
+                  age: calculatedAge,
+                  gender: cleanGender,
+                  dob: parsedDob,
+                  ageGenderConfirmed: true,
+                  profileCompleted: true,
+                  profileLocked: true,
+                  bio: 'Hey there! I am using CupidX.',
+                },
+              },
+              consent: {
+                create: {
+                  termsAccepted: true,
+                  termsAcceptedAt: consentNow,
+                  privacyAcknowledged: true,
+                  privacyAcknowledgedAt: consentNow,
+                  ageConfirmed: true,
+                  ageConfirmedAt: consentNow,
+                  randomChatAcknowledged: true,
+                  randomChatAcknowledgedAt: consentNow,
+                  locationProcessingAcknowledged: true,
+                  locationProcessingAcknowledgedAt: consentNow,
+                  marketingConsent: Boolean(marketingConsent),
+                  marketingConsentUpdatedAt: marketingConsent ? consentNow : null,
+                  termsVersion: CURRENT_TERMS_VERSION,
+                  privacyVersion: CURRENT_PRIVACY_VERSION,
+                  consentTimestamp: consentNow,
+                },
+              },
+            },
+            include: { profile: true, subscription: true, consent: true },
+          });
+        }
+      }
+    } catch (dbErr: any) {
+      // 9. Handle Database Uniqueness Race Conditions (Prisma P2002)
+      if (dbErr?.code === 'P2002') {
+        const target = dbErr?.meta?.target;
+        const targetStr = Array.isArray(target) ? target.join(',') : String(target || '');
+
+        if (targetStr.includes('username')) {
+          return NextResponse.json(
+            { error: 'Username is already taken. Please choose another username.' },
+            { status: 400 }
+          );
+        }
+
+        // Concurrent duplicate submission on clerkUserId: return existing user idempotently
+        if (targetStr.includes('clerkUserId') && clerkUserId) {
+          const existing = await prisma.user.findFirst({
+            where: { clerkUserId },
+            include: { profile: true, subscription: true, consent: true },
+          });
+          if (existing) {
+            updatedUser = existing;
+          }
+        }
+      }
+
+      if (!updatedUser) {
+        console.error('[ONBOARDING] Database error:', dbErr);
+        return NextResponse.json(
+          { error: 'Failed to create profile. Please try again.' },
+          { status: 500 }
+        );
+      }
+    }
+
+    const isVIP =
+      updatedUser.membershipTier === 'VIP' ||
+      (updatedUser.subscription?.isActive === true && updatedUser.subscription?.plan === 'VIP');
+
+    // 10. Sync to Clerk User publicMetadata & username
+    try {
+      const targetClerkId = updatedUser.clerkUserId || clerkUserId;
       if (targetClerkId) {
         const { clerkClient } = await import('@clerk/nextjs/server');
         const client = await clerkClient();
@@ -338,16 +574,16 @@ export async function POST(req: Request) {
           },
         });
 
-        if (finalUsername) {
+        if (cleanUsername) {
           await client.users.updateUser(targetClerkId, {
-            username: finalUsername,
+            username: cleanUsername,
           }).catch((uErr: any) => {
             console.warn('[ONBOARDING] Clerk username update notice:', uErr?.message || uErr);
           });
         }
       }
     } catch (clerkSyncErr) {
-      console.warn('Clerk metadata sync notice:', clerkSyncErr);
+      console.warn('[ONBOARDING] Clerk metadata sync notice:', clerkSyncErr);
     }
 
     const token = signToken({
@@ -378,12 +614,12 @@ export async function POST(req: Request) {
     });
 
     response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
-
     return response;
   } catch (error: any) {
     console.error('Onboarding save error:', error);
-    return NextResponse.json({ 
-      error: error?.message || 'Failed to complete onboarding. Please try again.' 
-    }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || 'Failed to complete profile setup. Please try again.' },
+      { status: 500 }
+    );
   }
 }

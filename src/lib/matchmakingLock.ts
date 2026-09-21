@@ -12,7 +12,7 @@ const STALE_SESSION_MS = 10 * 60 * 1000;
 
 /**
  * Prisma is the single source of truth for matchmaking.
- * This replaces the old Firestore distributed lock and works with
+ * It provides robust distributed session management and works with
  * the Supabase Postgres database used by Vercel.
  */
 export async function getActiveUserSession(userId: string): Promise<ActiveSessionInfo | null> {

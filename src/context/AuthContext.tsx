@@ -54,6 +54,7 @@ export interface UserProfile {
     ageGenderConfirmed?: boolean;
     ageGenderChangesCount?: number;
     nameChangesCount?: number;
+    profileCompleted?: boolean;
   };
   subscription?: {
     isActive: boolean;
@@ -101,11 +102,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const checkProfileCompletion = (u: User | null): boolean => {
     if (!u) return false;
     return Boolean(
-      u.profileCompleted === true ||
-      u.profileLocked === true ||
-      u.genderDobLocked === true ||
-      u.profile?.ageGenderConfirmed === true ||
-      ((u.dateOfBirth || u.profile?.dateOfBirth) && u.gender && u.gender !== 'unspecified' && (u.fullName || u.displayName))
+      u.profileCompleted === true &&
+      u.username &&
+      !u.username.startsWith('user_')
     );
   };
 
@@ -146,98 +145,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const backendUser = backendRes?.user;
 
-      const baseProfile: UserProfile = {
-        id: cUser.id,
+      const isProfileDone = Boolean(
+        backendUser &&
+        backendUser.username &&
+        !backendUser.username.startsWith('user_') &&
+        (backendUser.profileCompleted ||
+         backendUser.profileLocked ||
+         backendUser.genderDobLocked ||
+         backendUser.profile?.profileCompleted ||
+         backendUser.profile?.ageGenderConfirmed ||
+         (backendUser.dob && backendUser.gender && backendUser.gender !== 'unspecified' && backendUser.fullName))
+      );
+
+      const resolvedProfile: UserProfile = {
+        id: backendUser?.id || cUser.id,
         uid: cUser.id,
         clerkUserId: cUser.id,
-        username: cUser.username || `user_${cUser.id.slice(-5)}`,
-        usernameLower: (cUser.username || `user_${cUser.id.slice(-5)}`).toLowerCase(),
-        fullName: displayName,
-        displayName: displayName,
-        email,
-        role: 'USER' as const,
-        membershipTier: 'FREE',
-        is_vip: false,
-        isVIP: false,
+        username: backendUser?.username || '',
+        usernameLower: (backendUser?.username || '').toLowerCase(),
+        vipUsername: backendUser?.vipUsername || null,
+        vipUsernameClaimedAt: backendUser?.vipUsernameClaimedAt || null,
+        fullName: backendUser?.fullName || displayName,
+        displayName: backendUser?.displayName || displayName,
+        email: backendUser?.email || email,
+        role: (backendUser?.role as any) || 'USER',
+        membershipTier: backendUser?.membershipTier || 'FREE',
+        is_vip: Boolean(backendUser?.is_vip),
+        isVIP: Boolean(backendUser?.is_vip),
         online: true,
         status: 'active' as const,
-        profileCompleted: false,
-        profileLocked: false,
-        genderDobLocked: false,
-        dateOfBirth: null,
-        gender: 'unspecified',
+        profileCompleted: isProfileDone,
+        profileLocked: isProfileDone,
+        genderDobLocked: Boolean(backendUser?.genderDobLocked),
+        dateOfBirth: backendUser?.dob || null,
+        gender: backendUser?.gender || 'unspecified',
         createdAt: Date.now(),
         updatedAt: Date.now(),
         profile: {
-          bio: 'Hey there! I am using CupidX.',
-          age: 18,
-          dateOfBirth: null,
-          gender: 'unspecified',
-          themePreference: 'purple',
-          avatarType: 'EMOJI',
-          avatarEmoji: '😊',
-          avatarUrl: null,
-          interests: '',
-          randomChatIntroSeen: false,
-          ageGenderConfirmed: false,
+          bio: backendUser?.profile?.bio || 'Hey there! I am using CupidX.',
+          age: backendUser?.dob ? calculateDobAge(backendUser.dob) : 18,
+          dateOfBirth: backendUser?.dob || null,
+          gender: backendUser?.gender || 'unspecified',
+          themePreference: backendUser?.profile?.themePreference || 'purple',
+          avatarType: backendUser?.profile?.avatarType || 'EMOJI',
+          avatarEmoji: backendUser?.profile?.avatarEmoji || '😊',
+          avatarUrl: backendUser?.profile?.avatarUrl || null,
+          interests: backendUser?.profile?.interests || '',
+          randomChatIntroSeen: backendUser?.profile?.randomChatIntroSeen ?? false,
+          ageGenderConfirmed: Boolean(backendUser?.profile?.ageGenderConfirmed || backendUser?.genderDobLocked),
         },
-        subscription: {
+        subscription: backendUser?.subscription || {
           isActive: false,
           plan: 'FREE',
         },
       };
 
-      const isProfileDone = Boolean(
-        backendUser?.profileCompleted ||
-        backendUser?.profileLocked ||
-        backendUser?.genderDobLocked ||
-        backendUser?.profile?.ageGenderConfirmed ||
-        baseProfile.profileCompleted ||
-        baseProfile.profile?.ageGenderConfirmed ||
-        ((backendUser?.dob || baseProfile.dateOfBirth || baseProfile.profile?.dateOfBirth) &&
-          (backendUser?.gender || baseProfile.gender) !== 'unspecified' &&
-          (backendUser?.fullName || baseProfile.fullName))
-      );
-
-      const mergedProfile: UserProfile = {
-        ...baseProfile,
-        id: backendUser?.id || baseProfile.id,
-        uid: cUser.id,
-        clerkUserId: cUser.id,
-        username: backendUser?.username || baseProfile.username,
-        usernameLower: (backendUser?.username || baseProfile.username).toLowerCase(),
-        vipUsername: backendUser?.vipUsername || (baseProfile as any).vipUsername || null,
-        vipUsernameClaimedAt: backendUser?.vipUsernameClaimedAt || (baseProfile as any).vipUsernameClaimedAt || null,
-        fullName: backendUser?.fullName || baseProfile.fullName,
-        displayName: backendUser?.displayName || baseProfile.displayName,
-        email: backendUser?.email || baseProfile.email,
-        role: (backendUser?.role as any) || baseProfile.role,
-        membershipTier: backendUser?.membershipTier || baseProfile.membershipTier,
-        is_vip: Boolean(backendUser?.is_vip ?? baseProfile.is_vip),
-        isVIP: Boolean(backendUser?.is_vip ?? baseProfile.isVIP),
-        dateOfBirth: backendUser?.dob || baseProfile.dateOfBirth,
-        gender: backendUser?.gender || baseProfile.gender,
-        genderDobLocked: Boolean(backendUser?.genderDobLocked ?? baseProfile.genderDobLocked),
-        profileLocked: Boolean(backendUser?.profileLocked ?? baseProfile.profileLocked ?? isProfileDone),
-        profileCompleted: isProfileDone,
-        profile: {
-          ...baseProfile.profile,
-          ...(backendUser?.profile || {}),
-          avatarEmoji: backendUser?.profile?.avatarEmoji || baseProfile.profile?.avatarEmoji || '😊',
-          avatarType: backendUser?.profile?.avatarType || baseProfile.profile?.avatarType || 'EMOJI',
-          avatarUrl: backendUser?.profile?.avatarUrl || baseProfile.profile?.avatarUrl || null,
-          ageGenderConfirmed: Boolean(
-            backendUser?.profile?.ageGenderConfirmed ||
-            baseProfile.profile?.ageGenderConfirmed ||
-            backendUser?.genderDobLocked
-          ),
-          age: backendUser?.dob ? calculateDobAge(backendUser.dob) : baseProfile.profile?.age,
-        },
-        subscription: backendUser?.subscription || baseProfile.subscription,
-      };
-
-      setUser(mergedProfile);
-      return mergedProfile;
+      setUser(resolvedProfile);
+      return resolvedProfile;
     } catch (err) {
       console.error('[AUTH] Profile load error:', err);
       return null;
@@ -275,6 +239,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       '/login',
       '/register',
       '/signup',
+      '/sign-in',
+      '/sign-up',
       '/privacy',
       '/terms',
       '/safety',
@@ -289,43 +255,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const isAuthed = Boolean(isSignedIn && clerkUser);
 
-    // Unauthenticated user on protected route
+    // Unauthenticated user on protected route -> redirect to /login
     if (!isAuthed && !isPublic) {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
-      console.log('[AUTH GUARD] Unauthenticated user -> redirecting to /login');
+      console.log('[AUTH GUARD] Unauthenticated user on protected route -> redirecting to /login');
       router.replace('/login');
       setTimeout(() => { isNavigatingRef.current = false; }, 500);
       return;
     }
 
-    // Authenticated user on auth pages (/login, /signup, /register)
-    if (isAuthed && user) {
+    // Authenticated user routing
+    if (isAuthed) {
       const isComplete = checkProfileCompletion(user);
 
-      if (pathname === '/login' || pathname === '/register' || pathname === '/signup') {
+      const isAuthPage = [
+        '/login',
+        '/register',
+        '/signup',
+        '/sign-in',
+        '/sign-up',
+      ].some((p) => pathname === p || pathname.startsWith(p + '/'));
+
+      const isSetupProfilePage = pathname === '/setup-profile' || pathname === '/onboarding';
+
+      // Authenticated user visits sign-in / sign-up auth page -> route by profile state
+      if (isAuthPage) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        const target = isComplete ? '/dashboard' : '/setup-profile';
+        const target = isComplete ? '/chat' : '/setup-profile';
         console.log('[AUTH GUARD] Authenticated user on auth page -> redirecting to:', target);
         router.replace(target);
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // Already completed onboarding on /setup-profile or /onboarding
-      if ((pathname === '/setup-profile' || pathname === '/onboarding') && isComplete) {
+      // Authenticated user with completed profile visits /setup-profile -> redirect to /chat
+      if (isSetupProfilePage && isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        router.replace('/dashboard');
+        console.log('[AUTH GUARD] Profile already complete on setup-profile -> redirecting to /chat');
+        router.replace('/chat');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // Incomplete profile on protected route
-      if (!isPublic && pathname !== '/setup-profile' && pathname !== '/onboarding' && !isComplete) {
+      // Authenticated user with incomplete profile visits /chat or any protected route (other than /setup-profile) -> redirect to /setup-profile
+      if (!isPublic && !isSetupProfilePage && !isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
+        console.log('[AUTH GUARD] Incomplete profile on protected route -> redirecting to /setup-profile');
         router.replace('/setup-profile');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;

@@ -80,8 +80,7 @@ export async function estimateGenderFromImage(
 ): Promise<GenderEstimateResult> {
   const apiKey =
     process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.FIREBASE_AI_API_KEY;
+    process.env.GOOGLE_API_KEY;
 
   // Graceful fallback if no external AI API key is configured
   if (!apiKey) {

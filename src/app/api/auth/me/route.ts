@@ -5,44 +5,20 @@ import { isUserVip } from '@/lib/vipAuth';
 export async function GET(req: Request) {
   try {
     let user: any = await getCurrentUser(req);
+    let clerkUserId: string | null = null;
+    let clerkDetail: any = null;
+
     if (!user) {
       try {
-        const { auth: clerkAuth } = await import('@clerk/nextjs/server');
+        const { auth: clerkAuth, currentUser: clerkCurrentUser } = await import('@clerk/nextjs/server');
         const clerkSession = await clerkAuth();
         if (clerkSession?.userId) {
-          const { getOrCreateUserFromClerk } = await import('@/lib/auth');
-          try {
-            user = await getOrCreateUserFromClerk(clerkSession.userId);
-          } catch (clerkErr: any) {
-            if (clerkErr?.isDeletionLocked) {
-              return NextResponse.json(
-                {
-                  error:
-                    'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
-                  isDeletionLocked: true,
-                  expiresAt: clerkErr.expiresAt,
-                  remainingHours: clerkErr.remainingHours,
-                },
-                { status: 403 }
-              );
-            }
-            throw clerkErr;
-          }
+          clerkUserId = clerkSession.userId;
+          clerkDetail = await clerkCurrentUser().catch(() => null);
         }
-      } catch (e: any) {
-        if (e?.isDeletionLocked) {
-          return NextResponse.json(
-            {
-              error:
-                'Your previous account was recently deleted. For security reasons, you can create a new CupidxChat account after the temporary 48-hour restriction expires.',
-              isDeletionLocked: true,
-              expiresAt: e.expiresAt,
-              remainingHours: e.remainingHours,
-            },
-            { status: 403 }
-          );
-        }
-      }
+      } catch (e) {}
+    } else if (user.clerkUserId) {
+      clerkUserId = user.clerkUserId;
     }
 
     if (user) {
@@ -57,12 +33,14 @@ export async function GET(req: Request) {
 
       const isVIP = isUserVip(user);
       const isProfileDone = Boolean(
-        user.profileCompleted ||
-        user.profileLocked ||
-        user.genderDobLocked ||
-        user.profile?.profileCompleted ||
-        user.profile?.ageGenderConfirmed ||
-        (user.dob && user.gender && user.gender !== 'unspecified' && user.fullName)
+        user.username &&
+        !user.username.startsWith('user_') &&
+        (user.profileCompleted ||
+         user.profileLocked ||
+         user.genderDobLocked ||
+         user.profile?.profileCompleted ||
+         user.profile?.ageGenderConfirmed ||
+         (user.dob && user.gender && user.gender !== 'unspecified' && user.fullName))
       );
 
       console.log('[AUTH_FLOW] /api/auth/me:', {
@@ -70,7 +48,7 @@ export async function GET(req: Request) {
         clerkUserIdExists: Boolean(user.clerkUserId),
         profileExists: Boolean(user.profile),
         onboardingCompleted: isProfileDone,
-        routingTarget: isProfileDone ? '/dashboard' : '/setup-profile',
+        routingTarget: isProfileDone ? '/chat' : '/setup-profile',
       });
 
       const token = signToken({
@@ -80,6 +58,9 @@ export async function GET(req: Request) {
       });
 
       const response = NextResponse.json({
+        authenticated: true,
+        clerkUserId: user.clerkUserId,
+        profileCompleted: isProfileDone,
         user: {
           id: user.id,
           clerkUserId: user.clerkUserId,
@@ -105,11 +86,33 @@ export async function GET(req: Request) {
       });
 
       response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
-
       return response;
     }
 
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Authenticated with Clerk, but no Supabase profile created yet
+    if (clerkUserId) {
+      const email =
+        clerkDetail?.primaryEmailAddress?.emailAddress ||
+        clerkDetail?.emailAddresses?.[0]?.emailAddress ||
+        null;
+      const displayName =
+        clerkDetail?.fullName ||
+        (clerkDetail?.firstName ? `${clerkDetail.firstName} ${clerkDetail.lastName || ''}`.trim() : null) ||
+        clerkDetail?.username ||
+        'User';
+
+      return NextResponse.json({
+        authenticated: true,
+        clerkUserId,
+        user: null,
+        profileCompleted: false,
+        suggestedEmail: email,
+        suggestedDisplayName: displayName,
+        suggestedUsername: clerkDetail?.username || (email ? email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20) : ''),
+      });
+    }
+
+    return NextResponse.json({ error: 'Unauthorized', authenticated: false }, { status: 401 });
   } catch (error) {
     console.error('Error in /api/auth/me:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
