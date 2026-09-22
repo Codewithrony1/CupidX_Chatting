@@ -29,6 +29,7 @@ export default function OnboardingPage() {
 
   // Real-time Debounced Username Availability Check
   useEffect(() => {
+    let active = true;
     const clean = username.trim().toLowerCase().replace(/^@/, '');
     if (!clean) {
       setUsernameAvailable(null);
@@ -55,8 +56,36 @@ export default function OnboardingPage() {
     setUsernameError('');
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/auth/onboarding?username=${encodeURIComponent(clean)}`);
+        const token = await getToken().catch(() => null);
+        const headers: Record<string, string> = {};
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        const effectiveClerkId = directClerkUser?.id || clerkUser?.id || user?.clerkUserId;
+        if (effectiveClerkId) {
+          headers['x-clerk-user-id'] = effectiveClerkId;
+        }
+
+        const res = await fetch(`/api/auth/onboarding?username=${encodeURIComponent(clean)}`, {
+          headers,
+          credentials: 'include',
+        });
+
         const data = await res.json().catch(() => ({}));
+        if (!active) return;
+
+        if (!res.ok) {
+          setUsernameAvailable(false);
+          if (res.status === 429) {
+            setUsernameError('Too many checks. Please wait a moment.');
+          } else {
+            setUsernameError(
+              data?.reason || data?.error || 'Unable to verify username right now. Please try again.'
+            );
+          }
+          return;
+        }
+
         if (data?.available) {
           setUsernameAvailable(true);
           setUsernameError('');
@@ -65,14 +94,22 @@ export default function OnboardingPage() {
           setUsernameError(data?.reason || 'Username is already taken');
         }
       } catch {
-        // network issue
+        if (active) {
+          setUsernameAvailable(false);
+          setUsernameError('Network error checking username. Please try again.');
+        }
       } finally {
-        setUsernameChecking(false);
+        if (active) {
+          setUsernameChecking(false);
+        }
       }
     }, 350);
 
-    return () => clearTimeout(timer);
-  }, [username]);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [username, getToken, directClerkUser?.id, clerkUser?.id, user?.clerkUserId]);
 
   // Consent & Privacy State
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -265,6 +302,10 @@ export default function OnboardingPage() {
         if (data?.isDeletionLocked) {
           setIsDeletionLocked(true);
           setDeletionLockRemainingHours(data.remainingHours || 48);
+        }
+        if (data?.error?.toLowerCase().includes('username')) {
+          setUsernameAvailable(false);
+          setUsernameError(data.error);
         }
         setErrorMsg(data.error || 'Failed to complete profile setup. Please check your information and try again.');
         setSubmitting(false);

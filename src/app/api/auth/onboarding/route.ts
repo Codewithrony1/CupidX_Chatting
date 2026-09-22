@@ -11,54 +11,144 @@ export async function GET(req: Request) {
     const username = searchParams.get('username');
 
     if (!username) {
-      return NextResponse.json({ error: 'Username query parameter is required' }, { status: 400 });
+      return NextResponse.json(
+        { available: false, status: 'invalid', reason: 'Username query parameter is required' },
+        { status: 400 }
+      );
     }
 
     const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
 
+    // Format & reserved username validation
     const validation = usernameSchema.safeParse(cleanUsername);
     if (!validation.success) {
-      return NextResponse.json({
-        available: false,
-        reason: validation.error.issues[0]?.message || 'Invalid username format',
-      });
+      return NextResponse.json(
+        {
+          available: false,
+          status: 'invalid',
+          reason: validation.error.issues[0]?.message || 'Invalid username format',
+        },
+        { status: 200 }
+      );
     }
 
-    let currentUserId: string | null = null;
+    // 1. Authoritative Server-Side Identity Resolution
+    let currentDbUserId: string | null = null;
+    let currentClerkUserId: string | null = null;
+
     try {
       const u = await getCurrentUser(req);
-      if (u) currentUserId = u.id;
+      if (u) {
+        currentDbUserId = u.id;
+        if (u.clerkUserId) currentClerkUserId = u.clerkUserId;
+      }
     } catch {}
 
-    if (!currentUserId) {
+    if (!currentClerkUserId) {
       try {
         const { auth: clerkAuth } = await import('@clerk/nextjs/server');
         const session = await clerkAuth();
         if (session?.userId) {
-          const dbUser = await prisma.user.findFirst({
-            where: { clerkUserId: session.userId },
-            select: { id: true },
-          });
-          if (dbUser) currentUserId = dbUser.id;
+          currentClerkUserId = session.userId;
         }
       } catch {}
     }
 
+    // Also inspect verified token if clerkAuth did not populate in edge scenarios
+    if (!currentClerkUserId) {
+      const authHeader = req.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ') && process.env.CLERK_SECRET_KEY) {
+        try {
+          const { verifyToken: clerkVerifyToken } = await import('@clerk/nextjs/server');
+          const rawToken = authHeader.slice(7).trim();
+          const verifiedPayload: any = await clerkVerifyToken(rawToken, {
+            secretKey: process.env.CLERK_SECRET_KEY,
+          });
+          const sub = verifiedPayload?.data?.sub || verifiedPayload?.sub;
+          if (sub) currentClerkUserId = sub;
+        } catch {}
+      }
+    }
+
+    // If clerkUserId resolved but DB user wasn't yet resolved, find user in DB
+    if (currentClerkUserId && !currentDbUserId) {
+      try {
+        const dbUser = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { clerkUserId: currentClerkUserId },
+              { id: currentClerkUserId },
+            ],
+          },
+          select: { id: true, clerkUserId: true },
+        });
+        if (dbUser) {
+          currentDbUserId = dbUser.id;
+          currentClerkUserId = dbUser.clerkUserId || currentClerkUserId;
+        }
+      } catch {}
+    }
+
+    // 2. Lookup existing user by username or vipUsername (case-insensitive in PostgreSQL)
     const existing = await prisma.user.findFirst({
       where: {
-        username: cleanUsername,
-        ...(currentUserId ? { NOT: { id: currentUserId } } : {}),
+        OR: [
+          { username: { equals: cleanUsername, mode: 'insensitive' } },
+          { vipUsername: { equals: cleanUsername, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        clerkUserId: true,
+        username: true,
+        vipUsername: true,
       },
     });
 
     if (existing) {
-      return NextResponse.json({ available: false, reason: 'Username is already taken' });
+      // 3. Self-Matching Check: Does this username belong to the requesting user?
+      const isSelfMatch = Boolean(
+        (currentDbUserId && existing.id === currentDbUserId) ||
+        (currentClerkUserId && existing.clerkUserId === currentClerkUserId) ||
+        (currentClerkUserId && existing.id === currentClerkUserId)
+      );
+
+      if (isSelfMatch) {
+        return NextResponse.json({
+          available: true,
+          selfOwned: true,
+          status: 'available',
+          message: 'This is your current username',
+        });
+      }
+
+      // Truly owned by another user
+      return NextResponse.json({
+        available: false,
+        selfOwned: false,
+        status: 'taken',
+        reason: 'Username is already taken',
+      });
     }
 
-    return NextResponse.json({ available: true });
-  } catch (error) {
-    console.error('Check username error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    // Completely available
+    return NextResponse.json({
+      available: true,
+      selfOwned: false,
+      status: 'available',
+    });
+  } catch (error: any) {
+    console.error('[ONBOARDING] Check username database error:', error);
+    // NEVER mask database/server errors as "Username is already taken"
+    return NextResponse.json(
+      {
+        available: false,
+        status: 'error',
+        error: 'Database error',
+        reason: 'Unable to verify username availability right now. Please try again.',
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -190,11 +280,18 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check collision against other users
+    // Check collision against other users (case-insensitive in PostgreSQL, checking both username and vipUsername)
     const usernameConflict = await prisma.user.findFirst({
       where: {
-        username: cleanUsername,
-        ...(existingUser ? { NOT: { id: existingUser.id } } : {}),
+        OR: [
+          { username: { equals: cleanUsername, mode: 'insensitive' } },
+          { vipUsername: { equals: cleanUsername, mode: 'insensitive' } },
+        ],
+        NOT: [
+          ...(existingUser?.id ? [{ id: existingUser.id }] : []),
+          ...(existingUser?.clerkUserId ? [{ clerkUserId: existingUser.clerkUserId }] : []),
+          ...(clerkUserId ? [{ clerkUserId }, { id: clerkUserId }] : []),
+        ],
       },
     });
 
@@ -521,17 +618,43 @@ export async function POST(req: Request) {
         const target = dbErr?.meta?.target;
         const targetStr = Array.isArray(target) ? target.join(',') : String(target || '');
 
-        if (targetStr.includes('username')) {
-          return NextResponse.json(
-            { error: 'Username is already taken. Please choose another username.' },
-            { status: 400 }
+        if (targetStr.toLowerCase().includes('username')) {
+          // Verify if conflict was caused by a concurrent self-retry
+          const conflictOwner = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { username: { equals: cleanUsername, mode: 'insensitive' } },
+                { vipUsername: { equals: cleanUsername, mode: 'insensitive' } },
+              ],
+            },
+            include: { profile: true, subscription: true, consent: true },
+          });
+
+          const isSelf = conflictOwner && (
+            conflictOwner.id === existingUser?.id ||
+            conflictOwner.clerkUserId === clerkUserId ||
+            conflictOwner.id === clerkUserId
           );
+
+          if (isSelf) {
+            updatedUser = conflictOwner;
+          } else {
+            return NextResponse.json(
+              { error: 'Username is already taken. Please choose another username.' },
+              { status: 400 }
+            );
+          }
         }
 
-        // Concurrent duplicate submission on clerkUserId: return existing user idempotently
-        if (targetStr.includes('clerkUserId') && clerkUserId) {
+        // Concurrent duplicate submission on clerkUserId or primary key: return existing user idempotently
+        if (!updatedUser && (targetStr.includes('clerkUserId') || targetStr.includes('id') || targetStr.includes('pkey')) && clerkUserId) {
           const existing = await prisma.user.findFirst({
-            where: { clerkUserId },
+            where: {
+              OR: [
+                { clerkUserId },
+                { id: clerkUserId },
+              ],
+            },
             include: { profile: true, subscription: true, consent: true },
           });
           if (existing) {
