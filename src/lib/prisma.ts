@@ -23,11 +23,13 @@ function getConnectionString(): string {
 }
 
 function cleanConnectionString(raw: string): string {
-  // Strip sslmode query parameter so node-postgres doesn't override our explicit ssl options
-  return raw
-    .replace(/([?&])sslmode=[^&]+(&|$)/gi, '$1')
-    .replace(/[?&]$/, '')
-    .replace(/\?&/, '?');
+  let url = raw;
+  if (/sslmode=/i.test(url)) {
+    url = url.replace(/sslmode=[^&]+/i, 'sslmode=no-verify');
+  } else {
+    url += (url.includes('?') ? '&' : '?') + 'sslmode=no-verify';
+  }
+  return url;
 }
 
 function createPrismaClient() {
@@ -39,8 +41,10 @@ function createPrismaClient() {
     process.env.NODE_ENV === 'production';
 
   if (needsSsl && typeof process !== 'undefined') {
-    // Prevent Node TLS rejection of Supabase pooler intermediate/self-signed certs in serverless
+    // 1. Prevent Node TLS rejection of Supabase pooler intermediate/self-signed certs in serverless
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    // 2. Set PGSSLMODE to no-verify so pg connection-parameters defaults rejectUnauthorized to false
+    process.env.PGSSLMODE = 'no-verify';
   }
 
   const connectionString = needsSsl ? cleanConnectionString(rawConnectionString) : rawConnectionString;

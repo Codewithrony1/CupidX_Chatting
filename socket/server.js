@@ -29,7 +29,13 @@ if (isPostgres) {
   const { PrismaPg } = require('@prisma/adapter-pg');
   const { Pool } = require('pg');
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  const cleanUrl = databaseUrl.replace(/([?&])sslmode=[^&]+(&|$)/gi, '$1').replace(/[?&]$/, '').replace(/\?&/, '?');
+  process.env.PGSSLMODE = 'no-verify';
+  let cleanUrl = databaseUrl;
+  if (/sslmode=/i.test(cleanUrl)) {
+    cleanUrl = cleanUrl.replace(/sslmode=[^&]+/i, 'sslmode=no-verify');
+  } else {
+    cleanUrl += (cleanUrl.includes('?') ? '&' : '?') + 'sslmode=no-verify';
+  }
   const pool = new Pool({
     connectionString: cleanUrl,
     ssl: { rejectUnauthorized: false },
