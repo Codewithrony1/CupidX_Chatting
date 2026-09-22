@@ -8,9 +8,23 @@ export async function GET() {
   let dbStatus = 'disconnected';
   let dbLatencyMs = -1;
 
+  let dbHost = 'unknown';
+  let dbProtocol = 'unknown';
+  try {
+    const rawUrl = process.env.POSTGRES_PRISMA_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    if (rawUrl) {
+      const u = new URL(rawUrl);
+      dbHost = u.host;
+      dbProtocol = u.protocol;
+    } else {
+      dbHost = 'NO_ENV_SET';
+    }
+  } catch {
+    dbHost = 'PARSE_ERROR';
+  }
+
   try {
     const dbStart = Date.now();
-    // Fast check on SQLite database
     await prisma.$queryRaw`SELECT 1 as health_check`;
     dbLatencyMs = Date.now() - dbStart;
     dbStatus = 'connected';
@@ -29,6 +43,8 @@ export async function GET() {
       database: {
         status: dbStatus,
         latencyMs: dbLatencyMs,
+        host: dbHost,
+        protocol: dbProtocol,
       },
       memory: {
         rssMb: Math.round(mem.rss / 1024 / 1024),

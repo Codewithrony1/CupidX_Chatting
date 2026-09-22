@@ -144,7 +144,8 @@ export async function GET(req: Request) {
       {
         available: false,
         status: 'error',
-        error: 'Database error',
+        error: error?.message || 'Database error',
+        code: error?.code,
         reason: 'Unable to verify username availability right now. Please try again.',
       },
       { status: 500 }
