@@ -101,6 +101,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   const checkProfileCompletion = (u: User | null): boolean => {
     if (!u) return false;
+    // Admins are exempt from mandatory dating onboarding
+    if (u.role === 'ADMIN') return true;
     return Boolean(
       u.username &&
       !u.username.startsWith('user_') &&
@@ -247,6 +249,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── 2. Route Guard ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isLoaded || loading) return;
+
+    // Dedicated admin panel routes running in localhost ADMIN_MODE must never be redirected by dating onboarding guards
+    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+      return;
+    }
 
     const publicPaths = [
       '/',

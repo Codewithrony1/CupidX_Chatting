@@ -33,14 +33,15 @@ export async function GET(req: Request) {
 
       const isVIP = isUserVip(user);
       const isProfileDone = Boolean(
-        user.username &&
+        user.role === 'ADMIN' ||
+        (user.username &&
         !user.username.startsWith('user_') &&
         (user.profileCompleted ||
          user.profileLocked ||
          user.genderDobLocked ||
          user.profile?.profileCompleted ||
          user.profile?.ageGenderConfirmed ||
-         (user.dob && user.gender && user.gender !== 'unspecified' && user.fullName))
+         (user.dob && user.gender && user.gender !== 'unspecified' && user.fullName)))
       );
 
       console.log('[AUTH_FLOW] /api/auth/me:', {
