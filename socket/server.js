@@ -636,7 +636,7 @@ function processMatchQueue() {
 
       // adminDb (Firebase) block removed — see WS-001 fix.
       // Prisma sync above is the canonical record of active sessions.
-
+    });
 
     console.log(`[MATCH_SUCCESS] Matched ${candidateA.userId} (${candidateA.username}) <-> ${candidateB.userId} (${candidateB.username})`);
     console.log(`[SESSION_CREATED] Room: ${roomId} for Match: ${matchId}`);
