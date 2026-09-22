@@ -162,6 +162,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
          (backendUser.dob && backendUser.gender && backendUser.gender !== 'unspecified' && backendUser.fullName))
       );
 
+      const rawVipExpiresAt = backendUser?.vip_expires_at || null;
+      const isVipExpired = rawVipExpiresAt ? new Date(rawVipExpiresAt).getTime() <= Date.now() : false;
+      const isVipActive = !isVipExpired && Boolean(backendUser?.is_vip || backendUser?.membershipTier === 'VIP');
+
       const resolvedProfile: UserProfile = {
         id: backendUser?.id || cUser.id,
         uid: cUser.id,
@@ -174,9 +178,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         displayName: backendUser?.displayName || displayName,
         email: backendUser?.email || email,
         role: (backendUser?.role as any) || 'USER',
-        membershipTier: backendUser?.membershipTier || 'FREE',
-        is_vip: Boolean(backendUser?.is_vip),
-        isVIP: Boolean(backendUser?.is_vip),
+        membershipTier: isVipActive ? 'VIP' : 'FREE',
+        is_vip: isVipActive,
+        isVIP: isVipActive,
+        vip_expires_at: rawVipExpiresAt,
+        vip_started_at: backendUser?.vip_started_at || null,
         online: true,
         status: 'active' as const,
         profileCompleted: isProfileDone,

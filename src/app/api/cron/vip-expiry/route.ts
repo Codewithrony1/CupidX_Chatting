@@ -40,7 +40,7 @@ export async function GET(req: Request) {
           },
         ],
       },
-      select: { id: true, username: true },
+      select: { id: true, username: true, clerkUserId: true },
     });
 
     if (expiredUsers.length === 0) {
@@ -74,6 +74,26 @@ export async function GET(req: Request) {
         subscriptionStatus: 'EXPIRED',
       },
     });
+
+    // 5. Sync Clerk publicMetadata so client Clerk session updates
+    try {
+      const { clerkClient } = await import('@clerk/nextjs/server');
+      const client = await clerkClient();
+      for (const u of expiredUsers) {
+        const targetClerkId = u.clerkUserId || u.id;
+        if (targetClerkId) {
+          await client.users.updateUserMetadata(targetClerkId, {
+            publicMetadata: {
+              is_vip: false,
+              membershipTier: 'FREE',
+              vip_expires_at: null,
+            },
+          }).catch(() => {});
+        }
+      }
+    } catch (clerkErr) {
+      console.warn('Clerk sync warning during VIP auto-expiry cron:', clerkErr);
+    }
 
     return NextResponse.json({
       success: true,

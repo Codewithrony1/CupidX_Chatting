@@ -407,13 +407,29 @@ export async function getCurrentUser(req?: Request) {
 
       if (user && !user.isSuspended) {
         // Auto-expire VIP/Premium if expired
-        if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= Date.now()) {
+        const isVipMarked = user.is_vip || user.membershipTier === 'VIP';
+        const isExpired = user.vip_expires_at ? new Date(user.vip_expires_at).getTime() <= Date.now() : false;
+        if (isVipMarked && isExpired) {
           await prisma.user.update({
             where: { id: user.id },
             data: { is_vip: false, membershipTier: 'FREE' },
-          });
+          }).catch(() => {});
+          await prisma.subscription.updateMany({
+            where: { userId: user.id },
+            data: { isActive: false, subscriptionStatus: 'EXPIRED' },
+          }).catch(() => {});
+          if (user.clerkUserId) {
+            try {
+              const { clerkClient } = await import('@clerk/nextjs/server');
+              const client = await clerkClient();
+              await client.users.updateUserMetadata(user.clerkUserId, {
+                publicMetadata: { is_vip: false, membershipTier: 'FREE', vip_expires_at: null },
+              }).catch(() => {});
+            } catch (e) {}
+          }
           user.is_vip = false;
           user.membershipTier = 'FREE';
+          if (user.subscription) user.subscription.isActive = false;
         }
         return user;
       }
@@ -437,13 +453,29 @@ export async function getCurrentUser(req?: Request) {
           });
 
           if (user && !user.isSuspended) {
-            if (user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= Date.now()) {
+            const isVipMarked = user.is_vip || user.membershipTier === 'VIP';
+            const isExpired = user.vip_expires_at ? new Date(user.vip_expires_at).getTime() <= Date.now() : false;
+            if (isVipMarked && isExpired) {
               await prisma.user.update({
                 where: { id: user.id },
                 data: { is_vip: false, membershipTier: 'FREE' },
-              });
+              }).catch(() => {});
+              await prisma.subscription.updateMany({
+                where: { userId: user.id },
+                data: { isActive: false, subscriptionStatus: 'EXPIRED' },
+              }).catch(() => {});
+              if (user.clerkUserId) {
+                try {
+                  const { clerkClient } = await import('@clerk/nextjs/server');
+                  const client = await clerkClient();
+                  await client.users.updateUserMetadata(user.clerkUserId, {
+                    publicMetadata: { is_vip: false, membershipTier: 'FREE', vip_expires_at: null },
+                  }).catch(() => {});
+                } catch (e) {}
+              }
               user.is_vip = false;
               user.membershipTier = 'FREE';
+              if (user.subscription) user.subscription.isActive = false;
             }
             return user;
           }

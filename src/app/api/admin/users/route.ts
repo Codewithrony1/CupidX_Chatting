@@ -63,11 +63,15 @@ export async function GET(req: Request) {
         matchedClerkIds.add(matchedClerkUser.id);
       }
 
+      const rawExpiresAt = u.vip_expires_at || matchedClerkUser?.publicMetadata?.vip_expires_at || null;
+      const isExpired = rawExpiresAt ? new Date(rawExpiresAt).getTime() <= Date.now() : false;
+
       const isVip =
-        u.is_vip ||
-        u.membershipTier === 'VIP' ||
-        (u.subscription?.isActive === true && u.subscription?.plan === 'VIP') ||
-        matchedClerkUser?.publicMetadata?.is_vip === true;
+        !isExpired &&
+        (u.is_vip ||
+          u.membershipTier === 'VIP' ||
+          (u.subscription?.isActive === true && u.subscription?.plan === 'VIP') ||
+          matchedClerkUser?.publicMetadata?.is_vip === true);
 
       const email =
         u.email ||
@@ -96,7 +100,7 @@ export async function GET(req: Request) {
         email,
         membershipTier: isVip ? 'VIP' : 'FREE',
         is_vip: isVip,
-        vip_expires_at: u.vip_expires_at || matchedClerkUser?.publicMetadata?.vip_expires_at || null,
+        vip_expires_at: rawExpiresAt,
         isSuspended: u.isSuspended || Boolean(matchedClerkUser?.banned),
         role: u.role || 'USER',
         gender: u.gender || u.profile?.gender || 'unspecified',
@@ -118,7 +122,9 @@ export async function GET(req: Request) {
         null;
       if (primaryEmail && localByEmail.has(primaryEmail.toLowerCase())) continue;
 
-      const isVip = cu.publicMetadata?.is_vip === true;
+      const rawExpiresAt = cu.publicMetadata?.vip_expires_at || null;
+      const isExpired = rawExpiresAt ? new Date(rawExpiresAt).getTime() <= Date.now() : false;
+      const isVip = !isExpired && cu.publicMetadata?.is_vip === true;
       const fullName =
         [cu.firstName, cu.lastName].filter(Boolean).join(' ') ||
         cu.username ||
@@ -139,7 +145,7 @@ export async function GET(req: Request) {
         email: primaryEmail,
         membershipTier: isVip ? 'VIP' : 'FREE',
         is_vip: isVip,
-        vip_expires_at: cu.publicMetadata?.vip_expires_at || null,
+        vip_expires_at: rawExpiresAt,
         isSuspended: Boolean(cu.banned || cu.locked),
         role: 'USER',
         gender: 'unspecified',

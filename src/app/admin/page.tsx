@@ -169,6 +169,7 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState('');
   const [userPlanFilter, setUserPlanFilter] = useState<'all' | 'vip' | 'free'>('all');
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [processingVipId, setProcessingVipId] = useState<string | null>(null);
 
   // QR Settings state
   const [qrSettings, setQrSettings] = useState({
@@ -477,16 +478,37 @@ export default function AdminPage() {
     }
   };
 
-  // Toggle Subscription Direct (Activate / Deactivate)
-  const handleSubscriptionToggle = async (userId: string, currentActive: boolean) => {
+  // Direct VIP Activation with granular duration (1 Month = 30d, 3 Months = 90d, 1 Year = 365d)
+  const handleActivateVip = async (userId: string, days: number = 30) => {
+    setProcessingVipId(userId);
     try {
-      const endpoint = currentActive
-        ? `/api/admin/subscriptions/${userId}/deactivate`
-        : `/api/admin/subscriptions/${userId}/activate`;
-      const res = await fetch(endpoint, {
+      const res = await fetch(`/api/admin/subscriptions/${userId}/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days: 30 }),
+        body: JSON.stringify({ days }),
+      });
+      if (res.ok) {
+        fetchUsers();
+        fetchStats();
+        fetchAuditLogs();
+        try {
+          confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.error('Error activating VIP:', e);
+    } finally {
+      setProcessingVipId(null);
+    }
+  };
+
+  // Direct VIP Deactivation / Revoke
+  const handleDeactivateVip = async (userId: string) => {
+    setProcessingVipId(userId);
+    try {
+      const res = await fetch(`/api/admin/subscriptions/${userId}/deactivate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
       });
       if (res.ok) {
         fetchUsers();
@@ -494,7 +516,18 @@ export default function AdminPage() {
         fetchAuditLogs();
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error deactivating VIP:', e);
+    } finally {
+      setProcessingVipId(null);
+    }
+  };
+
+  // Direct Toggle helper for backwards compatibility
+  const handleSubscriptionToggle = async (userId: string, currentActive: boolean, days: number = 30) => {
+    if (currentActive) {
+      await handleDeactivateVip(userId);
+    } else {
+      await handleActivateVip(userId, days);
     }
   };
 
@@ -1199,23 +1232,82 @@ export default function AdminPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5 font-mono text-slate-300">
-                        {u.vip_expires_at ? new Date(u.vip_expires_at).toLocaleDateString() : '—'}
-                      </td>
-                      <td className="px-5 py-3.5 text-right space-x-2">
-                        {u.is_vip ? (
-                          <button
-                            onClick={() => handleSubscriptionToggle(u.id, true)}
-                            className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold border border-amber-500/30 cursor-pointer"
-                          >
-                            Deactivate Plan
-                          </button>
+                        {u.vip_expires_at ? (
+                          <div className="flex flex-col">
+                            <span>{new Date(u.vip_expires_at).toLocaleDateString()}</span>
+                            <span className="text-[10px] text-slate-400">
+                              {new Date(u.vip_expires_at).getTime() > Date.now()
+                                ? `${Math.ceil((new Date(u.vip_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}d left`
+                                : 'Expired'}
+                            </span>
+                          </div>
                         ) : (
-                          <button
-                            onClick={() => handleSubscriptionToggle(u.id, false)}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer"
-                          >
-                            [ ACTIVATE PLAN ]
-                          </button>
+                          '—'
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        {u.is_vip ? (
+                          <div className="inline-flex items-center gap-1.5 justify-end">
+                            <button
+                              disabled={processingVipId === u.id}
+                              onClick={() => handleDeactivateVip(u.id)}
+                              className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-bold border border-rose-500/30 cursor-pointer disabled:opacity-50"
+                            >
+                              Deactivate
+                            </button>
+                            <span className="text-slate-600 text-xs">|</span>
+                            <button
+                              disabled={processingVipId === u.id}
+                              onClick={() => handleActivateVip(u.id, 30)}
+                              className="px-2 py-1 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-300 text-[10px] font-bold border border-yellow-500/30 cursor-pointer disabled:opacity-50"
+                              title="Extend VIP by 1 Month (30 Days)"
+                            >
+                              +1M
+                            </button>
+                            <button
+                              disabled={processingVipId === u.id}
+                              onClick={() => handleActivateVip(u.id, 90)}
+                              className="px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30 cursor-pointer disabled:opacity-50"
+                              title="Extend VIP by 3 Months (90 Days)"
+                            >
+                              +3M
+                            </button>
+                            <button
+                              disabled={processingVipId === u.id}
+                              onClick={() => handleActivateVip(u.id, 365)}
+                              className="px-2 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-500/30 cursor-pointer disabled:opacity-50"
+                              title="Extend VIP by 1 Year (365 Days)"
+                            >
+                              +1Y
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5 justify-end">
+                            <button
+                              disabled={processingVipId === u.id}
+                              onClick={() => handleActivateVip(u.id, 30)}
+                              className="px-2.5 py-1.5 rounded-xl bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-300 text-xs font-bold border border-yellow-500/30 cursor-pointer disabled:opacity-50"
+                              title="Activate VIP for 1 Month (30 Days)"
+                            >
+                              1 Month
+                            </button>
+                            <button
+                              disabled={processingVipId === u.id}
+                              onClick={() => handleActivateVip(u.id, 90)}
+                              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-xs font-bold border border-amber-500/30 cursor-pointer disabled:opacity-50"
+                              title="Activate VIP for 3 Months (90 Days)"
+                            >
+                              3 Months
+                            </button>
+                            <button
+                              disabled={processingVipId === u.id}
+                              onClick={() => handleActivateVip(u.id, 365)}
+                              className="px-2.5 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 text-xs font-bold border border-purple-500/30 cursor-pointer disabled:opacity-50"
+                              title="Activate VIP for 1 Year (365 Days)"
+                            >
+                              1 Year
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -1246,14 +1338,78 @@ export default function AdminPage() {
                       : 'Search a user to manage VIP'}
                   </span>
                   {userSearch.trim() && users.length === 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleSubscriptionToggle(users[0].id, users[0].is_vip)}
-                      className="px-3 py-1.5 rounded-xl bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-[10px] font-black hover:bg-yellow-500/25"
-                    >
-                      <Crown className="w-3 h-3 inline mr-1" />
-                      {users[0].is_vip ? 'Remove VIP' : 'Give VIP'}
-                    </button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {users[0].is_vip ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={processingVipId === users[0].id}
+                            onClick={() => handleDeactivateVip(users[0].id)}
+                            className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[10px] font-black hover:bg-rose-500/25 cursor-pointer disabled:opacity-50"
+                          >
+                            <Crown className="w-3 h-3 inline mr-1" />
+                            Remove VIP
+                          </button>
+                          <button
+                            type="button"
+                            disabled={processingVipId === users[0].id}
+                            onClick={() => handleActivateVip(users[0].id, 30)}
+                            className="px-2 py-1.5 rounded-xl bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-[10px] font-bold hover:bg-yellow-500/25 cursor-pointer disabled:opacity-50"
+                            title="Extend 1 Month"
+                          >
+                            +1M
+                          </button>
+                          <button
+                            type="button"
+                            disabled={processingVipId === users[0].id}
+                            onClick={() => handleActivateVip(users[0].id, 90)}
+                            className="px-2 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold hover:bg-amber-500/25 cursor-pointer disabled:opacity-50"
+                            title="Extend 3 Months"
+                          >
+                            +3M
+                          </button>
+                          <button
+                            type="button"
+                            disabled={processingVipId === users[0].id}
+                            onClick={() => handleActivateVip(users[0].id, 365)}
+                            className="px-2 py-1.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[10px] font-bold hover:bg-purple-500/25 cursor-pointer disabled:opacity-50"
+                            title="Extend 1 Year"
+                          >
+                            +1Y
+                          </button>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-bold text-yellow-400 mr-1 flex items-center gap-1">
+                            <Crown className="w-3 h-3" /> Give VIP:
+                          </span>
+                          <button
+                            type="button"
+                            disabled={processingVipId === users[0].id}
+                            onClick={() => handleActivateVip(users[0].id, 30)}
+                            className="px-2.5 py-1.5 rounded-xl bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-[10px] font-black hover:bg-yellow-500/25 cursor-pointer disabled:opacity-50"
+                          >
+                            1 Month
+                          </button>
+                          <button
+                            type="button"
+                            disabled={processingVipId === users[0].id}
+                            onClick={() => handleActivateVip(users[0].id, 90)}
+                            className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-black hover:bg-amber-500/25 cursor-pointer disabled:opacity-50"
+                          >
+                            3 Months
+                          </button>
+                          <button
+                            type="button"
+                            disabled={processingVipId === users[0].id}
+                            onClick={() => handleActivateVip(users[0].id, 365)}
+                            className="px-2.5 py-1.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[10px] font-black hover:bg-purple-500/25 cursor-pointer disabled:opacity-50"
+                          >
+                            1 Year
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
             </div>
@@ -1322,9 +1478,18 @@ export default function AdminPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         {u.is_vip ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 font-black text-[10px] border border-yellow-500/30">
-                            👑 VIP
-                          </span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-yellow-500/20 text-yellow-400 font-black text-[10px] border border-yellow-500/30 w-fit">
+                              👑 VIP
+                            </span>
+                            {u.vip_expires_at && (
+                              <span className="text-[9px] font-mono text-yellow-200/70">
+                                {new Date(u.vip_expires_at).getTime() > Date.now()
+                                  ? `${Math.ceil((new Date(u.vip_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}d left`
+                                  : 'Expired'}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold text-[10px]">
                             FREE
@@ -1349,19 +1514,77 @@ export default function AdminPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-5 py-3.5 text-right space-x-2">
-                        <button
-                          onClick={() => handleSubscriptionToggle(u.id, u.is_vip)}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 cursor-pointer"
-                        >
-                          {u.is_vip ? 'Remove VIP' : 'Give VIP'}
-                        </button>
-                        <button
-                          onClick={() => handleToggleBan(u.id, u.isSuspended)}
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 hover:border-slate-500 cursor-pointer"
-                        >
-                          {u.isSuspended ? 'Unban' : 'Ban'}
-                        </button>
+                      <td className="px-5 py-3.5 text-right">
+                        <div className="inline-flex items-center gap-2 justify-end">
+                          {u.is_vip ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                disabled={processingVipId === u.id}
+                                onClick={() => handleDeactivateVip(u.id)}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 cursor-pointer disabled:opacity-50"
+                              >
+                                Remove VIP
+                              </button>
+                              <button
+                                disabled={processingVipId === u.id}
+                                onClick={() => handleActivateVip(u.id, 30)}
+                                className="px-2 py-1 rounded-lg text-[10px] font-bold border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 cursor-pointer disabled:opacity-50"
+                                title="Extend VIP by 1 Month (30 Days)"
+                              >
+                                +1M
+                              </button>
+                              <button
+                                disabled={processingVipId === u.id}
+                                onClick={() => handleActivateVip(u.id, 90)}
+                                className="px-2 py-1 rounded-lg text-[10px] font-bold border border-amber-500/30 text-amber-300 hover:bg-amber-500/10 cursor-pointer disabled:opacity-50"
+                                title="Extend VIP by 3 Months (90 Days)"
+                              >
+                                +3M
+                              </button>
+                              <button
+                                disabled={processingVipId === u.id}
+                                onClick={() => handleActivateVip(u.id, 365)}
+                                className="px-2 py-1 rounded-lg text-[10px] font-bold border border-purple-500/30 text-purple-300 hover:bg-purple-500/10 cursor-pointer disabled:opacity-50"
+                                title="Extend VIP by 1 Year (365 Days)"
+                              >
+                                +1Y
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                disabled={processingVipId === u.id}
+                                onClick={() => handleActivateVip(u.id, 30)}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/15 cursor-pointer disabled:opacity-50"
+                                title="Grant 1 Month VIP (30 Days)"
+                              >
+                                1 Month
+                              </button>
+                              <button
+                                disabled={processingVipId === u.id}
+                                onClick={() => handleActivateVip(u.id, 90)}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-amber-500/30 text-amber-300 hover:bg-amber-500/15 cursor-pointer disabled:opacity-50"
+                                title="Grant 3 Months VIP (90 Days)"
+                              >
+                                3 Months
+                              </button>
+                              <button
+                                disabled={processingVipId === u.id}
+                                onClick={() => handleActivateVip(u.id, 365)}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-purple-500/30 text-purple-300 hover:bg-purple-500/15 cursor-pointer disabled:opacity-50"
+                                title="Grant 1 Year VIP (365 Days)"
+                              >
+                                1 Year
+                              </button>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => handleToggleBan(u.id, u.isSuspended)}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 hover:border-slate-500 cursor-pointer"
+                          >
+                            {u.isSuspended ? 'Unban' : 'Ban'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

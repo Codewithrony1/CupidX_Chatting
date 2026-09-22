@@ -24,11 +24,20 @@ export async function GET(req: Request) {
       // Graceful fallback to database user count
     }
 
+    const now = new Date();
     const vipUsers = await prisma.user.count({
       where: {
         OR: [
           { is_vip: true },
           { membershipTier: 'VIP' },
+        ],
+        AND: [
+          {
+            OR: [
+              { vip_expires_at: null },
+              { vip_expires_at: { gt: now } },
+            ],
+          },
         ],
       },
     }).catch(() => 0);
