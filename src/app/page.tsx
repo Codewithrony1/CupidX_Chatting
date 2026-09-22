@@ -25,19 +25,19 @@ export default function Home() {
   const startChattingUrl = isAuthenticated
     ? needsOnboarding
       ? '/setup-profile'
-      : '/chat'
+      : '/dashboard'
     : '/login';
 
   const loginUrl = isAuthenticated
     ? needsOnboarding
       ? '/setup-profile'
-      : '/chat'
+      : '/dashboard'
     : '/login';
 
   const joinNowUrl = isAuthenticated
     ? needsOnboarding
       ? '/setup-profile'
-      : '/chat'
+      : '/dashboard'
     : '/signup';
 
   return (

@@ -48,7 +48,7 @@ export async function GET(req: Request) {
         clerkUserIdExists: Boolean(user.clerkUserId),
         profileExists: Boolean(user.profile),
         onboardingCompleted: isProfileDone,
-        routingTarget: isProfileDone ? '/chat' : '/setup-profile',
+        routingTarget: isProfileDone ? '/dashboard' : '/setup-profile',
       });
 
       const token = signToken({

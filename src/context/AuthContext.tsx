@@ -102,9 +102,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const checkProfileCompletion = (u: User | null): boolean => {
     if (!u) return false;
     return Boolean(
-      u.profileCompleted === true &&
       u.username &&
-      !u.username.startsWith('user_')
+      !u.username.startsWith('user_') &&
+      (u.profileCompleted ||
+       u.profileLocked ||
+       u.genderDobLocked ||
+       u.profile?.profileCompleted ||
+       u.profile?.ageGenderConfirmed ||
+       ((u.dateOfBirth || u.profile?.dateOfBirth) && u.gender && u.gender !== 'unspecified' && (u.fullName || u.displayName)))
     );
   };
 
@@ -283,19 +288,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isAuthPage) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        const target = isComplete ? '/chat' : '/setup-profile';
+        const target = isComplete ? '/dashboard' : '/setup-profile';
         console.log('[AUTH GUARD] Authenticated user on auth page -> redirecting to:', target);
         router.replace(target);
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }
 
-      // Authenticated user with completed profile visits /setup-profile -> redirect to /chat
+      // Authenticated user with completed profile visits /setup-profile -> redirect to /dashboard
       if (isSetupProfilePage && isComplete) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
-        console.log('[AUTH GUARD] Profile already complete on setup-profile -> redirecting to /chat');
-        router.replace('/chat');
+        console.log('[AUTH GUARD] Profile already complete on setup-profile -> redirecting to /dashboard');
+        router.replace('/dashboard');
         setTimeout(() => { isNavigatingRef.current = false; }, 500);
         return;
       }

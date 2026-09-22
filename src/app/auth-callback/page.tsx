@@ -77,11 +77,11 @@ export default async function AuthCallbackPage() {
     userIdExists: Boolean(userId),
     userExistsInDb: Boolean(user),
     isProfileComplete,
-    destination: isProfileComplete ? '/chat' : '/setup-profile',
+    destination: isProfileComplete ? '/dashboard' : '/setup-profile',
   });
 
   if (isProfileComplete) {
-    redirect('/chat');
+    redirect('/dashboard');
   } else {
     redirect('/setup-profile');
   }

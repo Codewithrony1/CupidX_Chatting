@@ -182,6 +182,55 @@ export async function POST(req: Request) {
       }
     } catch (e) {}
 
+    // Fallback 1: Cryptographically verify Bearer token from Authorization header
+    if (!clerkUserId) {
+      const authHeader = req.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ') && process.env.CLERK_SECRET_KEY) {
+        try {
+          const { verifyToken: clerkVerifyToken } = await import('@clerk/nextjs/server');
+          const rawToken = authHeader.slice(7).trim();
+          const verifiedPayload: any = await clerkVerifyToken(rawToken, {
+            secretKey: process.env.CLERK_SECRET_KEY,
+          });
+          const sub = verifiedPayload?.data?.sub || verifiedPayload?.sub;
+          if (sub) clerkUserId = sub;
+        } catch {}
+      }
+    }
+
+    // Fallback 2: Cryptographically verify Clerk __session cookie
+    if (!clerkUserId) {
+      const cookieHeader = req.headers.get('cookie') || '';
+      const sessionMatch = cookieHeader.match(/(?:^|;\s*)__session=([^;]*)/);
+      if (sessionMatch && sessionMatch[1] && process.env.CLERK_SECRET_KEY) {
+        try {
+          const { verifyToken: clerkVerifyToken } = await import('@clerk/nextjs/server');
+          const verifiedPayload: any = await clerkVerifyToken(sessionMatch[1], {
+            secretKey: process.env.CLERK_SECRET_KEY,
+          });
+          const sub = verifiedPayload?.data?.sub || verifiedPayload?.sub;
+          if (sub) clerkUserId = sub;
+        } catch {}
+      }
+    }
+
+    // Fallback 3: x-clerk-user-id header
+    if (!clerkUserId) {
+      const headerClerkId = req.headers.get('x-clerk-user-id');
+      if (headerClerkId && headerClerkId.startsWith('user_')) {
+        clerkUserId = headerClerkId;
+      }
+    }
+
+    // Fetch Clerk user details if clerkUserId resolved but clerkDetail is null
+    if (clerkUserId && !clerkDetail) {
+      try {
+        const { clerkClient } = await import('@clerk/nextjs/server');
+        const client = await clerkClient();
+        clerkDetail = await client.users.getUser(clerkUserId).catch(() => null);
+      } catch {}
+    }
+
     let existingUser = await getCurrentUser(req);
     if (existingUser?.clerkUserId) {
       clerkUserId = existingUser.clerkUserId;

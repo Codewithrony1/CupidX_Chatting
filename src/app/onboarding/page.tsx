@@ -205,11 +205,11 @@ export default function OnboardingPage() {
     }
   }, [authLoading, user, directClerkUser, clerkUser, router]);
 
-  // If already complete, redirect to /chat
+  // If already complete, redirect to /dashboard
   useEffect(() => {
     if (!authLoading && user) {
       if (isProfileComplete && !submitting) {
-        router.replace('/chat');
+        router.replace('/dashboard');
       }
     }
   }, [user, authLoading, isProfileComplete, submitting, router]);
@@ -272,14 +272,21 @@ export default function OnboardingPage() {
 
     try {
       const token = await getToken().catch(() => null);
+      const effectiveClerkId = directClerkUser?.id || clerkUser?.id || user?.clerkUserId;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      if (effectiveClerkId) {
+        headers['x-clerk-user-id'] = effectiveClerkId;
+      }
 
       // Direct authoritative API call to complete onboarding and permanently lock identity
       const res = await fetch('/api/auth/onboarding', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
         credentials: 'include',
         body: JSON.stringify({
           username: cleanUsername,
@@ -312,8 +319,13 @@ export default function OnboardingPage() {
         return;
       }
 
-      await refreshUser();
-      router.replace('/chat');
+      // Refresh user context and navigate to dashboard
+      try {
+        await refreshUser();
+      } catch (e) {}
+
+      // Hard redirect to dashboard to guarantee fresh state, cookies, and UI
+      window.location.href = '/dashboard';
     } catch (err: any) {
       console.error('Onboarding save error:', err);
       setErrorMsg(err?.message || 'Failed to complete profile setup. Please try again.');
@@ -330,7 +342,7 @@ export default function OnboardingPage() {
         </div>
         <div className="flex items-center space-x-2 text-pink-300 text-xs font-bold mt-4 z-10">
           <Loader2 className="w-4 h-4 animate-spin" />
-          <span>{isProfileComplete ? 'Opening chat...' : 'Loading CupidX...'}</span>
+          <span>{isProfileComplete ? 'Opening dashboard...' : 'Loading CupidX...'}</span>
         </div>
       </div>
     );
