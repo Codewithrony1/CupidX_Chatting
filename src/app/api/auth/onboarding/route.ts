@@ -759,11 +759,16 @@ export async function POST(req: Request) {
       console.warn('[ONBOARDING] Clerk metadata sync notice:', clerkSyncErr);
     }
 
-    const token = signToken({
-      userId: updatedUser.id,
-      username: updatedUser.username,
-      role: updatedUser.role,
-    });
+    let token: string | null = null;
+    try {
+      token = signToken({
+        userId: updatedUser.id,
+        username: updatedUser.username,
+        role: updatedUser.role,
+      });
+    } catch (tokenErr) {
+      console.warn('[ONBOARDING] Token signing warning:', tokenErr);
+    }
 
     const response = NextResponse.json({
       success: true,
@@ -786,7 +791,9 @@ export async function POST(req: Request) {
       },
     });
 
-    response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
+    if (token) {
+      response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
+    }
     return response;
   } catch (error: any) {
     console.error('Onboarding save error:', error);

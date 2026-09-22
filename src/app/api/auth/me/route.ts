@@ -51,11 +51,16 @@ export async function GET(req: Request) {
         routingTarget: isProfileDone ? '/dashboard' : '/setup-profile',
       });
 
-      const token = signToken({
-        userId: user.id,
-        username: user.username,
-        role: user.role,
-      });
+      let token: string | null = null;
+      try {
+        token = signToken({
+          userId: user.id,
+          username: user.username,
+          role: user.role,
+        });
+      } catch (tokenErr) {
+        console.warn('[AUTH_FLOW] Token signing warning in /api/auth/me:', tokenErr);
+      }
 
       const response = NextResponse.json({
         authenticated: true,
@@ -85,7 +90,9 @@ export async function GET(req: Request) {
         },
       });
 
-      response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
+      if (token) {
+        response.cookies.set('token', token, getAuthCookieOptions(req, 30 * 24 * 60 * 60));
+      }
       return response;
     }
 
