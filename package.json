@@ -7,7 +7,7 @@
     "admin": "cross-env ADMIN_MODE=true next dev -H 127.0.0.1 -p 3001",
     "build": "node prisma/ensure-schema.js && node prisma/ensure-pg-schema.js && prisma generate && next build",
     "postinstall": "prisma generate",
-    "start": "next start",
+    "start": "cross-env ADMIN_MODE=true next start -H 127.0.0.1 -p 3000",
     "lint": "eslint",
     "socket": "node socket/server.js"
   },
