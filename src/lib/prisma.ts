@@ -22,12 +22,28 @@ function getConnectionString(): string {
   return connectionString;
 }
 
+function cleanConnectionString(raw: string): string {
+  // Strip sslmode query parameter so node-postgres doesn't override our explicit ssl options
+  return raw
+    .replace(/([?&])sslmode=[^&]+(&|$)/gi, '$1')
+    .replace(/[?&]$/, '')
+    .replace(/\?&/, '?');
+}
+
 function createPrismaClient() {
-  const connectionString = getConnectionString();
+  const rawConnectionString = getConnectionString();
   const needsSsl =
-    connectionString.includes('supabase.co') ||
-    connectionString.includes('sslmode=require') ||
+    rawConnectionString.includes('supabase.co') ||
+    rawConnectionString.includes('pooler.supabase.com') ||
+    rawConnectionString.includes('sslmode=require') ||
     process.env.NODE_ENV === 'production';
+
+  if (needsSsl && typeof process !== 'undefined') {
+    // Prevent Node TLS rejection of Supabase pooler intermediate/self-signed certs in serverless
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  }
+
+  const connectionString = needsSsl ? cleanConnectionString(rawConnectionString) : rawConnectionString;
 
   const pool =
     globalForPrisma.pgPool ??
@@ -35,7 +51,7 @@ function createPrismaClient() {
       connectionString,
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 10000,
       ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
     });
 

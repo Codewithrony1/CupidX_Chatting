@@ -28,7 +28,13 @@ if (isPostgres) {
   // Production: PostgreSQL via @prisma/adapter-pg
   const { PrismaPg } = require('@prisma/adapter-pg');
   const { Pool } = require('pg');
-  const pool = new Pool({ connectionString: databaseUrl });
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  const cleanUrl = databaseUrl.replace(/([?&])sslmode=[^&]+(&|$)/gi, '$1').replace(/[?&]$/, '').replace(/\?&/, '?');
+  const pool = new Pool({
+    connectionString: cleanUrl,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000,
+  });
   const adapter = new PrismaPg(pool);
   prisma = new PrismaClient({ adapter });
   console.log('[DB] Connected to PostgreSQL (production mode)');
