@@ -113,6 +113,38 @@ export async function POST(req: Request) {
         },
       });
 
+      // 5. Notify the user
+      await prisma.notification.create({
+        data: {
+          userId: vipReq.userId,
+          type: 'VIP_UPGRADED',
+          content: `👑 VIP Activated! Your VIP membership has been approved. Enjoy VIP access for 30 days (expires ${expiresAt.toLocaleDateString()}).`,
+        },
+      }).catch(() => {});
+
+      // 6. Sync VIP status to Clerk publicMetadata so the user's next login
+      //    picks up VIP immediately via the self-healing auth check.
+      try {
+        const targetUser = await prisma.user.findUnique({
+          where: { id: vipReq.userId },
+          select: { clerkUserId: true },
+        });
+        const targetClerkId = targetUser?.clerkUserId;
+        if (targetClerkId) {
+          const { clerkClient } = await import('@clerk/nextjs/server');
+          const client = await clerkClient();
+          await client.users.updateUserMetadata(targetClerkId, {
+            publicMetadata: {
+              is_vip: true,
+              membershipTier: 'VIP',
+              vip_expires_at: expiresAt.toISOString(),
+            },
+          });
+        }
+      } catch (clerkErr) {
+        console.warn('[VIP] Clerk metadata sync failed (non-critical):', clerkErr);
+      }
+
       return NextResponse.json({
         success: true,
         message: 'VIP request approved! 30-day VIP status granted to user.',

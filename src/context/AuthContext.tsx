@@ -163,8 +163,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
 
       const rawVipExpiresAt = backendUser?.vip_expires_at || null;
-      const isVipExpired = rawVipExpiresAt ? new Date(rawVipExpiresAt).getTime() <= Date.now() : false;
-      const isVipActive = !isVipExpired && Boolean(backendUser?.is_vip || backendUser?.membershipTier === 'VIP');
+      // BUGFIX: < not <= because <= would mark a future expiry as expired
+      const isVipExpired = rawVipExpiresAt ? new Date(rawVipExpiresAt).getTime() < Date.now() : false;
+      const hasVipFlag = Boolean(backendUser?.is_vip || backendUser?.membershipTier === 'VIP');
+      const hasActiveSubscription = backendUser?.subscription?.isActive === true && backendUser?.subscription?.plan === 'VIP';
+      const isVipActive = !isVipExpired && (hasVipFlag || hasActiveSubscription);
 
       const resolvedProfile: UserProfile = {
         id: backendUser?.id || cUser.id,

@@ -97,6 +97,37 @@ export async function POST(req: Request) {
         },
       });
 
+      // Notify user
+      await prisma.notification.create({
+        data: {
+          userId: payment.userId,
+          type: 'VIP_UPGRADED',
+          content: `👑 VIP Activated! Your payment has been verified. Enjoy VIP access for 30 days (expires ${expiresAt.toLocaleDateString()}).`,
+        },
+      }).catch(() => {});
+
+      // Sync to Clerk publicMetadata
+      try {
+        const targetUser = await prisma.user.findUnique({
+          where: { id: payment.userId },
+          select: { clerkUserId: true },
+        });
+        const targetClerkId = targetUser?.clerkUserId;
+        if (targetClerkId) {
+          const { clerkClient } = await import('@clerk/nextjs/server');
+          const client = await clerkClient();
+          await client.users.updateUserMetadata(targetClerkId, {
+            publicMetadata: {
+              is_vip: true,
+              membershipTier: 'VIP',
+              vip_expires_at: expiresAt.toISOString(),
+            },
+          });
+        }
+      } catch (clerkErr) {
+        console.warn('[VIP] Clerk metadata sync failed (non-critical):', clerkErr);
+      }
+
       return NextResponse.json({
         success: true,
         message: 'Payment approved successfully! VIP access unlocked.',
