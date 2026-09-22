@@ -30,9 +30,13 @@ export async function GET(req: Request) {
             id: true,
             username: true,
             fullName: true,
+            membershipTier: true,
+            is_vip: true,
             profile: {
               select: {
                 avatarUrl: true,
+                avatarType: true,
+                avatarEmoji: true,
               },
             },
           },
@@ -46,7 +50,10 @@ export async function GET(req: Request) {
       blockedUser: {
         username: b.blocked.username,
         fullName: b.blocked.fullName,
-        avatarUrl: b.blocked.profile?.avatarUrl || '/default-avatar.png',
+        avatarUrl: b.blocked.profile?.avatarUrl || null,
+        avatarType: b.blocked.profile?.avatarType || 'EMOJI',
+        avatarEmoji: b.blocked.profile?.avatarEmoji || '😊',
+        isVIP: b.blocked.membershipTier === 'VIP' || Boolean(b.blocked.is_vip),
       },
     }));
 

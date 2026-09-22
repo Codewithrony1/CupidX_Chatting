@@ -24,7 +24,9 @@ export async function GET(req: Request) {
             username: true,
             fullName: true,
             displayName: true,
-            profile: { select: { avatarUrl: true, avatarEmoji: true, isOnline: true } },
+            membershipTier: true,
+            is_vip: true,
+            profile: { select: { avatarUrl: true, avatarType: true, avatarEmoji: true, isOnline: true } },
           },
         },
         userB: {
@@ -33,7 +35,9 @@ export async function GET(req: Request) {
             username: true,
             fullName: true,
             displayName: true,
-            profile: { select: { avatarUrl: true, avatarEmoji: true, isOnline: true } },
+            membershipTier: true,
+            is_vip: true,
+            profile: { select: { avatarUrl: true, avatarType: true, avatarEmoji: true, isOnline: true } },
           },
         },
         messages: {
@@ -54,7 +58,9 @@ export async function GET(req: Request) {
           username: partner.username,
           displayName: partner.displayName || partner.fullName,
           avatarUrl: partner.profile?.avatarUrl || null,
+          avatarType: partner.profile?.avatarType || 'EMOJI',
           avatarEmoji: partner.profile?.avatarEmoji || '😊',
+          isVIP: partner.membershipTier === 'VIP' || Boolean(partner.is_vip),
           isOnline: partner.profile?.isOnline || false,
         },
         lastMessage: lastMessage

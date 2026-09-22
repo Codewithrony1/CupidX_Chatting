@@ -30,7 +30,9 @@ interface ActiveCallData {
     username: string;
     displayName: string;
     avatarUrl: string | null;
+    avatarType?: string;
     avatarEmoji: string;
+    isVIP?: boolean;
   };
 }
 
@@ -415,7 +417,7 @@ export default function CallModal({ onCallEnded }: CallModalProps) {
           <div className="relative">
             <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 p-1.5 shadow-2xl shadow-pink-500/30 animate-pulse">
               <div className="w-full h-full rounded-full bg-slate-950 overflow-hidden flex items-center justify-center">
-                {activeCall.otherUser.avatarUrl ? (
+                {activeCall.otherUser.isVIP && activeCall.otherUser.avatarType === 'IMAGE' && activeCall.otherUser.avatarUrl ? (
                   <img
                     src={activeCall.otherUser.avatarUrl}
                     alt={`Profile picture for ${activeCall.otherUser.username}`}

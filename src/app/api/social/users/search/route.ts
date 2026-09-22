@@ -65,6 +65,7 @@ export async function GET(req: Request) {
         profile: {
           select: {
             avatarUrl: true,
+            avatarType: true,
             avatarEmoji: true,
             isOnline: true,
             bio: true,
@@ -131,7 +132,9 @@ export async function GET(req: Request) {
         hasVipUsername: Boolean(u.vipUsername),
         displayName: u.displayName || u.fullName || 'CupidX Member',
         avatarUrl: u.profile?.avatarUrl || null,
+        avatarType: u.profile?.avatarType || 'EMOJI',
         avatarEmoji: u.profile?.avatarEmoji || '😊',
+        isVIP: u.membershipTier === 'VIP' || Boolean(u.is_vip),
         isOnline: u.profile?.isOnline || false,
         bio: u.profile?.bio || '',
         relationshipStatus,

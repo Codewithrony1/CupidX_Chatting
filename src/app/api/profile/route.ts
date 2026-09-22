@@ -329,8 +329,16 @@ export async function PUT(req: Request) {
           // ignore cleanup errors
         }
       }
-    } else if (avatarType === 'EMOJI' && (body.avatarUrl === null || body.removeAvatarImage)) {
+    } else if (avatarType === 'EMOJI') {
       avatarUrl = null;
+      const previousAvatarUrl = user.profile?.avatarUrl || null;
+      if (previousAvatarUrl && !previousAvatarUrl.startsWith('data:')) {
+        try {
+          await deleteStoredImage(previousAvatarUrl);
+        } catch (e) {
+          // ignore cleanup errors
+        }
+      }
     }
 
     // Calculate mood expiration timestamp

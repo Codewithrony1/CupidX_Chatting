@@ -1586,14 +1586,14 @@ export default function KnotChatRandomPage() {
               <div className="flex items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
                 <div onClick={() => setShowProfileSheet(true)} className="relative cursor-pointer shrink-0">
                   <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-tr from-pink-600 to-purple-600 flex items-center justify-center text-white font-black text-xs sm:text-sm border-2 border-pink-400/50 shadow-md overflow-hidden shrink-0">
-                    {partner?.avatarUrl ? (
+                    {partner?.isVIP && partner?.avatarType === 'IMAGE' && partner?.avatarUrl ? (
                       <img
                         src={partner.avatarUrl}
                         alt={`Profile picture of ${partner?.displayName || partner?.fullName || 'Stranger'}`}
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      partner?.avatarEmoji || (partner?.displayName ? partner.displayName.substring(0, 2).toUpperCase() : '👤')
+                      partner?.avatarEmoji || (partner?.displayName ? partner.displayName.substring(0, 2).toUpperCase() : '😊')
                     )}
                   </div>
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 border-2 border-[#0d0119]" />

@@ -98,7 +98,10 @@ export async function POST(req: Request) {
         id: targetUser.id,
         username: targetUser.username,
         displayName: targetUser.displayName || targetUser.fullName,
-        avatarUrl: targetUser.profile?.avatarUrl || '/default-avatar.png',
+        avatarUrl: targetUser.profile?.avatarUrl || null,
+        avatarType: targetUser.profile?.avatarType || 'EMOJI',
+        avatarEmoji: targetUser.profile?.avatarEmoji || '😊',
+        isVIP: targetUser.membershipTier === 'VIP' || Boolean(targetUser.is_vip),
       },
     });
   } catch (error) {

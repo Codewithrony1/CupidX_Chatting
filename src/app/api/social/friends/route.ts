@@ -20,9 +20,12 @@ export async function GET(req: Request) {
             username: true,
             displayName: true,
             fullName: true,
+            membershipTier: true,
+            is_vip: true,
             profile: {
               select: {
                 avatarUrl: true,
+                avatarType: true,
                 avatarEmoji: true,
                 isOnline: true,
                 lastSeen: true,
@@ -38,9 +41,12 @@ export async function GET(req: Request) {
             username: true,
             displayName: true,
             fullName: true,
+            membershipTier: true,
+            is_vip: true,
             profile: {
               select: {
                 avatarUrl: true,
+                avatarType: true,
                 avatarEmoji: true,
                 isOnline: true,
                 lastSeen: true,
@@ -77,7 +83,9 @@ export async function GET(req: Request) {
             hasVipUsername: Boolean(friend.vipUsername),
             displayName: friend.displayName || friend.fullName || 'CupidX Member',
             avatarUrl: friend.profile?.avatarUrl || null,
+            avatarType: friend.profile?.avatarType || 'EMOJI',
             avatarEmoji: friend.profile?.avatarEmoji || '😊',
+            isVIP: friend.membershipTier === 'VIP' || Boolean(friend.is_vip),
             isOnline: friend.profile?.isOnline || false,
             lastSeen: friend.profile?.lastSeen || null,
             bio: friend.profile?.bio || '',

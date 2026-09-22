@@ -330,6 +330,7 @@ export async function GET(req: Request) {
             displayName: partner.displayName || partner.fullName || 'Stranger',
             gender: partner.profile?.gender || partner.gender || 'unspecified',
             avatarEmoji: partner.profile?.avatarEmoji || '😊',
+            avatarType: partner.profile?.avatarType || 'EMOJI',
             avatarUrl: partner.profile?.avatarUrl || null,
             isVIP: isPartnerVIP,
           }

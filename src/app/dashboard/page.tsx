@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/AppShell';
 import BottomSheet from '@/components/ui/BottomSheet';
+import UserAvatar from '@/components/UserAvatar';
 import { DEFAULT_BIO } from '@/lib/vipCommon';
 import {
   Search,
@@ -34,7 +35,10 @@ interface SearchUser {
   id: string;
   username: string;
   displayName: string;
-  avatarUrl: string;
+  avatarUrl?: string | null;
+  avatarEmoji?: string;
+  avatarType?: string;
+  isVIP?: boolean;
   isOnline: boolean;
 }
 
@@ -332,11 +336,7 @@ export default function DashboardPage() {
                       className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-between transition-colors"
                     >
                       <div className="flex items-center space-x-2.5">
-                        <img
-                          src={u.avatarUrl || '/default-avatar.png'}
-                          alt={`Profile picture for ${u.displayName || u.username || 'User'}`}
-                          className="w-8 h-8 rounded-full object-cover bg-slate-800"
-                        />
+                        <UserAvatar user={u} size="sm" className="rounded-full" />
                         <div>
                           <p className="text-xs font-bold text-white">{u.displayName || 'User'}</p>
                           <p className="text-[10px] text-pink-200/60">{u.isOnline ? 'Online now' : 'Active Member'}</p>
@@ -537,11 +537,7 @@ export default function DashboardPage() {
 
           <div className="space-y-2.5 text-xs">
             <div className="flex items-center space-x-3">
-              <img
-                src={user?.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user?.displayName || user?.id || 'cupidx'}`}
-                alt={`Profile picture for ${user?.displayName || user?.fullName || 'My Profile'}`}
-                className="w-10 h-10 rounded-full object-cover bg-slate-800 border border-pink-400/50"
-              />
+              <UserAvatar user={user} size="md" className="rounded-full" />
               <div>
                 <div className="flex items-center gap-1.5">
                   <h4 className="text-sm font-bold text-white">{user?.displayName || user?.fullName || 'My Profile'}</h4>

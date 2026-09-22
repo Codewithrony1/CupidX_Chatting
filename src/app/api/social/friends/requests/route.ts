@@ -19,9 +19,12 @@ export async function GET(req: Request) {
               username: true,
               displayName: true,
               fullName: true,
+              membershipTier: true,
+              is_vip: true,
               profile: {
                 select: {
                   avatarUrl: true,
+                  avatarType: true,
                   avatarEmoji: true,
                   isOnline: true,
                 },
@@ -41,9 +44,12 @@ export async function GET(req: Request) {
               username: true,
               displayName: true,
               fullName: true,
+              membershipTier: true,
+              is_vip: true,
               profile: {
                 select: {
                   avatarUrl: true,
+                  avatarType: true,
                   avatarEmoji: true,
                   isOnline: true,
                 },
@@ -62,7 +68,9 @@ export async function GET(req: Request) {
         username: r.sender.vipUsername || r.sender.username,
         displayName: r.sender.displayName || r.sender.fullName || 'CupidX Member',
         avatarUrl: r.sender.profile?.avatarUrl || null,
+        avatarType: r.sender.profile?.avatarType || 'EMOJI',
         avatarEmoji: r.sender.profile?.avatarEmoji || '😊',
+        isVIP: r.sender.membershipTier === 'VIP' || Boolean(r.sender.is_vip),
         isOnline: r.sender.profile?.isOnline || false,
       },
     }));
@@ -75,7 +83,9 @@ export async function GET(req: Request) {
         username: r.receiver.vipUsername || r.receiver.username,
         displayName: r.receiver.displayName || r.receiver.fullName || 'CupidX Member',
         avatarUrl: r.receiver.profile?.avatarUrl || null,
+        avatarType: r.receiver.profile?.avatarType || 'EMOJI',
         avatarEmoji: r.receiver.profile?.avatarEmoji || '😊',
+        isVIP: r.receiver.membershipTier === 'VIP' || Boolean(r.receiver.is_vip),
         isOnline: r.receiver.profile?.isOnline || false,
       },
     }));

@@ -25,6 +25,7 @@ import {
   Sparkles,
   Lock,
 } from 'lucide-react';
+import UserAvatar from '@/components/UserAvatar';
 
 interface PartnerInfo {
   id: string;
@@ -33,6 +34,8 @@ interface PartnerInfo {
   displayName: string;
   avatarUrl: string | null;
   avatarEmoji: string;
+  avatarType?: string;
+  isVIP?: boolean;
   isOnline: boolean;
 }
 
@@ -507,16 +510,8 @@ export default function PrivateChatPage() {
 
             {partner && (
               <div className="flex items-center space-x-2.5 min-w-0 flex-1">
-                <div className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-2xl overflow-hidden bg-slate-900 border border-white/10 shrink-0 flex items-center justify-center">
-                  {partner.avatarUrl ? (
-                    <img
-                      src={partner.avatarUrl}
-                      alt={`Profile picture for ${partner.displayName || partner.username}`}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-xl">{partner.avatarEmoji}</span>
-                  )}
+                <div className="relative shrink-0">
+                  <UserAvatar user={partner} size="sm" />
                   {partner.isOnline && (
                     <span className="absolute bottom-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
                   )}

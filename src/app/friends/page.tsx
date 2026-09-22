@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/AppShell';
 import CallModal from '@/components/social/CallModal';
+import UserAvatar from '@/components/UserAvatar';
 import { DEFAULT_BIO } from '@/lib/vipCommon';
 import {
   Users,
@@ -35,6 +36,8 @@ interface FriendItem {
     displayName: string;
     avatarUrl: string | null;
     avatarEmoji: string;
+    avatarType?: string;
+    isVIP?: boolean;
     isOnline: boolean;
     lastSeen: string | null;
     bio: string;
@@ -52,6 +55,8 @@ interface ConversationItem {
     displayName: string;
     avatarUrl: string | null;
     avatarEmoji: string;
+    avatarType?: string;
+    isVIP?: boolean;
     isOnline: boolean;
   };
   lastMessage: {
@@ -75,6 +80,8 @@ interface RequestItem {
     displayName: string;
     avatarUrl: string | null;
     avatarEmoji: string;
+    avatarType?: string;
+    isVIP?: boolean;
     isOnline: boolean;
   };
 }
@@ -86,6 +93,8 @@ interface SearchedUserItem {
   displayName: string;
   avatarUrl: string | null;
   avatarEmoji: string;
+  avatarType?: string;
+  isVIP?: boolean;
   isOnline: boolean;
   bio: string;
   relationshipStatus: 'FRIENDS' | 'REQUEST_SENT' | 'REQUEST_RECEIVED' | 'NONE';
@@ -519,19 +528,7 @@ export default function FriendsHubPage() {
             {/* Header Identity Card */}
             <div className="rounded-3xl bg-white/5 border border-white/10 p-5 flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-md">
               <div className="flex items-center space-x-4">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-pink-600 to-purple-600 p-0.5 shadow-md shadow-pink-500/20">
-                  <div className="w-full h-full rounded-2xl bg-slate-950 overflow-hidden flex items-center justify-center">
-                    {user?.profile?.avatarUrl ? (
-                      <img
-                        src={user.profile.avatarUrl}
-                        alt={`Profile picture for ${user.displayName || user.username || 'me'}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-2xl">{user?.profile?.avatarEmoji || '😊'}</span>
-                    )}
-                  </div>
-                </div>
+                <UserAvatar user={user} size="lg" />
 
                 <div>
                   <div className="flex items-center space-x-2">
@@ -643,18 +640,10 @@ export default function FriendsHubPage() {
                       className="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-4 hover:border-pink-500/30 transition-all"
                     >
                       <div className="flex items-center space-x-3 overflow-hidden">
-                        <div className="relative w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
-                          {item.friend.avatarUrl ? (
-                            <img
-                              src={item.friend.avatarUrl}
-                              alt={`Profile picture for ${item.friend.displayName || item.friend.username}`}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <span className="text-xl">{item.friend.avatarEmoji}</span>
-                          )}
+                        <div className="relative shrink-0">
+                          <UserAvatar user={item.friend} size="md" />
                           {item.friend.isOnline && (
-                            <span className="absolute bottom-1 right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
+                            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />
                           )}
                         </div>
 
@@ -726,17 +715,7 @@ export default function FriendsHubPage() {
                       className="p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-pink-500/30 flex items-center justify-between gap-4 transition-all block group"
                     >
                       <div className="flex items-center space-x-3 overflow-hidden">
-                        <div className="w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
-                          {conv.partner.avatarUrl ? (
-                            <img
-                              src={conv.partner.avatarUrl}
-                              alt={`Profile picture for ${conv.partner.displayName || conv.partner.username}`}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <span className="text-xl">{conv.partner.avatarEmoji}</span>
-                          )}
-                        </div>
+                        <UserAvatar user={conv.partner} size="md" />
 
                         <div className="overflow-hidden">
                           <div className="flex items-center space-x-2">
@@ -785,17 +764,7 @@ export default function FriendsHubPage() {
                         className="p-4 rounded-2xl bg-white/5 border border-pink-500/20 flex items-center justify-between gap-4"
                       >
                         <div className="flex items-center space-x-3 overflow-hidden">
-                          <div className="w-10 h-10 rounded-2xl overflow-hidden bg-slate-900 shrink-0 flex items-center justify-center">
-                            {req.user.avatarUrl ? (
-                              <img
-                                src={req.user.avatarUrl}
-                                alt={`Profile picture for ${req.user.displayName || req.user.username}`}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span className="text-lg">{req.user.avatarEmoji}</span>
-                            )}
-                          </div>
+                          <UserAvatar user={req.user} size="sm" />
                           <div>
                             <h5 className="text-xs font-bold text-white">{req.user.displayName}</h5>
                             <p className="text-[11px] font-mono font-bold text-pink-400">@{req.user.username}</p>
@@ -842,17 +811,7 @@ export default function FriendsHubPage() {
                         className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-between gap-4"
                       >
                         <div className="flex items-center space-x-3 overflow-hidden">
-                          <div className="w-10 h-10 rounded-2xl overflow-hidden bg-slate-900 shrink-0 flex items-center justify-center">
-                            {req.user.avatarUrl ? (
-                              <img
-                                src={req.user.avatarUrl}
-                                alt={`Profile picture for ${req.user.displayName || req.user.username}`}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span className="text-lg">{req.user.avatarEmoji}</span>
-                            )}
-                          </div>
+                          <UserAvatar user={req.user} size="sm" />
                           <div>
                             <h5 className="text-xs font-bold text-white">{req.user.displayName}</h5>
                             <p className="text-[11px] font-mono font-bold text-pink-400">@{req.user.username}</p>
@@ -923,17 +882,7 @@ export default function FriendsHubPage() {
                         className="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-4"
                       >
                         <div className="flex items-center space-x-3 overflow-hidden">
-                          <div className="w-11 h-11 rounded-2xl overflow-hidden bg-slate-900 shrink-0 border border-white/10 flex items-center justify-center">
-                            {target.avatarUrl ? (
-                              <img
-                                src={target.avatarUrl}
-                                alt={`Profile picture for ${target.displayName || target.username}`}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span className="text-xl">{target.avatarEmoji}</span>
-                            )}
-                          </div>
+                          <UserAvatar user={target} size="md" />
 
                           <div className="overflow-hidden">
                             <div className="flex items-center gap-1.5">

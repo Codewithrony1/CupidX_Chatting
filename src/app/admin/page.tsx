@@ -71,6 +71,7 @@ interface UserItem {
   gender: string;
   avatarUrl?: string | null;
   avatarType?: string | null;
+  avatarEmoji?: string | null;
   createdAt: string;
   lastSignInAt?: string | null;
   lastActiveAt?: string | null;
@@ -1240,13 +1241,13 @@ export default function AdminPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2">
                           <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 border border-white/10 flex items-center justify-center">
-                            {u.avatarUrl ? (
+                            {u.is_vip && u.avatarType === 'IMAGE' && u.avatarUrl ? (
                               <img src={u.avatarUrl} alt={u.username} className="w-full h-full object-cover" />
                             ) : (
-                              <span className="text-lg">😊</span>
+                              <span className="text-lg">{u.avatarEmoji || (u as any).profile?.avatarEmoji || '😊'}</span>
                             )}
                           </div>
-                          {u.avatarUrl && (
+                          {u.avatarType === 'IMAGE' && u.avatarUrl && (
                             <button
                               type="button"
                               onClick={() => handleDeleteUserAvatar(u.id, u.username)}
@@ -1563,10 +1564,10 @@ export default function AdminPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 border border-white/10 flex items-center justify-center shrink-0">
-                          {u.avatarUrl ? (
+                          {u.is_vip && u.avatarType === 'IMAGE' && u.avatarUrl ? (
                             <img src={u.avatarUrl} alt={u.username} className="w-full h-full object-cover" />
                           ) : (
-                            <span className="text-sm">😊</span>
+                            <span className="text-sm">{u.avatarEmoji || (u as any).profile?.avatarEmoji || '😊'}</span>
                           )}
                         </div>
                       </td>

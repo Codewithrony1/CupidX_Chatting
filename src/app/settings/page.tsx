@@ -34,6 +34,7 @@ import AppShell from '@/components/AppShell';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION } from '@/lib/config/policy';
 import { DEFAULT_BIO } from '@/lib/vipCommon';
+import UserAvatar from '@/components/UserAvatar';
 
 interface BlockedUser {
   id: string;
@@ -41,7 +42,10 @@ interface BlockedUser {
   blockedUser: {
     username: string;
     fullName: string;
-    avatarUrl?: string;
+    avatarUrl?: string | null;
+    avatarEmoji?: string;
+    avatarType?: string;
+    isVIP?: boolean;
   };
 }
 
@@ -400,11 +404,7 @@ export default function SettingsPage() {
                       className="p-3 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between"
                     >
                       <div className="flex items-center space-x-3">
-                        <img
-                          src={item.blockedUser.avatarUrl || '/default-avatar.png'}
-                          alt={item.blockedUser.username}
-                          className="w-8 h-8 rounded-full object-cover bg-slate-800"
-                        />
+                        <UserAvatar user={item.blockedUser} size="sm" className="rounded-full" />
                         <div>
                           <p className="text-xs font-bold text-white">@{item.blockedUser.username}</p>
                           <p className="text-[10px] text-pink-200/60">{item.blockedUser.fullName}</p>

@@ -33,6 +33,7 @@ function UserAvatarComponent({ user, size = 'md', className = '', alt }: UserAva
     user?.membershipTier === 'VIP' ||
     (user as any)?.is_vip ||
     (user as any)?.isVIP ||
+    (user as any)?.plan === 'vip' ||
     (user?.subscription?.isActive && user?.subscription?.plan === 'VIP')
   );
 
@@ -53,12 +54,13 @@ function UserAvatarComponent({ user, size = 'md', className = '', alt }: UserAva
       ? `Profile picture for ${user.displayName || user.fullName || user.username}`
       : 'User avatar');
 
+  const hasCustomRounding = className.includes('rounded-');
   const sizeClasses = {
-    xs: 'w-7 h-7 text-sm rounded-lg',
-    sm: 'w-8 h-8 text-base rounded-xl',
-    md: 'w-10 h-10 text-xl rounded-2xl',
-    lg: 'w-14 h-14 text-3xl rounded-2xl',
-    xl: 'w-24 h-24 text-5xl rounded-3xl',
+    xs: `w-7 h-7 text-sm ${hasCustomRounding ? '' : 'rounded-lg'}`,
+    sm: `w-8 h-8 text-base ${hasCustomRounding ? '' : 'rounded-xl'}`,
+    md: `w-10 h-10 text-xl ${hasCustomRounding ? '' : 'rounded-2xl'}`,
+    lg: `w-14 h-14 text-3xl ${hasCustomRounding ? '' : 'rounded-2xl'}`,
+    xl: `w-24 h-24 text-5xl ${hasCustomRounding ? '' : 'rounded-3xl'}`,
   };
 
   if (showImage) {

@@ -6,6 +6,7 @@ export interface QueueCandidate {
   fullName: string;
   displayName: string;
   avatarEmoji?: string;
+  avatarType?: string;
   avatarUrl?: string | null;
   gender: string;
   plan: 'free' | 'vip';

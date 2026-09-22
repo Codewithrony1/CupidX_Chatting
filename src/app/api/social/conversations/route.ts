@@ -27,7 +27,9 @@ export async function GET(req: Request) {
             username: true,
             displayName: true,
             fullName: true,
-            profile: { select: { avatarUrl: true, avatarEmoji: true, isOnline: true } },
+            membershipTier: true,
+            is_vip: true,
+            profile: { select: { avatarUrl: true, avatarType: true, avatarEmoji: true, isOnline: true } },
           },
         },
         user2: {
@@ -37,7 +39,9 @@ export async function GET(req: Request) {
             username: true,
             displayName: true,
             fullName: true,
-            profile: { select: { avatarUrl: true, avatarEmoji: true, isOnline: true } },
+            membershipTier: true,
+            is_vip: true,
+            profile: { select: { avatarUrl: true, avatarType: true, avatarEmoji: true, isOnline: true } },
           },
         },
         // PERF-001: Fetch only the single most recent message per conversation.
@@ -71,7 +75,9 @@ export async function GET(req: Request) {
           hasVipUsername: Boolean(partner.vipUsername),
           displayName: partner.displayName || partner.fullName || 'CupidX Member',
           avatarUrl: partner.profile?.avatarUrl ?? null,
+          avatarType: partner.profile?.avatarType ?? 'EMOJI',
           avatarEmoji: partner.profile?.avatarEmoji ?? '😊',
+          isVIP: partner.membershipTier === 'VIP' || Boolean(partner.is_vip),
           isOnline: partner.profile?.isOnline ?? false,
         },
         lastMessage: lastMsg

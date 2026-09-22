@@ -42,9 +42,13 @@ export async function GET(req: Request) {
         vipUsername: true,
         fullName: true,
         displayName: true,
+        membershipTier: true,
+        is_vip: true,
         profile: {
           select: {
             avatarUrl: true,
+            avatarType: true,
+            avatarEmoji: true,
             isOnline: true,
           },
         },
@@ -55,7 +59,10 @@ export async function GET(req: Request) {
       id: u.id,
       username: u.vipUsername || u.username,
       displayName: u.displayName || u.fullName,
-      avatarUrl: u.profile?.avatarUrl || '/default-avatar.png',
+      avatarUrl: u.profile?.avatarUrl || null,
+      avatarType: u.profile?.avatarType || 'EMOJI',
+      avatarEmoji: u.profile?.avatarEmoji || '😊',
+      isVIP: u.membershipTier === 'VIP' || Boolean(u.is_vip),
       isOnline: u.profile?.isOnline || false,
     }));
 

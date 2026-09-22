@@ -26,6 +26,7 @@ import {
   Crown,
   Loader2
 } from 'lucide-react';
+import UserAvatar from '@/components/UserAvatar';
 
 interface ChatMessage {
   id: string;
@@ -48,7 +49,9 @@ interface TargetUserProfile {
   username: string;
   fullName: string;
   displayName?: string;
-  avatarUrl: string;
+  avatarUrl?: string | null;
+  avatarEmoji?: string;
+  avatarType?: string;
   isOnline: boolean;
   isVIP?: boolean;
   bio: string;
@@ -454,11 +457,7 @@ export default function ChatWindow() {
               className="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer group min-w-0 flex-1"
             >
               <div className="relative shrink-0">
-                <img
-                  src={targetUser.avatarUrl || '/default-avatar.png'}
-                  alt={`Profile picture for ${targetUser.fullName || targetUser.username}`}
-                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover bg-slate-900 border border-pink-500/30 group-hover:border-pink-400 transition-colors"
-                />
+                <UserAvatar user={targetUser} size="sm" className="rounded-full" />
                 {targetUser.isOnline && (
                   <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 border-2 border-slate-950" />
                 )}
@@ -737,12 +736,8 @@ export default function ChatWindow() {
               <X className="w-4 h-4" />
             </button>
 
-            <div className="relative w-20 h-20 mx-auto">
-              <img
-                src={targetUser.avatarUrl || '/default-avatar.png'}
-                alt={`Profile picture for ${targetUser.fullName || targetUser.username}`}
-                className="w-20 h-20 rounded-full object-cover bg-slate-900 border-2 border-pink-400 shadow-lg"
-              />
+            <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
+              <UserAvatar user={targetUser} size="xl" className="rounded-full" />
               {targetUser.isOnline && (
                 <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-400 border-2 border-slate-950" title="Online" />
               )}

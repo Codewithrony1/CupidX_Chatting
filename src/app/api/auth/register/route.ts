@@ -73,7 +73,9 @@ export async function POST(req: Request) {
         profile: {
           create: {
             bio: "Hey there! I am using CupidX.",
-            avatarUrl: `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${cleanUsername}`,
+            avatarUrl: null,
+            avatarType: 'EMOJI',
+            avatarEmoji: '😊',
             themePreference: 'purple',
           },
         },
