@@ -33,28 +33,27 @@ export function isUserVip(user: any): boolean {
   if (!user) return false;
   const now = new Date();
 
-  // 1. Explicit vip_expires_at on User
-  if (user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= now.getTime()) {
-    return false;
-  }
-
-  // 2. Subscription period check
+  // 1. Subscription period check (highest priority — subscription is source of truth)
   if (user.subscription) {
     const sub = user.subscription;
     const subEnd = sub.endDate || sub.currentPeriodEnd;
-    if (subEnd && new Date(subEnd).getTime() <= now.getTime()) {
-      return false;
-    }
+    // If subscription is active VIP and not yet expired → VIP
     if (sub.isActive === true && sub.plan === 'VIP') {
-      return true;
+      if (!subEnd || new Date(subEnd).getTime() > now.getTime()) {
+        return true;
+      }
     }
+    // Subscription expired or inactive → not VIP via subscription
   }
 
-  // 3. User VIP flags
+  // 2. User-level VIP flags (set by admin approval)
   if (user.is_vip || user.membershipTier === 'VIP' || user.isVIP) {
-    if (!user.vip_expires_at || new Date(user.vip_expires_at).getTime() > now.getTime()) {
-      return true;
+    // If vip_expires_at is set, check it's in the future
+    if (user.vip_expires_at) {
+      return new Date(user.vip_expires_at).getTime() > now.getTime();
     }
+    // No expiry set → treat as lifetime VIP granted by admin
+    return true;
   }
 
   return false;
