@@ -93,8 +93,8 @@ export async function GET(req: Request) {
     const existing = await prisma.user.findFirst({
       where: {
         OR: [
-          { username: { equals: cleanUsername, mode: 'insensitive' } },
-          { vipUsername: { equals: cleanUsername, mode: 'insensitive' } },
+          { username: { equals: cleanUsername, mode: 'insensitive' } as any },
+          { vipUsername: { equals: cleanUsername, mode: 'insensitive' } as any },
         ],
       },
       select: {
@@ -334,8 +334,8 @@ export async function POST(req: Request) {
     const usernameConflict = await prisma.user.findFirst({
       where: {
         OR: [
-          { username: { equals: cleanUsername, mode: 'insensitive' } },
-          { vipUsername: { equals: cleanUsername, mode: 'insensitive' } },
+          { username: { equals: cleanUsername, mode: 'insensitive' } as any },
+          { vipUsername: { equals: cleanUsername, mode: 'insensitive' } as any },
         ],
         NOT: [
           ...(existingUser?.id ? [{ id: existingUser.id }] : []),
@@ -673,8 +673,8 @@ export async function POST(req: Request) {
           const conflictOwner = await prisma.user.findFirst({
             where: {
               OR: [
-                { username: { equals: cleanUsername, mode: 'insensitive' } },
-                { vipUsername: { equals: cleanUsername, mode: 'insensitive' } },
+                { username: { equals: cleanUsername, mode: 'insensitive' } as any },
+                { vipUsername: { equals: cleanUsername, mode: 'insensitive' } as any },
               ],
             },
             include: { profile: true, subscription: true, consent: true },

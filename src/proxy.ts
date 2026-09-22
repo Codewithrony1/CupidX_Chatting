@@ -1,5 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextFetchEvent, NextResponse } from 'next/server';
 
 // ── Public routes that do NOT require authentication ─────────────────────────
 // NOTE: /vip and /premium are intentionally NOT public — they require a logged-in
@@ -39,7 +39,13 @@ const isPublicRoute = createRouteMatcher([
   '/api/social(.*)',
 ]);
 
-export default clerkMiddleware(async (auth, req) => {
+const clerkHandler = clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+});
+
+export default async function proxy(req: NextRequest, ev: NextFetchEvent) {
   const pathname = req.nextUrl.pathname;
 
   const isAdminPath =
@@ -53,9 +59,6 @@ export default clerkMiddleware(async (auth, req) => {
     // SECURITY FIX (ADM-001): Use ONLY the server-controlled `host` header for
     // locality checks. The `x-forwarded-host` header is client-controlled and
     // can be spoofed by any attacker to bypass this check.
-    //
-    // Additionally, require a static ADMIN_SECRET token header as a second
-    // authentication factor, preventing any unauthenticated access even on localhost.
     const host = (req.headers.get('host') ?? '').toLowerCase();
 
     const isLocalHost =
@@ -73,26 +76,22 @@ export default clerkMiddleware(async (auth, req) => {
     }
 
     // Second factor: ADMIN_SECRET token (if set in environment).
-    // To use: set ADMIN_SECRET=<random-token> in .env and pass
-    // X-Admin-Secret: <token> in all admin API requests.
     const adminSecret = process.env.ADMIN_SECRET;
     if (adminSecret) {
       const providedSecret = req.headers.get('x-admin-secret');
-      // Only enforce the secret for API routes, not the admin UI pages.
       const isAdminApi = pathname === '/api/admin' || pathname.startsWith('/api/admin/');
       if (isAdminApi && providedSecret !== adminSecret) {
         return new NextResponse('Forbidden', { status: 403 });
       }
     }
 
-    // Local admin mode intentionally supports the adminAuth fallback without Clerk.
-    return;
+    // Bypass Clerk middleware for local admin panel to avoid dev-browser proxy loops
+    // and internal rewrite failures on loopback interfaces.
+    return NextResponse.next();
   }
 
-  if (!isPublicRoute(req)) {
-    await auth.protect();
-  }
-});
+  return clerkHandler(req, ev);
+}
 
 export const config = {
   matcher: [
