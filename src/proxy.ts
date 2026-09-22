@@ -20,6 +20,8 @@ const isPublicRoute = createRouteMatcher([
   '/contact(.*)',
   '/sso-callback(.*)',
   '/auth-callback(.*)',
+  '/setup-profile(.*)',
+  '/onboarding(.*)',
   '/api/auth/login(.*)',
   '/api/auth/register(.*)',
   '/api/auth/logout(.*)',
