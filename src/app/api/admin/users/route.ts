@@ -14,6 +14,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const search = (searchParams.get('search') || '').toLowerCase().trim();
     const planFilter = (searchParams.get('plan') || 'all').toLowerCase();
+    const loginFilter = (searchParams.get('login') || 'all').toLowerCase();
 
     // 1. Fetch local/remote database users
     const localUsers = await prisma.user.findMany({
@@ -89,6 +90,24 @@ export async function GET(req: Request) {
         matchedClerkUser?.imageUrl ||
         null;
 
+      const lastSignInAt = matchedClerkUser?.lastSignInAt
+        ? new Date(matchedClerkUser.lastSignInAt).toISOString()
+        : (u.profile?.lastSeen ? new Date(u.profile.lastSeen).toISOString() : null);
+
+      const lastActiveAt = matchedClerkUser?.lastActiveAt
+        ? new Date(matchedClerkUser.lastActiveAt).toISOString()
+        : (u.profile?.lastSeen ? new Date(u.profile.lastSeen).toISOString() : null);
+
+      const hasLoggedIn = Boolean(
+        matchedClerkUser?.lastSignInAt ||
+        u.profileCompleted ||
+        u.profile?.profileCompleted ||
+        u.profile?.lastSeen ||
+        u.clerkUserId
+      );
+
+      const isOnline = Boolean(u.profile?.isOnline);
+
       return {
         id: u.id,
         clerkUserId: clerkUserId || matchedClerkUser?.id || null,
@@ -110,6 +129,10 @@ export async function GET(req: Request) {
         avatarType: u.profile?.avatarType || (avatarUrl ? 'IMAGE' : null),
         subscription: u.subscription,
         source: matchedClerkUser ? 'CLERK_SYNCED' : 'DATABASE',
+        lastSignInAt,
+        lastActiveAt,
+        hasLoggedIn,
+        isOnline,
       };
     });
 
@@ -134,6 +157,10 @@ export async function GET(req: Request) {
         primaryEmail?.split('@')[0] ||
         `user_${cu.id.slice(-6)}`;
 
+      const lastSignInAt = cu.lastSignInAt ? new Date(cu.lastSignInAt).toISOString() : null;
+      const lastActiveAt = cu.lastActiveAt ? new Date(cu.lastActiveAt).toISOString() : null;
+      const hasLoggedIn = Boolean(cu.lastSignInAt);
+
       mergedUsers.push({
         id: cu.id,
         clerkUserId: cu.id,
@@ -155,11 +182,22 @@ export async function GET(req: Request) {
         avatarType: cu.imageUrl ? 'IMAGE' : null,
         subscription: null,
         source: 'CLERK_ONLY',
+        lastSignInAt,
+        lastActiveAt,
+        hasLoggedIn,
+        isOnline: false,
       });
     }
 
     // Sort newest first
     mergedUsers.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Compute summary metrics before search/filter
+    const totalCombined = mergedUsers.length;
+    const totalLoggedIn = mergedUsers.filter((u) => u.hasLoggedIn).length;
+    const totalOnline = mergedUsers.filter((u) => u.isOnline).length;
+    const totalVip = mergedUsers.filter((u) => u.is_vip).length;
+    const totalFree = Math.max(0, totalCombined - totalVip);
 
     // Apply Filters
     let filteredUsers = mergedUsers;
@@ -179,8 +217,26 @@ export async function GET(req: Request) {
       filteredUsers = filteredUsers.filter((u) => !u.is_vip);
     }
 
+    if (loginFilter === 'logged_in') {
+      filteredUsers = filteredUsers.filter((u) => u.hasLoggedIn);
+    } else if (loginFilter === 'not_logged_in') {
+      filteredUsers = filteredUsers.filter((u) => !u.hasLoggedIn);
+    }
+
     return NextResponse.json({
       users: filteredUsers,
+      summary: {
+        totalUsers: totalCombined,
+        loggedInUsers: totalLoggedIn,
+        onlineUsers: totalOnline,
+        vipUsers: totalVip,
+        freeUsers: totalFree,
+      },
+      totalUsers: totalCombined,
+      totalLoggedIn,
+      totalOnline,
+      totalVip,
+      totalFree,
       totalClerkUsers: clerkUsers.length,
       totalDatabaseUsers: localUsers.length,
       totalCombined: mergedUsers.length,

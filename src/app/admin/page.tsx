@@ -42,6 +42,9 @@ import confetti from 'canvas-confetti';
 
 interface StatData {
   totalUsers: number;
+  loggedInUsers?: number;
+  onlineUsers?: number;
+  freeUsers?: number;
   vipUsers: number;
   pendingRequests: number;
   approvedToday?: number;
@@ -69,6 +72,11 @@ interface UserItem {
   avatarUrl?: string | null;
   avatarType?: string | null;
   createdAt: string;
+  lastSignInAt?: string | null;
+  lastActiveAt?: string | null;
+  hasLoggedIn?: boolean;
+  isOnline?: boolean;
+  source?: string;
 }
 
 interface PaymentRequestItem {
@@ -168,6 +176,14 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [userPlanFilter, setUserPlanFilter] = useState<'all' | 'vip' | 'free'>('all');
+  const [userLoginFilter, setUserLoginFilter] = useState<'all' | 'logged_in' | 'not_logged_in'>('all');
+  const [usersSummary, setUsersSummary] = useState({
+    totalUsers: 0,
+    loggedInUsers: 0,
+    onlineUsers: 0,
+    vipUsers: 0,
+    freeUsers: 0,
+  });
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [processingVipId, setProcessingVipId] = useState<string | null>(null);
 
@@ -332,10 +348,13 @@ export default function AdminPage() {
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
-      const res = await fetch(`/api/admin/users?search=${encodeURIComponent(userSearch)}&plan=${userPlanFilter}`);
+      const res = await fetch(`/api/admin/users?search=${encodeURIComponent(userSearch)}&plan=${userPlanFilter}&login=${userLoginFilter}`);
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
+        if (data.summary) {
+          setUsersSummary(data.summary);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -414,7 +433,7 @@ export default function AdminPage() {
       fetchUsers();
     }, 300);
     return () => clearTimeout(timer);
-  }, [userSearch, userPlanFilter]);
+  }, [userSearch, userPlanFilter, userLoginFilter]);
 
   // APPROVE & ACTIVATE Payment Request
   const handleApproveRequest = async (requestId: string) => {
@@ -763,11 +782,47 @@ export default function AdminPage() {
         )}
 
         {/* DASHBOARD STAT CARDS */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+          <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 backdrop-blur-md shadow-xl flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-bold text-sky-400 uppercase tracking-wider">Total Users</p>
+              <h3 className="text-2xl font-black text-white mt-0.5">{stats.totalUsers || usersSummary.totalUsers || users.length}</h3>
+              <p className="text-[9px] text-slate-400 font-medium">Registered accounts</p>
+            </div>
+            <div className="w-10 h-10 rounded-2xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold">
+              <Users className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 backdrop-blur-md shadow-xl flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Logged In Users</p>
+              <h3 className="text-2xl font-black text-emerald-400 mt-0.5">
+                {stats.loggedInUsers ?? (usersSummary.loggedInUsers || stats.totalUsers || users.length)}
+              </h3>
+              <p className="text-[9px] text-emerald-300/70 font-medium">Active sign-ins</p>
+            </div>
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 backdrop-blur-md shadow-xl flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">Active VIP</p>
+              <h3 className="text-2xl font-black text-yellow-400 mt-0.5">{stats.vipUsers}</h3>
+              <p className="text-[9px] text-yellow-300/70 font-medium">VIP Members</p>
+            </div>
+            <div className="w-10 h-10 rounded-2xl bg-yellow-500/20 text-yellow-400 flex items-center justify-center font-bold">
+              <Crown className="w-5 h-5 fill-current" />
+            </div>
+          </div>
+
           <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 backdrop-blur-md shadow-xl flex items-center justify-between">
             <div>
               <p className="text-[10px] font-bold text-pink-300 uppercase tracking-wider">Pending Payments</p>
               <h3 className="text-2xl font-black text-pink-400 mt-0.5">{stats.pendingRequests}</h3>
+              <p className="text-[9px] text-pink-300/70 font-medium">Awaiting review</p>
             </div>
             <div className="w-10 h-10 rounded-2xl bg-pink-500/20 text-pink-400 flex items-center justify-center font-bold">
               <Clock className="w-5 h-5" />
@@ -778,36 +833,18 @@ export default function AdminPage() {
             <div>
               <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Approved Today</p>
               <h3 className="text-2xl font-black text-emerald-400 mt-0.5">{stats.approvedToday || 0}</h3>
+              <p className="text-[9px] text-slate-400 font-medium">{stats.rejectedToday || 0} rejected</p>
             </div>
             <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-              <CheckCircle2 className="w-5 h-5" />
+              <Check className="w-5 h-5" />
             </div>
           </div>
 
           <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 backdrop-blur-md shadow-xl flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Rejected Today</p>
-              <h3 className="text-2xl font-black text-rose-400 mt-0.5">{stats.rejectedToday || 0}</h3>
-            </div>
-            <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold">
-              <XCircle className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800 backdrop-blur-md shadow-xl flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">Active Subscriptions</p>
-              <h3 className="text-2xl font-black text-yellow-400 mt-0.5">{stats.vipUsers}</h3>
-            </div>
-            <div className="w-10 h-10 rounded-2xl bg-yellow-500/20 text-yellow-400 flex items-center justify-center font-bold">
-              <Crown className="w-5 h-5 fill-current" />
-            </div>
-          </div>
-
-          <div className="col-span-2 sm:col-span-1 p-4 rounded-3xl bg-slate-900/60 border border-slate-800 backdrop-blur-md shadow-xl flex items-center justify-between">
             <div>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Approved Revenue</p>
               <h3 className="text-2xl font-black text-white mt-0.5">₹{stats.totalApprovedRevenue || 0}</h3>
+              <p className="text-[9px] text-slate-400 font-medium">Verified payments</p>
             </div>
             <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold">
               <DollarSign className="w-5 h-5" />
@@ -1188,7 +1225,17 @@ export default function AdminPage() {
                     <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
                       <td className="px-5 py-3.5">
                         <span className="font-bold text-white block">@{u.username}</span>
-                        <span className="text-[10px] text-slate-400">{u.fullName}</span>
+                        <span className="text-[10px] text-slate-400 block">{u.fullName}</span>
+                        {u.hasLoggedIn ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] text-emerald-400 font-bold mt-0.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            Logged In
+                          </span>
+                        ) : (
+                          <span className="text-[9px] text-slate-500 font-medium block mt-0.5">
+                            Not logged in
+                          </span>
+                        )}
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2">
@@ -1321,6 +1368,49 @@ export default function AdminPage() {
         {/* TAB 3: USERS & CLERK AUTH */}
         {activeTab === 'USERS' && (
           <div className="space-y-4">
+            {/* Quick Metrics Bar for Users */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wider block">Total Users</span>
+                  <span className="text-xl font-black text-white">{usersSummary.totalUsers || stats.totalUsers || users.length}</span>
+                </div>
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold">
+                  <Users className="w-4 h-4" />
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider block">Logged In Users</span>
+                  <span className="text-xl font-black text-emerald-400">{usersSummary.loggedInUsers || stats.loggedInUsers || users.filter((u) => u.hasLoggedIn).length}</span>
+                </div>
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-yellow-400 font-bold uppercase tracking-wider block">VIP Members</span>
+                  <span className="text-xl font-black text-yellow-400">{usersSummary.vipUsers || stats.vipUsers || users.filter((u) => u.is_vip).length}</span>
+                </div>
+                <div className="w-8 h-8 rounded-xl bg-yellow-500/20 text-yellow-400 flex items-center justify-center font-bold">
+                  <Crown className="w-4 h-4 fill-current" />
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Free Members</span>
+                  <span className="text-xl font-black text-slate-300">{usersSummary.freeUsers || Math.max(0, (usersSummary.totalUsers || stats.totalUsers || users.length) - (usersSummary.vipUsers || stats.vipUsers))}</span>
+                </div>
+                <div className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center font-bold">
+                  <Shield className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-3xl bg-slate-900/80 border border-slate-800">
               <div className="relative flex-1 min-w-[240px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -1335,7 +1425,7 @@ export default function AdminPage() {
                   <span className="text-[10px] text-slate-500">
                     {userSearch.trim()
                       ? `Found ${users.length} matching user(s)`
-                      : 'Search a user to manage VIP'}
+                      : `Displaying ${users.length} user(s)`}
                   </span>
                   {userSearch.trim() && users.length === 1 && (
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -1414,17 +1504,32 @@ export default function AdminPage() {
                 </div>
             </div>
 
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-400">Plan:</span>
-                <select
-                  value={userPlanFilter}
-                  onChange={(e) => setUserPlanFilter(e.target.value as any)}
-                  className="px-3 py-2 rounded-xl bg-black/60 border border-slate-800 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
-                >
-                  <option value="all">All Users</option>
-                  <option value="vip">VIP Users Only</option>
-                  <option value="free">Free Users Only</option>
-                </select>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-slate-400">Login:</span>
+                  <select
+                    value={userLoginFilter}
+                    onChange={(e) => setUserLoginFilter(e.target.value as any)}
+                    className="px-3 py-2 rounded-xl bg-black/60 border border-slate-800 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
+                  >
+                    <option value="all">All Users</option>
+                    <option value="logged_in">Logged In Only</option>
+                    <option value="not_logged_in">Never Logged In</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-slate-400">Plan:</span>
+                  <select
+                    value={userPlanFilter}
+                    onChange={(e) => setUserPlanFilter(e.target.value as any)}
+                    className="px-3 py-2 rounded-xl bg-black/60 border border-slate-800 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-pink-500"
+                  >
+                    <option value="all">All Plans</option>
+                    <option value="vip">VIP Only</option>
+                    <option value="free">Free Only</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1435,9 +1540,10 @@ export default function AdminPage() {
                     <th className="px-5 py-3.5">User</th>
                     <th className="px-5 py-3.5">Photo</th>
                     <th className="px-5 py-3.5">Email (Clerk)</th>
+                    <th className="px-5 py-3.5">Login Status</th>
                     <th className="px-5 py-3.5">Clerk User ID</th>
                     <th className="px-5 py-3.5">Plan</th>
-                    <th className="px-5 py-3.5">Status</th>
+                    <th className="px-5 py-3.5">Account Status</th>
                     <th className="px-5 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -1469,6 +1575,34 @@ export default function AdminPage() {
                           <span className="font-mono text-pink-300 text-xs block">{u.email}</span>
                         ) : (
                           <span className="text-slate-500 text-xs">No email linked</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        {u.hasLoggedIn ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/30 w-fit">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              🟢 Logged In
+                            </span>
+                            {u.lastSignInAt ? (
+                              <span className="text-[9px] text-slate-400 font-mono">
+                                Last: {new Date(u.lastSignInAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-slate-400 font-mono">
+                                Registered &amp; Active
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold text-[10px] w-fit">
+                              ⚪ Never Logged In
+                            </span>
+                            <span className="text-[9px] text-slate-500">
+                              Pending sign-in
+                            </span>
+                          </div>
                         )}
                       </td>
                       <td className="px-5 py-3.5">

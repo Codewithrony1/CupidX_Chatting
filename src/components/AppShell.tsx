@@ -308,11 +308,7 @@ export default function AppShell({
               </Link>
 
               <Link href="/profile" className="flex items-center space-x-1.5 group">
-                <img
-                  src={user?.profile?.avatarUrl || `https://api.dicebear.com/7.x/fun-emoji/svg?seed=${user?.username || 'me'}`}
-                  alt={user?.displayName || user?.username ? `Profile picture for ${user?.displayName || user?.username}` : 'My profile picture'}
-                  className="w-8 h-8 rounded-full border border-pink-400/50 object-cover group-hover:scale-105 transition-transform"
-                />
+                <UserAvatar user={user} size="sm" className="group-hover:scale-105 transition-transform" />
               </Link>
             </div>
           </header>
