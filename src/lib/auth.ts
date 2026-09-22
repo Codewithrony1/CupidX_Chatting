@@ -88,6 +88,61 @@ export async function getOrCreateUserFromClerk(clerkId: string) {
       user.clerkUserId = cleanId;
     }
 
+    // Bi-directional VIP sync from Clerk publicMetadata (bridges localhost admin <-> production DB)
+    try {
+      const client = await clerkClient();
+      const cDetail = await client.users.getUser(cleanId);
+      const meta: any = cDetail?.publicMetadata || {};
+      const clerkVipExpiresAt = meta?.vip_expires_at ? new Date(meta.vip_expires_at) : null;
+      const isClerkVipActive =
+        Boolean(meta?.is_vip || meta?.membershipTier === 'VIP') &&
+        (!clerkVipExpiresAt || clerkVipExpiresAt.getTime() > Date.now());
+
+      if (isClerkVipActive && (!user.is_vip || user.membershipTier !== 'VIP')) {
+        const startDate = meta?.vip_started_at ? new Date(meta.vip_started_at) : new Date();
+        const expiresAt = clerkVipExpiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            is_vip: true,
+            membershipTier: 'VIP',
+            vip_started_at: startDate,
+            vip_expires_at: expiresAt,
+          },
+          include: { profile: true, subscription: true },
+        });
+
+        await prisma.subscription.upsert({
+          where: { userId: user.id },
+          create: {
+            userId: user.id,
+            plan: 'VIP',
+            isActive: true,
+            subscriptionStatus: 'ACTIVE',
+            startDate,
+            endDate: expiresAt,
+          },
+          update: {
+            plan: 'VIP',
+            isActive: true,
+            subscriptionStatus: 'ACTIVE',
+            startDate,
+            endDate: expiresAt,
+          },
+        });
+      } else if (!isClerkVipActive && meta?.is_vip === false && user.is_vip) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            is_vip: false,
+            membershipTier: 'FREE',
+            vip_expires_at: null,
+          },
+          include: { profile: true, subscription: true },
+        });
+      }
+    } catch (clerkSyncErr) {}
+
     // Self-healing check: if profile is not marked completed in Prisma, verify Clerk metadata
     if (!user.profileCompleted || !user.genderDobLocked || user.gender === 'unspecified' || !user.dob) {
       let isCompletedInCloud = false;

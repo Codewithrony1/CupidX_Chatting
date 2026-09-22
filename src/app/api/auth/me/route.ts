@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, signToken, getAuthCookieOptions } from '@/lib/auth';
 import { isUserVip } from '@/lib/vipAuth';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(req: Request) {
   try {
@@ -29,6 +30,53 @@ export async function GET(req: Request) {
       ].filter(Boolean).map((e) => e!.toLowerCase().trim());
       if (user.email && ADMIN_EMAILS.includes(user.email.toLowerCase().trim())) {
         user.role = 'ADMIN';
+      }
+
+      // Bi-directional VIP sync: if DB does not mark VIP, check Clerk metadata
+      if (!isUserVip(user) && user.clerkUserId) {
+        try {
+          const { clerkClient } = await import('@clerk/nextjs/server');
+          const client = await clerkClient();
+          const cDetail = await client.users.getUser(user.clerkUserId);
+          const meta: any = cDetail?.publicMetadata || {};
+          const clerkVipExpiresAt = meta?.vip_expires_at ? new Date(meta.vip_expires_at) : null;
+          const isClerkVip =
+            Boolean(meta?.is_vip || meta?.membershipTier === 'VIP') &&
+            (!clerkVipExpiresAt || clerkVipExpiresAt.getTime() > Date.now());
+
+          if (isClerkVip) {
+            const startDate = meta?.vip_started_at ? new Date(meta.vip_started_at) : new Date();
+            const expiresAt = clerkVipExpiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            user = await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                is_vip: true,
+                membershipTier: 'VIP',
+                vip_started_at: startDate,
+                vip_expires_at: expiresAt,
+              },
+              include: { profile: true, subscription: true },
+            });
+            await prisma.subscription.upsert({
+              where: { userId: user.id },
+              create: {
+                userId: user.id,
+                plan: 'VIP',
+                isActive: true,
+                subscriptionStatus: 'ACTIVE',
+                startDate,
+                endDate: expiresAt,
+              },
+              update: {
+                plan: 'VIP',
+                isActive: true,
+                subscriptionStatus: 'ACTIVE',
+                startDate,
+                endDate: expiresAt,
+              },
+            });
+          }
+        } catch (e) {}
       }
 
       const isVIP = isUserVip(user);
