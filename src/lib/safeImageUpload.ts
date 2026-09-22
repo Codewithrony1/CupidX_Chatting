@@ -72,11 +72,11 @@ export async function saveBase64Image(
     return { success: false, error: 'Empty image buffer.', statusCode: 400 };
   }
 
-  // 2. Strict 5 MB file size enforcement
+  // 2. Strict file size enforcement
   if (buffer.length > maxBytes) {
     return {
       success: false,
-      error: 'Image must be 5 MB or smaller.',
+      error: `Image must be ${Math.max(1, Math.round(maxBytes / (1024 * 1024)))} MB or smaller.`,
       statusCode: 400,
     };
   }

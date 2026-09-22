@@ -115,6 +115,7 @@ export default function TermsPage() {
               <li><strong className="text-rose-300">Non-Consensual Imagery:</strong> Transmitting non-consensual sexually explicit media, nude photos, or personal doxxing data.</li>
               <li><strong className="text-rose-300">Spam, Bots &amp; Phishing:</strong> Unsolicited advertising, affiliate links, automated bot scripts, or phishing malware.</li>
               <li><strong className="text-rose-300">Impersonation:</strong> Pretending to be platform moderators, administrators, or other real individuals.</li>
+              <li><strong className="text-rose-300">Inappropriate Profile Photos:</strong> Uploading custom VIP profile photos or avatars that contain nudity, sexually explicit material, violence, gore, hate speech, weapons, or unauthorized photos of others.</li>
               <li><strong className="text-rose-300">Unlawful Activity:</strong> Solicitation of illegal substances, prostitution, money laundering, or illegal trade.</li>
             </ul>
           </section>
@@ -134,14 +135,22 @@ export default function TermsPage() {
           <section className="space-y-3">
             <div className="flex items-center gap-2 text-base font-bold text-white">
               <CreditCard className="w-5 h-5 text-amber-400" />
-              <h2>6. VIP Subscriptions, Payment Processing &amp; Refund Terms</h2>
+              <h2>6. VIP Subscriptions, Payment Processing &amp; Custom Photo Guidelines</h2>
             </div>
             <p>
-              CupidX offers optional VIP subscriptions granting benefits such as image sharing and custom avatars.
+              CupidX offers optional VIP subscriptions granting benefits such as image sharing, custom avatars, and premium discovery.
             </p>
             <ul className="list-disc pl-5 space-y-1.5 text-slate-400">
               <li><strong className="text-white">India Pricing &amp; Methods:</strong> Monthly (₹29), 3 Months (₹99), Yearly (₹399). Payments are handled via manual UPI QR code scanning. Users submit their transaction reference (UTR) and proof screenshot for administrative review and activation.</li>
               <li><strong className="text-white">International Pricing:</strong> Monthly ($2) and Yearly ($12) via cryptocurrency/digital payment references.</li>
+              <li>
+                <strong className="text-white">VIP Custom Profile Photo Specifications:</strong> VIP members may upload a custom personal profile picture (avatar). All uploads must comply with the following technical specifications and content requirements:
+                <ul className="list-disc pl-5 mt-1 space-y-1 text-slate-400">
+                  <li><strong className="text-pink-300">File Constraints:</strong> Strictly <strong className="text-white">JPG, JPEG, and PNG</strong> formats only. Maximum file size is <strong className="text-white">2MB</strong>. Other file types (e.g. GIF, SVG, WebP) are prohibited.</li>
+                  <li><strong className="text-pink-300">Database Storage:</strong> Custom profile pictures are validated, optimized, and saved directly into our secure database to ensure persistent, high-performance rendering across random chats, friends lists, and matchmaking.</li>
+                  <li><strong className="text-pink-300">Content Integrity:</strong> Custom profile images must not depict nudity, sexually suggestive or pornographic content, violence, hate speech, weapons, or unauthorized photos of other people. Violations result in immediate removal of the photo and may lead to VIP revocation and account suspension without refund.</li>
+                </ul>
+              </li>
               <li><strong className="text-white">No Raw Card Storage:</strong> CupidX does not receive, process, or store credit card numbers, debit card numbers, CVVs, banking passwords, or UPI PINs.</li>
               <li><strong className="text-white">Refund Policy:</strong> VIP subscriptions are digital services that activate upon verification. All purchases are final and non-refundable once activated, except for verified duplicate transactions reported within 48 hours. See our full <Link href="/refund" className="text-pink-400 underline">Refund Policy</Link>.</li>
             </ul>

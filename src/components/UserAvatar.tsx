@@ -22,7 +22,10 @@ interface UserAvatarProps {
 }
 
 function UserAvatarComponent({ user, size = 'md', className = '', alt }: UserAvatarProps) {
-  const isVIP = user?.membershipTier === 'VIP' || (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
+  const isVIP =
+    user?.membershipTier === 'VIP' ||
+    (user as any)?.is_vip === true ||
+    (user?.subscription?.isActive === true && user?.subscription?.plan === 'VIP');
   const isImageAvatar = isVIP && user?.profile?.avatarType === 'IMAGE' && user?.profile?.avatarUrl;
   const avatarEmoji = user?.profile?.avatarEmoji || '😊';
   const resolvedAlt = alt || (user?.username ? `Profile picture for ${user.username}` : 'User avatar');

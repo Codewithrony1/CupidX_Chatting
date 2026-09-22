@@ -91,6 +91,15 @@ export default function PrivacyPage() {
                 <strong className="text-white">Account &amp; Profile Identity:</strong> Your verified email (managed securely via Clerk), unique @username, public display name, date of birth (collected solely to enforce the 18+ legal age gate), gender tag, and avatar emoji.
               </li>
               <li>
+                <strong className="text-white">VIP Custom Profile Photos:</strong> When a VIP member uploads a custom profile picture (avatar), we process and store the image under strict privacy standards:
+                <ul className="list-disc pl-5 mt-1 space-y-1 text-slate-400">
+                  <li><strong className="text-pink-300">File Limits:</strong> Supported formats are strictly <strong className="text-white">JPG, JPEG, and PNG</strong>, up to a maximum size of <strong className="text-white">2MB</strong>.</li>
+                  <li><strong className="text-pink-300">Database Storage:</strong> Validated image data is saved directly in our secure database linked with your user profile, avoiding ephemeral third-party hosting risks.</li>
+                  <li><strong className="text-pink-300">Visibility:</strong> Your custom photo is displayed to other users in random chat sessions, friends lists, and discovery matchmaking.</li>
+                  <li><strong className="text-pink-300">User Control &amp; Erasure:</strong> You may replace or remove your custom photo at any time in Edit Profile. When removed or upon account deletion, the image data is permanently purged from our database.</li>
+                </ul>
+              </li>
+              <li>
                 <strong className="text-white">Ephemeral Chat Messages:</strong> Real-time messages transmitted during random chat sessions. <em>Storage policy:</em> Strictly ephemeral. Messages are held in temporary memory during the active session and are permanently wiped when either participant clicks NEXT or disconnects.
               </li>
               <li>
@@ -122,6 +131,12 @@ export default function PrivacyPage() {
                 <span className="font-bold text-pink-300 block">Personal Profile Data: User-Controlled</span>
                 <p className="text-[11px] text-slate-400">
                   Retained until you update your profile or permanently delete your account.
+                </p>
+              </div>
+              <div className="p-3 rounded-2xl bg-black/40 border border-white/5 space-y-1">
+                <span className="font-bold text-pink-300 block">VIP Custom Profile Photos: Direct Database Storage &amp; User-Controlled Retention</span>
+                <p className="text-[11px] text-slate-400">
+                  Custom profile pictures (JPG, JPEG, PNG, max 2MB) are stored directly in our database. They remain active until replaced, switched to an emoji avatar, or permanently purged upon account deletion.
                 </p>
               </div>
               <div className="p-3 rounded-2xl bg-black/40 border border-white/5 space-y-1">

@@ -37,6 +37,7 @@ const isPublicRoute = createRouteMatcher([
   '/api/webhook(.*)',
   '/api/cron(.*)',
   '/api/social(.*)',
+  '/uploads(.*)',
 ]);
 
 const clerkHandler = clerkMiddleware(async (auth, req) => {

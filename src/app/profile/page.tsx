@@ -164,8 +164,24 @@ export default function ProfilePage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      alert('Image size must be less than 10MB');
+    // 1. Strict 2MB file size enforcement
+    const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2MB
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert('Image size must be 2MB or smaller.');
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    // 2. Strict format validation: JPG, JPEG, and PNG only
+    const validMimes = ['image/jpeg', 'image/png'];
+    const validExtensions = ['.jpg', '.jpeg', '.png'];
+    const lowerName = file.name.toLowerCase();
+    const hasValidExt = validExtensions.some((ext) => lowerName.endsWith(ext));
+    const hasValidMime = validMimes.includes(file.type.toLowerCase()) || file.type === '';
+
+    if (!hasValidExt || !hasValidMime) {
+      alert('Only JPG, JPEG, and PNG images are allowed.');
+      if (e.target) e.target.value = '';
       return;
     }
 
@@ -175,18 +191,18 @@ export default function ProfilePage() {
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        const maxDim = 600;
+        const maxDim = 500;
         let width = img.width;
         let height = img.height;
 
         if (width > height) {
           if (width > maxDim) {
-            height *= maxDim / width;
+            height = Math.round((height * maxDim) / width);
             width = maxDim;
           }
         } else {
           if (height > maxDim) {
-            width *= maxDim / height;
+            width = Math.round((width * maxDim) / height);
             height = maxDim;
           }
         }
@@ -195,12 +211,20 @@ export default function ProfilePage() {
         canvas.height = height;
         ctx?.drawImage(img, 0, 0, width, height);
 
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+        const isPng = file.type === 'image/png' || lowerName.endsWith('.png');
+        const outputMime = isPng ? 'image/png' : 'image/jpeg';
+        const compressedBase64 = canvas.toDataURL(outputMime, 0.85);
         setImagePreview(compressedBase64);
         setAvatarData(compressedBase64);
         setAvatarType('IMAGE');
       };
+      img.onerror = () => {
+        alert('Failed to process the selected image. Please try another image.');
+      };
       img.src = event.target?.result as string;
+    };
+    reader.onerror = () => {
+      alert('Error reading image file.');
     };
     reader.readAsDataURL(file);
   };
@@ -220,6 +244,8 @@ export default function ProfilePage() {
       // Save directly to Authoritative Database API
       const effectiveClerkId = user?.clerkUserId || user?.id || user?.uid;
       const token = await getToken().catch(() => null);
+      const isRemovingAvatar = isVIP && avatarType === 'EMOJI' && !avatarData && Boolean(avatarUrl);
+
       const res = await fetch('/api/profile', {
         method: 'PUT',
         headers: {
@@ -243,6 +269,7 @@ export default function ProfilePage() {
           avatarType: isVIP ? avatarType : undefined,
           avatarEmoji: isVIP ? avatarEmoji : undefined,
           avatarData: isVIP ? (avatarData || undefined) : undefined,
+          avatarUrl: isRemovingAvatar ? null : undefined,
         }),
       });
 
@@ -250,6 +277,13 @@ export default function ProfilePage() {
       if (res.ok) {
         setSaveSuccess(true);
         setIsEditingBio(false);
+        if (data.profile?.avatarUrl) {
+          setAvatarUrl(data.profile.avatarUrl);
+        } else if (isRemovingAvatar || avatarType === 'EMOJI') {
+          setAvatarUrl(null);
+          setImagePreview(null);
+        }
+        setAvatarData('');
         await refreshUser();
         setTimeout(() => setSaveSuccess(false), 3000);
       } else if (res.status === 403 && data.isVipRequired) {
@@ -413,11 +447,12 @@ export default function ProfilePage() {
                   if (!isVIP) {
                     setShowVipLockModal(true);
                   } else {
+                    if (fileInputRef.current) fileInputRef.current.value = '';
                     fileInputRef.current?.click();
                   }
                 }}
                 className="absolute -bottom-1 -right-1 p-2 rounded-2xl bg-gradient-to-tr from-pink-600 to-rose-500 text-white shadow-lg border border-white/20 hover:scale-110 transition-transform cursor-pointer"
-                title={isVIP ? 'Upload Custom Image DP' : 'Custom Image DP requires VIP'}
+                title={isVIP ? 'Upload Custom Image DP (JPG/JPEG/PNG, Max 2MB)' : 'Custom Image DP requires VIP'}
               >
                 {isVIP ? <Camera className="w-4 h-4" /> : <Lock className="w-4 h-4 text-yellow-300" />}
               </button>
@@ -425,7 +460,7 @@ export default function ProfilePage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                 onChange={(e) => {
                   if (!isVIP) {
                     setShowVipLockModal(true);
@@ -501,6 +536,7 @@ export default function ProfilePage() {
                       onClick={() => {
                         setAvatarType('IMAGE');
                         if (!imagePreview && !avatarUrl) {
+                          if (fileInputRef.current) fileInputRef.current.value = '';
                           fileInputRef.current?.click();
                         }
                       }}
@@ -541,28 +577,54 @@ export default function ProfilePage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-2 text-center">
-                      <p className="text-xs text-pink-200/80">Custom image is set as active profile picture.</p>
-                      <div className="flex justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="px-3 py-1.5 rounded-xl bg-pink-500/20 text-pink-300 font-bold text-xs border border-pink-500/30 hover:bg-pink-500/30 transition-colors"
-                        >
-                          Replace Image
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAvatarType('EMOJI');
-                            setImagePreview(null);
-                            setAvatarData('');
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold text-xs border border-rose-500/30 hover:bg-rose-500/30 transition-colors"
-                        >
-                          Remove Image
-                        </button>
-                      </div>
+                    <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-2.5 text-center">
+                      {imagePreview || avatarUrl ? (
+                        <>
+                          <p className="text-xs text-pink-200 font-semibold">Custom photo set as active VIP profile picture.</p>
+                          <p className="text-[10px] text-pink-300/70">JPG, JPEG, PNG only • Maximum 2MB • Saved in database</p>
+                          <div className="flex justify-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (fileInputRef.current) fileInputRef.current.value = '';
+                                fileInputRef.current?.click();
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-pink-500/20 text-pink-300 font-bold text-xs border border-pink-500/30 hover:bg-pink-500/30 transition-colors cursor-pointer"
+                            >
+                              Replace Image
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAvatarType('EMOJI');
+                                setImagePreview(null);
+                                setAvatarData('');
+                                setAvatarUrl(null);
+                                if (fileInputRef.current) fileInputRef.current.value = '';
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 font-bold text-xs border border-rose-500/30 hover:bg-rose-500/30 transition-colors cursor-pointer"
+                            >
+                              Remove Image
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="py-2 space-y-2">
+                          <p className="text-xs text-pink-200 font-semibold">No custom photo selected yet</p>
+                          <p className="text-[10px] text-pink-300/70">JPG, JPEG, PNG only • Max 2MB</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (fileInputRef.current) fileInputRef.current.value = '';
+                              fileInputRef.current?.click();
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 text-white font-bold text-xs shadow-md hover:scale-105 transition-all cursor-pointer"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Choose Photo</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

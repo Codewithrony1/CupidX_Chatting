@@ -260,23 +260,77 @@ export async function PUT(req: Request) {
       );
     }
 
-    let avatarUrl = avatarUrlPreset !== undefined ? avatarUrlPreset : undefined;
+    let avatarUrl: string | null | undefined =
+      avatarUrlPreset !== undefined
+        ? avatarUrlPreset
+        : (body.avatarUrl !== undefined ? body.avatarUrl : undefined);
 
     if (isUpdatingVIPAvatarImage && isVIP && avatarData) {
-      const previousAvatarUrl = user.profile?.avatarUrl || null;
-      const uploadRes = await saveBase64Image(avatarData, 'uploads', user.username);
-      if (uploadRes.success && uploadRes.url) {
-        avatarUrl = uploadRes.url;
-        // Remove the previous custom avatar after the new image is safely stored.
-        if (previousAvatarUrl && previousAvatarUrl !== avatarUrl) {
-          await deleteStoredImage(previousAvatarUrl);
-        }
-      } else {
+      // 1. Resilient base64 payload extraction
+      const commaIdx = avatarData.indexOf(',');
+      const rawBase64 = commaIdx !== -1 ? avatarData.slice(commaIdx + 1) : avatarData;
+      const cleanBase64 = rawBase64.replace(/\s+/g, '');
+
+      if (!cleanBase64) {
+        return NextResponse.json({ error: 'Empty image payload.' }, { status: 400 });
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = Buffer.from(cleanBase64, 'base64');
+      } catch (err) {
+        return NextResponse.json({ error: 'Invalid base64 image data.' }, { status: 400 });
+      }
+
+      if (buffer.length === 0) {
+        return NextResponse.json({ error: 'Empty image buffer.' }, { status: 400 });
+      }
+
+      // 2. Strict 2MB file size enforcement (User requirement: max 2MB)
+      const MAX_BYTES = 2 * 1024 * 1024; // 2MB
+      if (buffer.length > MAX_BYTES) {
         return NextResponse.json(
-          { error: uploadRes.error || 'Failed to process avatar image.' },
-          { status: uploadRes.statusCode || 400 }
+          { error: 'Image size must be 2MB or smaller.' },
+          { status: 400 }
         );
       }
+
+      // 3. Binary Magic Bytes Validation: JPG, JPEG, and PNG ONLY
+      const isPng =
+        buffer.length >= 8 &&
+        buffer[0] === 0x89 &&
+        buffer[1] === 0x50 &&
+        buffer[2] === 0x4e &&
+        buffer[3] === 0x47;
+
+      const isJpg =
+        buffer.length >= 3 &&
+        buffer[0] === 0xff &&
+        buffer[1] === 0xd8 &&
+        buffer[2] === 0xff;
+
+      if (!isPng && !isJpg) {
+        return NextResponse.json(
+          { error: 'Invalid image format. Only JPG, JPEG, and PNG images are allowed.' },
+          { status: 400 }
+        );
+      }
+
+      // 4. Save directly in the database as base64 Data URI
+      const mimeType = isPng ? 'image/png' : 'image/jpeg';
+      avatarUrl = `data:${mimeType};base64,${cleanBase64}`;
+
+      // Clean up previous disk-stored image if one existed
+      const previousAvatarUrl = user.profile?.avatarUrl || null;
+      if (previousAvatarUrl && !previousAvatarUrl.startsWith('data:')) {
+        try {
+          await deleteStoredImage(previousAvatarUrl);
+        } catch (e) {
+          // ignore cleanup errors
+        }
+      }
+    } else if (avatarType === 'EMOJI' && (body.avatarUrl === null || body.removeAvatarImage)) {
+      avatarUrl = null;
     }
 
     // Calculate mood expiration timestamp
@@ -330,7 +384,14 @@ export async function PUT(req: Request) {
       saveChatHistory: saveChatHistory !== undefined ? Boolean(saveChatHistory) : undefined,
       interests: interests !== undefined ? interests : undefined,
       themePreference: themePreference !== undefined ? themePreference : undefined,
-      avatarType: avatarType !== undefined ? avatarType : undefined,
+      avatarType:
+        avatarUrl && avatarUrl.startsWith('data:image/')
+          ? 'IMAGE'
+          : avatarUrl === null
+          ? 'EMOJI'
+          : avatarType !== undefined
+          ? avatarType
+          : undefined,
       avatarEmoji: avatarEmoji !== undefined ? avatarEmoji : undefined,
       avatarUrl: avatarUrl !== undefined ? avatarUrl : undefined,
     };
