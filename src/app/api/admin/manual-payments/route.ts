@@ -59,7 +59,7 @@ export async function POST(req: Request) {
         where: { id: payment.id },
         data: {
           status: 'PAID',
-          reviewedByUserId: user.id,
+          reviewedByUserId: user!.id,
           reviewedAt: new Date(),
         },
       });
@@ -109,7 +109,7 @@ export async function POST(req: Request) {
         data: {
           status: 'REJECTED',
           rejectionReason: rejectionReason || 'Payment verification failed or invalid UTR.',
-          reviewedByUserId: user.id,
+          reviewedByUserId: user!.id,
           reviewedAt: new Date(),
         },
       });

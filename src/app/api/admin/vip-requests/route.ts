@@ -68,7 +68,7 @@ export async function POST(req: Request) {
         data: {
           status: 'approved',
           reviewedAt: now,
-          reviewedBy: user.username,
+          reviewedBy: user!.username,
         },
       });
 
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
       // 4. Log Admin Action in AdminLog audit trail
       await prisma.adminLog.create({
         data: {
-          adminUserId: user.id,
+          adminUserId: user!.id,
           action: 'APPROVE_VIP',
           targetUserId: vipReq.userId,
           details: `Approved VIP request (${vipReq.method}) for ₹${vipReq.amount}`,
@@ -126,14 +126,14 @@ export async function POST(req: Request) {
           status: 'rejected',
           rejectionReason: rejectionReason || 'Verification failed. Invalid proof or transaction hash.',
           reviewedAt: now,
-          reviewedBy: user.username,
+          reviewedBy: user!.username,
         },
       });
 
       // Log Admin Action
       await prisma.adminLog.create({
         data: {
-          adminUserId: user.id,
+          adminUserId: user!.id,
           action: 'REJECT_VIP',
           targetUserId: vipReq.userId,
           details: `Rejected VIP request (${vipReq.method}). Reason: ${rejectionReason || 'Verification failed'}`,

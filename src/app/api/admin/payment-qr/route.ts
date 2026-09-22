@@ -117,7 +117,7 @@ export async function POST(req: Request) {
     // Log admin action
     await prisma.adminLog.create({
       data: {
-        adminUserId: admin.id,
+        adminUserId: admin!.id,
         action: 'UPDATE_PAYMENT_QR',
         details: `Updated ${region} payment QR to ${savedQrUrl || 'unchanged'}`,
       },
