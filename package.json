@@ -52,5 +52,12 @@
   },
   "prisma": {
     "seed": "node prisma/seed.js"
+  },
+  "allowScripts": {
+    "@prisma/engines": true,
+    "better-sqlite3": true,
+    "prisma": true,
+    "sharp": true,
+    "unrs-resolver": true
   }
 }
