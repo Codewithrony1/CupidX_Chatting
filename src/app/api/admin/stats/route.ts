@@ -10,7 +10,20 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Admin authorization required' }, { status: 403 });
     }
 
-    const totalUsers = await prisma.user.count();
+    let totalUsers = await prisma.user.count().catch(() => 0);
+
+    // Sync live Clerk user count if available
+    try {
+      const { clerkClient } = await import('@clerk/nextjs/server');
+      const client = await clerkClient();
+      const clerkCount = await client.users.getCount();
+      if (typeof clerkCount === 'number' && clerkCount > totalUsers) {
+        totalUsers = clerkCount;
+      }
+    } catch (e) {
+      // Graceful fallback to database user count
+    }
+
     const vipUsers = await prisma.user.count({
       where: {
         OR: [
@@ -18,19 +31,19 @@ export async function GET(req: Request) {
           { membershipTier: 'VIP' },
         ],
       },
-    });
+    }).catch(() => 0);
 
     const pendingRequests = await prisma.paymentRequest.count({
       where: { status: 'pending' },
-    });
+    }).catch(() => 0);
 
     const approvedRequests = await prisma.paymentRequest.count({
       where: { status: 'approved' },
-    });
+    }).catch(() => 0);
 
     const activeChats = await prisma.chatSession.count({
       where: { status: 'ACTIVE' },
-    });
+    }).catch(() => 0);
 
     const totalMessages = await prisma.message.count().catch(() => 0);
 

@@ -15,11 +15,18 @@ export async function POST(
 
     const { id } = await props.params;
 
-    const user = await prisma.user.findFirst({
+    let user = await prisma.user.findFirst({
       where: {
         OR: [{ id }, { clerkUserId: id }],
       },
     });
+
+    if (!user) {
+      try {
+        const { getOrCreateUserFromClerk } = await import('@/lib/auth');
+        user = await getOrCreateUserFromClerk(id);
+      } catch (err) {}
+    }
 
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });

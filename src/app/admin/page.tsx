@@ -1142,7 +1142,9 @@ export default function AdminPage() {
                 <thead className="bg-black/40 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
                   <tr>
                     <th className="px-5 py-3.5">Customer</th>
+                    <th className="px-5 py-3.5">Photo</th>
                     <th className="px-5 py-3.5">Email</th>
+                    <th className="px-5 py-3.5">Clerk ID</th>
                     <th className="px-5 py-3.5">Subscription Status</th>
                     <th className="px-5 py-3.5">Expires At</th>
                     <th className="px-5 py-3.5 text-right">Actions</th>
@@ -1298,14 +1300,25 @@ export default function AdminPage() {
                         <span className="text-[10px] text-slate-400">{u.fullName}</span>
                       </td>
                       <td className="px-5 py-3.5">
+                        <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 border border-white/10 flex items-center justify-center shrink-0">
+                          {u.avatarUrl ? (
+                            <img src={u.avatarUrl} alt={u.username} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-sm">😊</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5">
                         {u.email ? (
-                          <span className="font-mono text-pink-300">{u.email}</span>
+                          <span className="font-mono text-pink-300 text-xs block">{u.email}</span>
                         ) : (
-                          <span className="text-slate-500">No email linked</span>
+                          <span className="text-slate-500 text-xs">No email linked</span>
                         )}
                       </td>
-                      <td className="px-5 py-3.5 font-mono text-slate-400 text-[10px]">
-                        {u.clerkUserId || 'N/A'}
+                      <td className="px-5 py-3.5">
+                        <span className="font-mono text-indigo-300 text-[10px] bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-800/40">
+                          {u.clerkUserId || 'N/A'}
+                        </span>
                       </td>
                       <td className="px-5 py-3.5">
                         {u.is_vip ? (
@@ -1319,15 +1332,22 @@ export default function AdminPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5">
-                        {u.isSuspended ? (
-                          <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-bold">
-                            Suspended
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-                            Active
-                          </span>
-                        )}
+                        <div className="flex flex-col gap-1 items-start">
+                          {u.isSuspended ? (
+                            <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-bold">
+                              Suspended
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                              Active
+                            </span>
+                          )}
+                          {(u as any).source === 'CLERK_ONLY' && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              Clerk Auth
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-3.5 text-right space-x-2">
                         <button
