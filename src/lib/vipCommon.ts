@@ -31,30 +31,36 @@ export const DEFAULT_BIO = "Hey there! I am using CupidX.";
 
 export function isUserVip(user: any): boolean {
   if (!user) return false;
-  const now = new Date();
+  const now = Date.now();
 
   // 1. Explicit vip_expires_at on User - if set and expired, immediately revoke VIP
-  if (user.vip_expires_at && new Date(user.vip_expires_at).getTime() <= now.getTime()) {
-    return false;
+  if (user.vip_expires_at) {
+    const exp = new Date(user.vip_expires_at).getTime();
+    if (!isNaN(exp) && exp <= now) {
+      return false;
+    }
   }
 
   // 2. Subscription period check
   if (user.subscription) {
     const sub = user.subscription;
     const subEnd = sub.endDate || sub.currentPeriodEnd;
-    if (subEnd && new Date(subEnd).getTime() <= now.getTime()) {
-      return false;
-    }
-    if (sub.isActive === true && sub.plan === 'VIP') {
-      return true;
+    const subExp = subEnd ? new Date(subEnd).getTime() : 0;
+    if (Boolean(sub.isActive) && sub.plan === 'VIP') {
+      if (!subEnd || (!isNaN(subExp) && subExp > now)) {
+        return true;
+      }
     }
   }
 
-  // 3. User VIP flags
-  if (user.is_vip || user.membershipTier === 'VIP' || user.isVIP) {
-    if (!user.vip_expires_at || new Date(user.vip_expires_at).getTime() > now.getTime()) {
-      return true;
+  // 3. User VIP flags (set by admin direct activation / approval)
+  const isVipFlag = Boolean(user.is_vip || user.isVIP || user.membershipTier === 'VIP');
+  if (isVipFlag) {
+    if (user.vip_expires_at) {
+      const exp = new Date(user.vip_expires_at).getTime();
+      return !isNaN(exp) && exp > now;
     }
+    return true;
   }
 
   return false;

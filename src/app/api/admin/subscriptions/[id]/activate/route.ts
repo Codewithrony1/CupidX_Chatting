@@ -93,6 +93,14 @@ export async function POST(
       },
     });
 
+    await prisma.notification.create({
+      data: {
+        userId: user.id,
+        type: 'VIP_UPGRADED',
+        content: `👑 VIP Activated! Your account has been upgraded to VIP for ${days} days (expires ${expiresAt.toLocaleDateString()}).`,
+      },
+    }).catch(() => {});
+
     // Sync Clerk metadata
     try {
       const targetClerkId = user.clerkUserId || user.id;

@@ -15,6 +15,13 @@ function getRawConnectionString(): string {
 }
 
 function getIsPostgres(): boolean {
+  const rawUrl = getRawConnectionString();
+  if (rawUrl.startsWith('postgresql://') || rawUrl.startsWith('postgres://')) {
+    return true;
+  }
+  if (rawUrl.startsWith('file:') || rawUrl.includes('.db')) {
+    return false;
+  }
   try {
     const path = require('path');
     const fs = require('fs');
@@ -26,8 +33,7 @@ function getIsPostgres(): boolean {
     }
   } catch {}
 
-  const rawUrl = getRawConnectionString();
-  return rawUrl.startsWith('postgresql://') || rawUrl.startsWith('postgres://');
+  return false;
 }
 
 function cleanConnectionString(raw: string): string {

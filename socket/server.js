@@ -275,27 +275,46 @@ async function getCachedUserData(userId) {
       include: { profile: true, subscription: true },
     });
 
-    const now = new Date();
+    const now = Date.now();
     let isVIP = false;
 
     if (userDb) {
-      if (userDb.vip_expires_at && new Date(userDb.vip_expires_at).getTime() <= now.getTime()) {
-        isVIP = false;
-      } else if (userDb.subscription) {
-        const subEnd = userDb.subscription.endDate || userDb.subscription.currentPeriodEnd;
-        if (subEnd && new Date(subEnd).getTime() <= now.getTime()) {
-          isVIP = false;
-        } else if (userDb.subscription.isActive === true && userDb.subscription.plan === 'VIP') {
-          isVIP = true;
+      // 1. If explicit vip_expires_at is expired, revoke VIP
+      let isExpired = false;
+      if (userDb.vip_expires_at) {
+        const exp = new Date(userDb.vip_expires_at).getTime();
+        if (!isNaN(exp) && exp <= now) {
+          isExpired = true;
         }
       }
 
-      if (!isVIP && (userDb.is_vip || userDb.membershipTier === 'VIP')) {
-        if (!userDb.vip_expires_at || new Date(userDb.vip_expires_at).getTime() > now.getTime()) {
-          isVIP = true;
+      if (!isExpired) {
+        // 2. Subscription check
+        if (userDb.subscription) {
+          const sub = userDb.subscription;
+          const subEnd = sub.endDate || sub.currentPeriodEnd;
+          const subExp = subEnd ? new Date(subEnd).getTime() : 0;
+          if (Boolean(sub.isActive) && sub.plan === 'VIP') {
+            if (!subEnd || (!isNaN(subExp) && subExp > now)) {
+              isVIP = true;
+            }
+          }
+        }
+
+        // 3. User flags check
+        if (!isVIP && (Boolean(userDb.is_vip) || userDb.membershipTier === 'VIP')) {
+          if (userDb.vip_expires_at) {
+            const exp = new Date(userDb.vip_expires_at).getTime();
+            if (!isNaN(exp) && exp > now) {
+              isVIP = true;
+            }
+          } else {
+            isVIP = true;
+          }
         }
       }
     }
+
 
     const userInterests = userDb?.profile?.interests
       ? userDb.profile.interests.split(',').map((s) => s.trim().toLowerCase())

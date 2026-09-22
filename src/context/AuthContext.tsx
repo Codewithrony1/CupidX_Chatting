@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useRouter, usePathname } from 'next/navigation';
 import { useUser, useClerk, useAuth as useClerkAuth, useSignIn, useSignUp } from '@clerk/nextjs';
 import { calculateDobAge } from '@/lib/validation/dob';
+import { isUserVip } from '@/lib/vipCommon';
 
 export interface UserProfile {
   id: string;
@@ -165,11 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
 
       const rawVipExpiresAt = backendUser?.vip_expires_at || null;
-      // BUGFIX: < not <= because <= would mark a future expiry as expired
-      const isVipExpired = rawVipExpiresAt ? new Date(rawVipExpiresAt).getTime() < Date.now() : false;
-      const hasVipFlag = Boolean(backendUser?.is_vip || backendUser?.membershipTier === 'VIP');
-      const hasActiveSubscription = backendUser?.subscription?.isActive === true && backendUser?.subscription?.plan === 'VIP';
-      const isVipActive = !isVipExpired && (hasVipFlag || hasActiveSubscription);
+      const isVipActive = isUserVip(backendUser);
 
       const resolvedProfile: UserProfile = {
         id: backendUser?.id || cUser.id,
@@ -245,6 +242,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
   }, [isLoaded, isSignedIn, clerkUser]);
+
+  // ─── 1b. Window focus & visibility revalidation for instant VIP sync ───────
+  useEffect(() => {
+    if (!isSignedIn || !clerkUser) return;
+
+    const handleRevalidate = () => {
+      currentInitUidRef.current = null;
+      initializeUserSession(clerkUser);
+    };
+
+    window.addEventListener('focus', handleRevalidate);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleRevalidate();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('focus', handleRevalidate);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [isSignedIn, clerkUser]);
 
   // ─── 2. Route Guard ──────────────────────────────────────────────────────────
   useEffect(() => {
