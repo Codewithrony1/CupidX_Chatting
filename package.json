@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "cross-env ADMIN_MODE=true next dev -H 127.0.0.1 -p 3000",
     "admin": "cross-env ADMIN_MODE=true next dev -H 127.0.0.1 -p 3001",
-    "build": "node prisma/ensure-schema.js && prisma generate && next build",
+    "build": "node prisma/ensure-schema.js && node prisma/ensure-pg-schema.js && prisma generate && next build",
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",

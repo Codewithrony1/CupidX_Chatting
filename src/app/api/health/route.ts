@@ -28,6 +28,20 @@ export async function GET() {
     await prisma.$queryRaw`SELECT 1 as health_check`;
     dbLatencyMs = Date.now() - dbStart;
     dbStatus = 'connected';
+
+    // Verify User table exists in PostgreSQL
+    try {
+      await prisma.user.findFirst({ select: { id: true } });
+    } catch (tableErr: any) {
+      if (String(tableErr?.message || tableErr).includes('does not exist')) {
+        console.log('[HEALTH] User table missing. Executing ensurePgSchema()...');
+        const { ensurePgSchema } = await import('../../../../prisma/ensure-pg-schema.js');
+        await ensurePgSchema();
+        await prisma.user.findFirst({ select: { id: true } });
+      } else {
+        throw tableErr;
+      }
+    }
   } catch (err: any) {
     dbStatus = `error: ${err?.message || String(err)}`;
   }
