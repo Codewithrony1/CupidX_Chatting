@@ -193,8 +193,10 @@ export default function OnboardingPage() {
     user.username &&
     !user.username.startsWith('user_') &&
     (user.profileCompleted ||
+     user.profileLocked ||
      (user as any)?.genderDobLocked ||
      user?.profile?.ageGenderConfirmed ||
+     user?.profile?.profileCompleted ||
      ((user?.dateOfBirth || user?.profile?.dateOfBirth) && user?.gender && user?.gender !== 'unspecified' && (user?.fullName || user?.displayName)))
   );
 
@@ -205,12 +207,11 @@ export default function OnboardingPage() {
     }
   }, [authLoading, user, directClerkUser, clerkUser, router]);
 
-  // If already complete, redirect to /dashboard
+  // If already complete (and not in the middle of submitting), redirect to /dashboard
   useEffect(() => {
-    if (!authLoading && user) {
-      if (isProfileComplete && !submitting) {
-        router.replace('/dashboard');
-      }
+    if (submitting) return; // Don't interfere during form submission - onboarding handles its own redirect
+    if (!authLoading && user && isProfileComplete) {
+      router.replace('/dashboard');
     }
   }, [user, authLoading, isProfileComplete, submitting, router]);
 

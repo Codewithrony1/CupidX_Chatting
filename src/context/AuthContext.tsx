@@ -119,14 +119,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   /**
    * Initializes user profile from the canonical Clerk + Prisma backend (/api/auth/me)
    */
-  const initializeUserSession = async (cUser: any): Promise<UserProfile | null> => {
+  const initializeUserSession = async (cUser: any, forceRefresh = false): Promise<UserProfile | null> => {
     if (!cUser) {
       currentInitUidRef.current = null;
       setUser(null);
       return null;
     }
 
-    if (currentInitUidRef.current === cUser.id && user) {
+    // Skip re-fetch only if same user AND not a forced refresh (e.g. after onboarding)
+    if (!forceRefresh && currentInitUidRef.current === cUser.id && user) {
       return user;
     }
     currentInitUidRef.current = cUser.id;
@@ -224,7 +225,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     if (clerkUser) {
       currentInitUidRef.current = null;
-      await initializeUserSession(clerkUser);
+      await initializeUserSession(clerkUser, true);
     }
   }, [clerkUser]);
 
@@ -342,7 +343,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Authenticated user with incomplete profile visits /chat or any protected route (other than /setup-profile) -> redirect to /setup-profile
-      if (!isPublic && !isSetupProfilePage && !isComplete) {
+      // IMPORTANT: Only redirect if user object is loaded (not null) - prevents redirect loop on fresh dashboard load
+      if (!isPublic && !isSetupProfilePage && !isComplete && user !== null) {
         if (isNavigatingRef.current) return;
         isNavigatingRef.current = true;
         console.log('[AUTH GUARD] Incomplete profile on protected route -> redirecting to /setup-profile');
