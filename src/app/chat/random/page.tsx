@@ -240,15 +240,7 @@ function ModeLanding({
               <div className="text-[11px] text-slate-400 mt-0.5">Talk with a stranger via voice</div>
             </div>
             <div className="ml-auto">
-              {isVIP ? (
-                <div className="text-[10px] font-bold text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <Crown className="w-2.5 h-2.5" /> VIP
-                </div>
-              ) : (
-                <div className="text-[10px] font-bold text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <Crown className="w-2.5 h-2.5" /> VIP
-                </div>
-              )}
+              <div className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">Free</div>
             </div>
           </motion.button>
 
@@ -267,9 +259,7 @@ function ModeLanding({
               <div className="text-[11px] text-slate-400 mt-0.5">Face-to-face with a stranger</div>
             </div>
             <div className="ml-auto">
-              <div className="text-[10px] font-bold text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <Crown className="w-2.5 h-2.5" /> VIP
-              </div>
+              <div className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">Free</div>
             </div>
           </motion.button>
         </div>
@@ -835,12 +825,7 @@ export default function RandomChatPage() {
       if (isMatchmakingStartingRef.current) return;
       isMatchmakingStartingRef.current = true;
 
-      // VIP gate for audio/video
-      if ((mode === 'AUDIO' || mode === 'VIDEO') && !isVIP) {
-        setShowVipModal(true);
-        isMatchmakingStartingRef.current = false;
-        return;
-      }
+      
 
       setConnectionState('SEARCHING');
       setMatchStatus('searching');
@@ -884,7 +869,7 @@ export default function RandomChatPage() {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
           },
-          body: JSON.stringify({ skipCurrentMatch: skipCurrent, ...preferences }),
+          body: JSON.stringify({ skipCurrentMatch: true, ...preferences }),
         });
 
         if (!res.ok) {
@@ -912,6 +897,14 @@ export default function RandomChatPage() {
             setReconnecting(false);
             setMessages([]);
             isMatchmakingStartingRef.current = false;
+            if (data.mode && data.mode !== 'TEXT') {
+              const offerer = Boolean(data.isOfferer);
+              setIsOfferer(offerer);
+              isOffererRef.current = offerer;
+              setTimeout(() => {
+                webrtcInitSessionRef.current(offerer);
+              }, 300);
+            }
             return;
           }
         }
@@ -950,6 +943,14 @@ export default function RandomChatPage() {
                 setConnectionState('CONNECTED');
                 setReconnecting(false);
                 setMessages([]);
+                if (statusData.mode && statusData.mode !== 'TEXT') {
+                  const offerer = Boolean(statusData.isOfferer);
+                  setIsOfferer(offerer);
+                  isOffererRef.current = offerer;
+                  setTimeout(() => {
+                    webrtcInitSessionRef.current(offerer);
+                  }, 300);
+                }
               }
             }
           } catch (e) {}
@@ -962,7 +963,7 @@ export default function RandomChatPage() {
   // ── Check availability & auto-start ─────────────────────────────────────────
   useEffect(() => {
     let isMounted = true;
-    if (currentUser?.id && !autoStartExecutedRef.current) {
+    if (!autoStartExecutedRef.current) {
       autoStartExecutedRef.current = true;
       fetch('/api/settings/random-chat')
         .then((res) => res.json())
@@ -976,7 +977,6 @@ export default function RandomChatPage() {
             setMatchStatus('idle');
           } else {
             setRandomChatDisabled(false);
-            // Show mode selection first
             setMatchStatus('mode_select');
           }
         })
@@ -988,13 +988,76 @@ export default function RandomChatPage() {
         });
     }
     return () => { isMounted = false; };
-  }, [currentUser?.id]);
+  }, []);
+
+  // ─── Realtime HTTP Message & Session Sync (when socket is disconnected) ────
+  useEffect(() => {
+    if (matchStatus !== 'connected' || !matchId) return;
+    if (socketConnected) return;
+
+    const interval = setInterval(async () => {
+      const currentMid = activeMatchIdRef.current || matchId;
+      if (!currentMid) return;
+
+      try {
+        const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+        const res = await fetch(`/api/chat/messages?chatSessionId=${currentMid}`, {
+          headers: {
+            ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.sessionStatus === 'ENDED') {
+            cleanupSessionRef.current();
+            setConnectionState('DISCONNECTED');
+            setMatchStatus('ended');
+            return;
+          }
+          if (Array.isArray(data.messages)) {
+            setMessages((prev) => {
+              const prevIds = new Set(prev.map((m) => m.id));
+              const prevClientIds = new Set(prev.map((m) => m.clientMessageId).filter(Boolean));
+              const newMsgs = data.messages.filter(
+                (m: any) => !prevIds.has(m.id) && (!m.clientMessageId || !prevClientIds.has(m.clientMessageId))
+              );
+
+              if (newMsgs.length === 0) return prev;
+
+              // Acknowledge receipt of partner messages
+              const partnerMsgs = newMsgs.filter((m: any) => m.senderId !== currentUidRef.current);
+              partnerMsgs.forEach((pm: any) => {
+                fetch('/api/chat/messages/ack', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    messageId: pm.id,
+                    clientMessageId: pm.clientMessageId,
+                    chatSessionId: currentMid,
+                  }),
+                }).catch(() => {});
+              });
+
+              const updated = [...prev, ...newMsgs];
+              return updated.sort((a, b) => {
+                const seqA = a.sequenceNumber || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+                const seqB = b.sequenceNumber || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+                return seqA - seqB;
+              });
+            });
+          }
+        }
+      } catch (err) {}
+    }, 1200);
+
+    return () => clearInterval(interval);
+  }, [matchStatus, matchId, socketConnected, currentUser]);
 
   // ── Mode selected ────────────────────────────────────────────────────────────
   const handleModeSelect = useCallback((mode: ChatMode) => {
     setChatMode(mode);
     chatModeRef.current = mode;
-    handleStartMatch(false, mode);
+    handleStartMatch(true, mode);
   }, [handleStartMatch]);
 
   // ── CANCEL SEARCH ────────────────────────────────────────────────────────────
