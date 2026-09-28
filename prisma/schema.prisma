@@ -143,6 +143,9 @@ model ChatSession {
   status    String    @default("ACTIVE") // ACTIVE, ENDED
   startedAt DateTime  @default(now())
   endedAt   DateTime?
+  offerSdp      String?
+  answerSdp     String?
+  iceCandidates String?
 
   userA User @relation("ChatSessionUserA", fields: [userAId], references: [id], onDelete: Cascade)
   userB User @relation("ChatSessionUserB", fields: [userBId], references: [id], onDelete: Cascade)

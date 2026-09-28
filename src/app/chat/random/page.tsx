@@ -590,6 +590,10 @@ export default function RandomChatPage() {
     if (!loading && !user) router.push('/login');
   }, [user, loading, router]);
 
+  // Stable cleanup ref so cleanupSession doesn't change identity on every render
+  const webrtcCleanupRef = useRef(webrtc.cleanup);
+  useEffect(() => { webrtcCleanupRef.current = webrtc.cleanup; }, [webrtc.cleanup]);
+
   // ── Cleanup helper ──────────────────────────────────────────────────────────
   const cleanupSession = useCallback(() => {
     activeMatchIdRef.current = null;
@@ -610,13 +614,25 @@ export default function RandomChatPage() {
       typingTimeoutRef.current = null;
     }
     isCurrentlyTypingRef.current = false;
-    // Cleanup WebRTC resources
     if (chatModeRef.current !== 'TEXT') {
-      webrtc.cleanup();
+      webrtcCleanupRef.current();
     }
-  }, [webrtc]);
+  }, []); // stable — uses refs only
 
-  // ── Socket Event Listeners ──────────────────────────────────────────────────
+  // Stable refs for WebRTC functions — avoids useEffect re-runs
+  const webrtcInitSessionRef = useRef(webrtc.initSession);
+  const webrtcHandleOfferRef = useRef(webrtc.handleOffer);
+  const webrtcHandleAnswerRef = useRef(webrtc.handleAnswer);
+  const webrtcHandleIceRef = useRef(webrtc.handleIceCandidate);
+  const cleanupSessionRef = useRef(cleanupSession);
+
+  useEffect(() => { webrtcInitSessionRef.current = webrtc.initSession; }, [webrtc.initSession]);
+  useEffect(() => { webrtcHandleOfferRef.current = webrtc.handleOffer; }, [webrtc.handleOffer]);
+  useEffect(() => { webrtcHandleAnswerRef.current = webrtc.handleAnswer; }, [webrtc.handleAnswer]);
+  useEffect(() => { webrtcHandleIceRef.current = webrtc.handleIceCandidate; }, [webrtc.handleIceCandidate]);
+  useEffect(() => { cleanupSessionRef.current = cleanupSession; }, [cleanupSession]);
+
+  // ── Socket Event Listeners ─ registered ONCE per socket instance ────────────
   useEffect(() => {
     if (!socket) return;
 
@@ -641,7 +657,6 @@ export default function RandomChatPage() {
         clearInterval(serverlessPollIntervalRef.current);
         serverlessPollIntervalRef.current = null;
       }
-      setConnectionState('CONNECTING');
       activeMatchIdRef.current = data.matchId;
       setMatchId(data.matchId);
       setPartner(data.partner);
@@ -661,9 +676,8 @@ export default function RandomChatPage() {
         const offerer = Boolean(data.isOfferer);
         setIsOfferer(offerer);
         isOffererRef.current = offerer;
-        // Small delay to let state settle
         setTimeout(() => {
-          webrtc.initSession(offerer);
+          webrtcInitSessionRef.current(offerer);
         }, 300);
       }
     };
@@ -702,19 +716,12 @@ export default function RandomChatPage() {
       });
 
       const isFromPartner = message.senderId !== currentUidRef.current;
-      if (isFromPartner) {
-        if (socket?.connected) {
-          socket.emit('ack_random_message_delivered', {
-            messageId: message.id,
-            clientMessageId: message.clientMessageId,
-            chatSessionId: currentMid,
-          });
-        }
-        fetch('/api/chat/messages/ack', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messageId: message.id, clientMessageId: message.clientMessageId, chatSessionId: currentMid }),
-        }).catch(() => {});
+      if (isFromPartner && socket?.connected) {
+        socket.emit('ack_random_message_delivered', {
+          messageId: message.id,
+          clientMessageId: message.clientMessageId,
+          chatSessionId: currentMid,
+        });
       }
     };
 
@@ -736,13 +743,13 @@ export default function RandomChatPage() {
 
     const handlePartnerLeft = () => {
       console.log('[RANDOM_CHAT] Partner left');
-      cleanupSession();
+      cleanupSessionRef.current();
       setConnectionState('DISCONNECTED');
       setMatchStatus('ended');
     };
 
     const handleChatEndedConfirm = () => {
-      cleanupSession();
+      cleanupSessionRef.current();
       setConnectionState('DISCONNECTED');
       setMatchStatus('ended');
     };
@@ -758,20 +765,19 @@ export default function RandomChatPage() {
       else setConnectionState('IDLE');
     };
 
-    // ── WebRTC signaling passthrough ──
     const handleWebRtcOffer = (data: { matchId: string; sdp: RTCSessionDescriptionInit }) => {
       if (data.matchId !== activeMatchIdRef.current) return;
-      webrtc.handleOffer(data.sdp);
+      webrtcHandleOfferRef.current(data.sdp);
     };
 
     const handleWebRtcAnswer = (data: { matchId: string; sdp: RTCSessionDescriptionInit }) => {
       if (data.matchId !== activeMatchIdRef.current) return;
-      webrtc.handleAnswer(data.sdp);
+      webrtcHandleAnswerRef.current(data.sdp);
     };
 
     const handleWebRtcIce = (data: { matchId: string; candidate: RTCIceCandidateInit }) => {
       if (data.matchId !== activeMatchIdRef.current) return;
-      webrtc.handleIceCandidate(data.candidate);
+      webrtcHandleIceRef.current(data.candidate);
     };
 
     const handlePartnerMediaState = (data: { matchId: string; isMuted: boolean; isCameraOff: boolean }) => {
@@ -809,7 +815,7 @@ export default function RandomChatPage() {
       socket.off('webrtc:ice-candidate', handleWebRtcIce);
       socket.off('partner_media_state', handlePartnerMediaState);
     };
-  }, [socket, webrtc, cleanupSession]);
+  }, [socket]); // ← ONLY socket in deps — stable refs used for everything else
 
   // Cleanup on unmount
   useEffect(() => {

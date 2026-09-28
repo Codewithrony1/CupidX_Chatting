@@ -90,6 +90,8 @@ export async function GET(req: Request) {
         return NextResponse.json({
           matched: true,
           chatSessionId: activeSession.chatSessionId,
+          mode: session.mode || 'TEXT',
+          isOfferer: session.userAId === user.id,
           partner: partnerUser
             ? {
                 id: partnerUser.id,
@@ -142,6 +144,8 @@ export async function GET(req: Request) {
         return NextResponse.json({
           matched: true,
           chatSessionId: userQueue.chatSessionId,
+          mode: session.mode || 'TEXT',
+          isOfferer: session.userAId === user.id,
           partner: partnerUser
             ? {
                 id: partnerUser.id,

@@ -133,6 +133,7 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        mode,
         countryCode: userCountry.countryCode,
         countryName: userCountry.countryName,
         countryFlag: userCountry.countryFlag,
@@ -145,6 +146,7 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        mode,
         countryCode: userCountry.countryCode,
         countryName: userCountry.countryName,
         countryFlag: userCountry.countryFlag,
@@ -155,6 +157,7 @@ export async function POST(req: Request) {
     const candidates = await prisma.matchmakingQueue.findMany({
       where: {
         status: 'WAITING',
+        mode,
         userId: { notIn: excludeUserIds },
         updatedAt: { gte: STALE_THRESHOLD },
       },
@@ -243,6 +246,7 @@ export async function POST(req: Request) {
               id: newChatSessionId,
               userAId: user.id,
               userBId: candidate.userId,
+              mode,
               status: 'ACTIVE',
             },
           });
@@ -270,6 +274,8 @@ export async function POST(req: Request) {
           return NextResponse.json({
             matched: true,
             chatSessionId: newChatSessionId,
+            mode,
+            isOfferer: true,
             partner: partnerUser
               ? {
                   id: partnerUser.id,
@@ -315,6 +321,7 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        mode,
         countryCode: userCountry.countryCode,
         countryName: userCountry.countryName,
         countryFlag: userCountry.countryFlag,
@@ -327,6 +334,7 @@ export async function POST(req: Request) {
         gender,
         preferredGender,
         language,
+        mode,
         countryCode: userCountry.countryCode,
         countryName: userCountry.countryName,
         countryFlag: userCountry.countryFlag,
