@@ -122,6 +122,7 @@ model MatchmakingQueue {
   countryCode     String?
   countryName     String?
   countryFlag     String?
+  mode            String   @default("TEXT") // TEXT, AUDIO, VIDEO
   status          String   @default("WAITING") // WAITING, MATCHED, CANCELLED
   chatSessionId   String?
   partnerUserId   String?
@@ -131,12 +132,14 @@ model MatchmakingQueue {
   @@index([status, gender, preferredGender])
   @@index([status, updatedAt])
   @@index([userId, status])
+  @@index([status, mode])
 }
 
 model ChatSession {
   id        String    @id @default(uuid())
   userAId   String
   userBId   String
+  mode      String    @default("TEXT") // TEXT, AUDIO, VIDEO
   status    String    @default("ACTIVE") // ACTIVE, ENDED
   startedAt DateTime  @default(now())
   endedAt   DateTime?

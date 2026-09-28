@@ -103,6 +103,11 @@ const rematchExclusions = new Map();
 const matchmakingTokens = new Map();
 const matchmakingStates = new Map();
 const recentMatchMessageCounts = new Map();
+// partnerMediaState: matchId -> media mute/camera state per user
+const partnerMediaStates = new Map();
+// webrtcOfferers: matchId -> userId (userA is always the offerer)
+const webrtcOfferers = new Map();
+
 
 function nextMatchmakingToken(userId) {
   const next = (matchmakingTokens.get(userId) || 0) + 1;
@@ -473,6 +478,11 @@ function calculateMatchScore(candidateA, candidateB, now) {
     return { canMatch: false, score: -1 };
   }
 
+  // Mode enforcement: TEXT users never match with AUDIO/VIDEO users
+  if ((candidateA.mode || 'TEXT') !== (candidateB.mode || 'TEXT')) {
+    return { canMatch: false, score: -1 };
+  }
+
   // Invariant: MAX ACTIVE SESSIONS PER USER = 1
   if (userActiveMatch.has(candidateA.userId) || userActiveMatch.has(candidateB.userId)) {
     return { canMatch: false, score: -1 };
@@ -605,10 +615,15 @@ function processMatchQueue() {
       roomId,
       userA: candidateA,
       userB: candidateB,
+      mode: candidateA.mode || 'TEXT',
       createdAt: Date.now(),
     };
 
     activeMatches.set(matchId, matchRecord);
+    // For AUDIO/VIDEO: designate userA as the WebRTC offerer
+    if (matchRecord.mode !== 'TEXT') {
+      webrtcOfferers.set(matchId, candidateA.userId);
+    }
     userActiveMatch.set(candidateA.userId, matchId);
     userActiveMatch.set(candidateB.userId, matchId);
 
@@ -623,6 +638,7 @@ function processMatchQueue() {
             userAId: candidateA.userId,
             userBId: candidateB.userId,
             status: 'ACTIVE',
+            mode: matchRecord.mode || 'TEXT',
           },
         });
         await prisma.matchmakingQueue.updateMany({
@@ -674,6 +690,8 @@ function processMatchQueue() {
         io.to(sId).emit('random_match_found', {
           matchId,
           roomId,
+          mode: matchRecord.mode || 'TEXT',
+          isOfferer: matchRecord.mode !== 'TEXT',
           partner: {
             id: candidateB.userId,
             username: candidateB.username,
@@ -702,6 +720,8 @@ function processMatchQueue() {
         io.to(sId).emit('random_match_found', {
           matchId,
           roomId,
+          mode: matchRecord.mode || 'TEXT',
+          isOfferer: false,
           partner: {
             id: candidateA.userId,
             username: candidateA.username,
@@ -772,6 +792,8 @@ function teardownMatch(matchId, reason, triggeringUserId) {
 
   activeMatches.delete(matchId);
   recentMatchMessageCounts.delete(matchId);
+  partnerMediaStates.delete(matchId);
+  webrtcOfferers.delete(matchId);
   matchmakingStates.set(userA.userId, 'IDLE');
   matchmakingStates.set(userB.userId, 'IDLE');
   userActiveMatch.delete(userA.userId);
@@ -864,6 +886,8 @@ io.on('connection', async (socket) => {
           countryName: partner.countryName || 'India',
           countryFlag: partner.countryFlag || '🇮🇳',
         },
+        mode: match.mode || 'TEXT',
+        isOfferer: false, // On reconnect, WebRTC is already established
         reconnected: true,
       });
 
@@ -1092,6 +1116,71 @@ io.on('connection', async (socket) => {
       });
     }
   });
+
+  // ========= WebRTC Signaling Events =========
+  // Relay SDP and ICE candidates between matched peers.
+  // Actual media goes P2P � server only does signaling.
+
+  socket.on('webrtc:offer', ({ matchId: mid, sdp }) => {
+    if (!mid || !sdp) return;
+    const match = activeMatches.get(mid);
+    if (!match) return;
+    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+    const ps = userSockets.get(partnerId);
+    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:offer', { matchId: mid, sdp, from: userId }));
+    console.log(`[WEBRTC] offer relayed matchId=${mid}`);
+  });
+
+  socket.on('webrtc:answer', ({ matchId: mid, sdp }) => {
+    if (!mid || !sdp) return;
+    const match = activeMatches.get(mid);
+    if (!match) return;
+    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+    const ps = userSockets.get(partnerId);
+    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:answer', { matchId: mid, sdp, from: userId }));
+    console.log(`[WEBRTC] answer relayed matchId=${mid}`);
+  });
+
+  socket.on('webrtc:ice-candidate', ({ matchId: mid, candidate }) => {
+    if (!mid || !candidate) return;
+    const match = activeMatches.get(mid);
+    if (!match) return;
+    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+    const ps = userSockets.get(partnerId);
+    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:ice-candidate', { matchId: mid, candidate, from: userId }));
+  });
+
+  socket.on('webrtc:restart', ({ matchId: mid }) => {
+    if (!mid) return;
+    const match = activeMatches.get(mid);
+    if (!match) return;
+    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+    const ps = userSockets.get(partnerId);
+    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:restart', { matchId: mid, from: userId }));
+    console.log(`[WEBRTC] ICE restart matchId=${mid}`);
+  });
+
+  socket.on('partner_media_state', ({ matchId: mid, isMuted, isCameraOff }) => {
+    if (!mid) return;
+    const match = activeMatches.get(mid);
+    if (!match) return;
+    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+    const state = partnerMediaStates.get(mid) || {};
+    if (match.userA.userId === userId) {
+      partnerMediaStates.set(mid, { ...state, userAMuted: !!isMuted, userACameraOff: !!isCameraOff });
+    } else {
+      partnerMediaStates.set(mid, { ...state, userBMuted: !!isMuted, userBCameraOff: !!isCameraOff });
+    }
+    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+    const ps = userSockets.get(partnerId);
+    if (ps) ps.forEach((sId) => io.to(sId).emit('partner_media_state', { matchId: mid, isMuted: !!isMuted, isCameraOff: !!isCameraOff, from: userId }));
+  });
+  // ========= End WebRTC Signaling Events =========
+
 
   // ── Event: Next Partner (Instant skip & re-queue with 60s anti-rematch) ────
   socket.on('next_partner', async (preferences = {}) => {

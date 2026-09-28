@@ -23,6 +23,7 @@ export async function POST(req: Request) {
     const gender = body.gender || userProfile?.gender || user.gender || 'unspecified';
     const preferredGender = body.preferredGender || userProfile?.preferredGender || 'auto';
     const language = body.language || userProfile?.language || 'english';
+    const mode = (body.mode as string | undefined) || 'TEXT'; // TEXT, AUDIO, VIDEO
 
     const userCountry = (await import('@/lib/countryDetection')).detectCountryFromHeaders(req.headers);
 
