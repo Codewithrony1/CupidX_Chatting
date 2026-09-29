@@ -533,6 +533,7 @@ export default function RandomChatPage() {
     mode: chatMode as WebRTCMode,
     matchId,
     isOfferer,
+    getToken,
     onRemoteStream: useCallback((stream: MediaStream) => {
       setRemoteStream(stream);
     }, []),
@@ -926,8 +927,12 @@ export default function RandomChatPage() {
           }
           try {
             const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+            const token = await getToken().catch(() => null);
             const statusRes = await fetch('/api/matchmaking/status', {
-              headers: effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {},
+              headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+              },
             });
             if (statusRes.ok) {
               const statusData = await statusRes.json();
@@ -1001,8 +1006,10 @@ export default function RandomChatPage() {
 
       try {
         const effectiveClerkId = currentUidRef.current || currentUser?.clerkUserId || currentUser?.id || '';
+        const token = await getToken().catch(() => null);
         const res = await fetch(`/api/chat/messages?chatSessionId=${currentMid}`, {
           headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
           },
         });
@@ -1029,7 +1036,11 @@ export default function RandomChatPage() {
               partnerMsgs.forEach((pm: any) => {
                 fetch('/api/chat/messages/ack', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    ...(effectiveClerkId ? { 'x-clerk-user-id': effectiveClerkId } : {}),
+                  },
                   body: JSON.stringify({
                     messageId: pm.id,
                     clientMessageId: pm.clientMessageId,
@@ -1051,7 +1062,7 @@ export default function RandomChatPage() {
     }, 1200);
 
     return () => clearInterval(interval);
-  }, [matchStatus, matchId, socketConnected, currentUser]);
+  }, [matchStatus, matchId, socketConnected, currentUser, getToken]);
 
   // ── Mode selected ────────────────────────────────────────────────────────────
   const handleModeSelect = useCallback((mode: ChatMode) => {

@@ -32,6 +32,7 @@ interface UseWebRTCOptions {
   mode: WebRTCMode;
   matchId: string | null;
   isOfferer: boolean | null; // null = not yet determined
+  getToken?: () => Promise<string | null>;
   onRemoteStream?: (stream: MediaStream) => void;
   onConnectionStateChange?: (state: WebRTCConnectionState) => void;
   onError?: (message: string) => void;
@@ -52,6 +53,7 @@ export function useWebRTC({
   mode,
   matchId,
   isOfferer,
+  getToken,
   onRemoteStream,
   onConnectionStateChange,
   onError,
@@ -96,15 +98,19 @@ export function useWebRTC({
     const currentMid = matchIdRef.current;
     if (!currentMid) return;
     try {
+      const token = await getToken?.().catch(() => null);
       await fetch('/api/chat/random/webrtc', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ chatSessionId: currentMid, action, ...payload }),
       });
     } catch (e) {
       console.warn('[WebRTC] REST signal post error:', e);
     }
-  }, []);
+  }, [getToken]);
 
   // ── Acquire local media ──────────────────────────────────────────────────────
   const acquireMedia = useCallback(async (): Promise<MediaStream | null> => {
@@ -421,7 +427,12 @@ export function useWebRTC({
       }
 
       try {
-        const res = await fetch(`/api/chat/random/webrtc?chatSessionId=${currentMid}`);
+        const token = await getToken?.().catch(() => null);
+        const res = await fetch(`/api/chat/random/webrtc?chatSessionId=${currentMid}`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
         if (!res.ok) return;
         const data = await res.json();
 

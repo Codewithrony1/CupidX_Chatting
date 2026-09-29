@@ -8,7 +8,7 @@ export interface ActiveSessionInfo {
   source: 'prisma';
 }
 
-const STALE_SESSION_MS = 10 * 60 * 1000;
+const STALE_SESSION_MS = 60 * 1000;
 
 /**
  * Prisma is the single source of truth for matchmaking.
