@@ -400,6 +400,16 @@ const server = http.createServer((req, res) => {
           activeUsers: userSockets.size,
           activeMatches: activeMatches.size,
           queueLength: randomMatchQueue.length,
+          // Bug 7: Full queue detail for debugging
+          queue: randomMatchQueue.map((c) => ({
+            username: c.username,
+            mode: c.mode,
+            isVIP: c.isVIP,
+            genderPref: c.genderPref,
+            gender: c.gender,
+            waitMs: Date.now() - c.joinTime,
+            state: matchmakingStates.get(c.userId),
+          })),
         },
         timestamp: new Date().toISOString(),
       })
@@ -478,6 +488,18 @@ io.use((socket, next) => {
   }
 });
 
+// ── Gender Normalization ──────────────────────────────────────────────────────
+// Maps every UI/DB variant to a canonical value used in matching logic.
+// 'auto' means no preference (match anyone); 'male'/'female' are the two genders.
+function normGender(raw) {
+  if (!raw) return 'auto';
+  const v = String(raw).toLowerCase().trim();
+  if (['male', 'm', 'man', 'men', 'boy', 'boys'].includes(v)) return 'male';
+  if (['female', 'f', 'woman', 'women', 'girl', 'girls'].includes(v)) return 'female';
+  // Everything else (auto, any, anyone, everyone, all, unspecified, '') -> no pref
+  return 'auto';
+}
+
 // ── Smart Compatibility Scoring ──────────────────────────────────────────────
 const MOOD_COMPATIBILITY = {
   romantic: ['romantic', 'flirty', 'deep'],
@@ -530,25 +552,31 @@ function calculateMatchScore(candidateA, candidateB, now) {
   const waitTimeA = now - candidateA.joinTime;
   const waitTimeB = now - candidateB.joinTime;
 
-  const prefA = candidateA.isVIP ? (candidateA.genderPref || 'auto') : 'auto';
-  const prefB = candidateB.isVIP ? (candidateB.genderPref || 'auto') : 'auto';
+  const prefA = normGender(candidateA.isVIP ? (candidateA.genderPref || 'auto') : 'auto');
+  const prefB = normGender(candidateB.isVIP ? (candidateB.genderPref || 'auto') : 'auto');
+  const genderA = normGender(candidateA.gender);
+  const genderB = normGender(candidateB.gender);
 
-  if (candidateA.isVIP && prefA !== 'auto' && prefA !== 'any') {
-    const isGenderMatch = prefA.toLowerCase() === (candidateB.gender || '').toLowerCase();
+  if (candidateA.isVIP && prefA !== 'auto') {
+    const isGenderMatch = prefA === genderB;
     if (isGenderMatch) {
       score += 3;
     } else if (waitTimeA < 8000) {
+      console.log(`[MATCH_REJECT] ${candidateA.userId} wants ${prefA} but ${candidateB.userId} is ${genderB} (waited ${waitTimeA}ms < 8s)`);
       return { canMatch: false, score: -1 };
     }
+    // waitTimeA >= 8000: fall through (match anyone)
   }
 
-  if (candidateB.isVIP && prefB !== 'auto' && prefB !== 'any') {
-    const isGenderMatch = prefB.toLowerCase() === (candidateA.gender || '').toLowerCase();
+  if (candidateB.isVIP && prefB !== 'auto') {
+    const isGenderMatch = prefB === genderA;
     if (isGenderMatch) {
       score += 3;
     } else if (waitTimeB < 8000) {
+      console.log(`[MATCH_REJECT] ${candidateB.userId} wants ${prefB} but ${candidateA.userId} is ${genderA} (waited ${waitTimeB}ms < 8s)`);
       return { canMatch: false, score: -1 };
     }
+    // waitTimeB >= 8000: fall through (match anyone)
   }
 
   const tagsA = candidateA.tags || [];
@@ -576,12 +604,13 @@ function calculateMatchScore(candidateA, candidateB, now) {
 // ── In-Memory Queue Matcher (Atomic & Random Selection) ──────────────────────
 function processMatchQueue() {
   // Prune any candidates already in an active match
-  randomMatchQueue = randomMatchQueue.filter((c) => !userActiveMatch.has(c.userId));
+  // Bug 2 fix: pre-filter stale candidates so valid ones are never lost
+  randomMatchQueue = randomMatchQueue.filter((c) => isCurrentQueueCandidate(c));
 
   if (randomMatchQueue.length < 2) return;
 
   const now = Date.now();
-  console.log(`[MATCH_ATTEMPT] Queue length: ${randomMatchQueue.length}`);
+  console.log(`[MATCH_ATTEMPT] Queue length: ${randomMatchQueue.length}, users: ${randomMatchQueue.map(c => c.username).join(', ')}`);
 
   // Randomize evaluation order so matching is genuinely unpredictable among eligible users
   const candidatesShuffled = [...randomMatchQueue].sort(() => Math.random() - 0.5);
@@ -591,11 +620,11 @@ function processMatchQueue() {
 
   for (let i = 0; i < candidatesShuffled.length; i++) {
     const candidateA = candidatesShuffled[i];
-    if (userActiveMatch.has(candidateA.userId)) continue;
+    if (!isCurrentQueueCandidate(candidateA)) continue;
 
     for (let j = i + 1; j < candidatesShuffled.length; j++) {
       const candidateB = candidatesShuffled[j];
-      if (userActiveMatch.has(candidateB.userId)) continue;
+      if (!isCurrentQueueCandidate(candidateB)) continue;
 
       const { canMatch, score } = calculateMatchScore(candidateA, candidateB, now);
       if (canMatch && score > highestScore) {
@@ -608,25 +637,21 @@ function processMatchQueue() {
   if (bestPair) {
     const [candidateA, candidateB] = bestPair;
 
-    // Concurrency guard: verify neither candidate was matched in the interim
-    if (userActiveMatch.has(candidateA.userId) || userActiveMatch.has(candidateB.userId)) {
-      randomMatchQueue = randomMatchQueue.filter((c) => !userActiveMatch.has(c.userId));
-      if (randomMatchQueue.length >= 2) {
-        setImmediate(processMatchQueue);
-      }
-      return;
-    }
-
-    // Invariant: Remove both users from waiting queue atomically
-    randomMatchQueue = randomMatchQueue.filter(
-      (c) => c.userId !== candidateA.userId && c.userId !== candidateB.userId
-    );
-
-    if (!isCurrentQueueCandidate(candidateA) || !isCurrentQueueCandidate(candidateB)) {
+    // Bug 2 fix: re-verify BOTH candidates are still current BEFORE removing from queue
+    // If one is stale, put the valid one back and continue
+    const aOk = isCurrentQueueCandidate(candidateA);
+    const bOk = isCurrentQueueCandidate(candidateB);
+    if (!aOk || !bOk) {
+      // Remove definitively stale entries; keep valid ones
       randomMatchQueue = randomMatchQueue.filter((c) => isCurrentQueueCandidate(c));
       if (randomMatchQueue.length >= 2) setImmediate(processMatchQueue);
       return;
     }
+
+    // Invariant: Remove both users from waiting queue atomically (they passed re-verification)
+    randomMatchQueue = randomMatchQueue.filter(
+      (c) => c.userId !== candidateA.userId && c.userId !== candidateB.userId
+    );
 
     matchmakingStates.set(candidateA.userId, 'MATCHED');
     matchmakingStates.set(candidateB.userId, 'MATCHED');
@@ -874,6 +899,16 @@ io.on('connection', async (socket) => {
     username,
     connectedAt: Date.now(),
   });
+
+  // Bug 6 fix: Reset stale matchmaking state to IDLE if this user has no active match.
+  // A DISCONNECTING or MATCHED state left over from a previous session blocks isCurrentQueueCandidate.
+  if (!userActiveMatch.has(userId)) {
+    const currentState = matchmakingStates.get(userId);
+    if (currentState && currentState !== 'SEARCHING' && currentState !== 'IDLE') {
+      matchmakingStates.set(userId, 'IDLE');
+      console.log(`[CONNECT] Reset stale state '${currentState}' -> 'IDLE' for user ${userId} (no active match)`);
+    }
+  }
 
   // 3. Seamless Session Recovery on Reconnection
   const existingMatchId = userActiveMatch.get(userId);
@@ -1536,42 +1571,53 @@ io.on('connection', async (socket) => {
 
   // ── Disconnect Handler with 10-Second Grace Period ─────────────────────────
   socket.on('disconnect', () => {
-    nextMatchmakingToken(userId);
-    matchmakingStates.set(userId, 'DISCONNECTING');
+    // Bug 1 fix: Remove THIS socket first, then decide whether to tear down state.
+    // If the user still has other sockets (two tabs, React double-mount, refresh)
+    // we must NOT invalidate the token or state — the live search would break.
     socketToUser.delete(socket.id);
 
     const userSocketSet = userSockets.get(userId);
     if (userSocketSet) {
       userSocketSet.delete(socket.id);
-      if (userSocketSet.size === 0) {
-        userSockets.delete(userId);
 
-        randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
-
-        const activeMId = userActiveMatch.get(userId);
-        if (activeMId) {
-          const timer = setTimeout(() => {
-            reconnectGraceTimers.delete(userId);
-            if (!userSockets.has(userId)) {
-              teardownMatch(activeMId, 'disconnected', userId);
-            }
-          }, 10000);
-          reconnectGraceTimers.set(userId, timer);
-        }
-
-        setTimeout(async () => {
-          if (!userSockets.has(userId)) {
-            try {
-              await prisma.profile.updateMany({
-                where: { OR: [{ userId }, { user: { clerkUserId: userId } }] },
-                data: { isOnline: false, lastSeen: new Date() },
-              });
-              io.emit('user_status_changed', { userId, username, isOnline: false });
-            } catch {}
-          }
-        }, 15000);
+      if (userSocketSet.size > 0) {
+        // Other sockets still alive — leave token, state, and queue untouched.
+        console.log(`[DISCONNECT] Socket ${socket.id} for user ${userId} closed but ${userSocketSet.size} socket(s) still alive. State preserved.`);
+        return;
       }
+
+      // Last socket gone — now it's safe to invalidate the search token.
+      userSockets.delete(userId);
     }
+
+    // Token bump and state change only happen when the very last socket is gone.
+    nextMatchmakingToken(userId);
+    matchmakingStates.set(userId, 'DISCONNECTING');
+    randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
+    console.log(`[DISCONNECT] Last socket for user ${userId} closed. State set to DISCONNECTING.`);
+
+    const activeMId = userActiveMatch.get(userId);
+    if (activeMId) {
+      const timer = setTimeout(() => {
+        reconnectGraceTimers.delete(userId);
+        if (!userSockets.has(userId)) {
+          teardownMatch(activeMId, 'disconnected', userId);
+        }
+      }, 10000);
+      reconnectGraceTimers.set(userId, timer);
+    }
+
+    setTimeout(async () => {
+      if (!userSockets.has(userId)) {
+        try {
+          await prisma.profile.updateMany({
+            where: { OR: [{ userId }, { user: { clerkUserId: userId } }] },
+            data: { isOnline: false, lastSeen: new Date() },
+          });
+          io.emit('user_status_changed', { userId, username, isOnline: false });
+        } catch {}
+      }
+    }, 15000);
   });
 });
 
@@ -1599,10 +1645,22 @@ const gracefulShutdown = () => {
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
+// Bug 3 fix: Periodic retry loop so pairs that were temporarily blocked (VIP gender
+// wait, anti-rematch cooldown, etc.) get another chance every 2 seconds instead of
+// only when a new user joins.
+setInterval(() => {
+  try {
+    if (randomMatchQueue.length >= 2) processMatchQueue();
+  } catch (e) {
+    console.error('[QUEUE_RETRY_ERROR]', e);
+  }
+}, 2000);
+
 server.listen(PORT, () => {
   const dbMode = isPostgres ? 'PostgreSQL' : 'SQLite (local dev)';
   console.log(`⚡ CupidX Production Realtime Socket.IO Server running on port ${PORT}`);
   console.log(`   - HTTP Health Check: http://localhost:${PORT}/health`);
   console.log(`   - Database: ${dbMode}`);
   console.log(`   - Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   - Queue retry interval: 2000ms`);
 });

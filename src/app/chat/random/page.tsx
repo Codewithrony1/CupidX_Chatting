@@ -499,6 +499,10 @@ export default function RandomChatPage() {
   const isMatchmakingStartingRef = useRef(false);
   const isOffererRef = useRef<boolean | null>(null);
   const chatModeRef = useRef<ChatMode>('TEXT');
+  // Bug 9: Stable ref so the 'connect' handler can see latest matchStatus without re-registering
+  const matchStatusRef = useRef<typeof matchStatus>('idle');
+  // Bug 9: 20-second search timeout ref
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Modal focus traps
   const reportModalRef = useRef<HTMLDivElement>(null);
@@ -526,6 +530,11 @@ export default function RandomChatPage() {
   useEffect(() => {
     isOffererRef.current = isOfferer;
   }, [isOfferer]);
+
+  // Bug 9: Keep matchStatusRef in sync
+  useEffect(() => {
+    matchStatusRef.current = matchStatus;
+  }, [matchStatus]);
 
   // ── WebRTC hook ──
   const webrtc = useWebRTC({
@@ -644,6 +653,11 @@ export default function RandomChatPage() {
     }) => {
       console.log('[RANDOM_CHAT] Match found:', data.matchId, 'mode:', data.mode, 'offerer:', data.isOfferer);
       isMatchmakingStartingRef.current = false;
+      // Clear 20-second search timeout — a match arrived
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
       if (serverlessPollIntervalRef.current) {
         clearInterval(serverlessPollIntervalRef.current);
         serverlessPollIntervalRef.current = null;
@@ -752,8 +766,22 @@ export default function RandomChatPage() {
 
     const handleConnect = () => {
       setReconnecting(false);
-      if (activeMatchIdRef.current) setConnectionState('CONNECTED');
-      else setConnectionState('IDLE');
+      if (activeMatchIdRef.current) {
+        setConnectionState('CONNECTED');
+      } else if (matchStatusRef.current === 'searching') {
+        // Bug 9: Socket reconnected while user was searching — re-join the queue.
+        // The server state was reset to IDLE on disconnect; this re-enrolls them.
+        console.log('[RANDOM_CHAT] Socket reconnected while searching — re-emitting join_random_queue');
+        socket.emit('join_random_queue', {
+          gender: currentUser?.profile?.gender || 'unspecified',
+          preferredGender: currentUser?.profile?.preferredGender || 'auto',
+          mood: currentUser?.profile?.mood || 'chill',
+          language: currentUser?.profile?.language || 'english',
+          mode: chatModeRef.current,
+        });
+      } else {
+        setConnectionState('IDLE');
+      }
     };
 
     const handleWebRtcOffer = (data: { matchId: string; sdp: RTCSessionDescriptionInit }) => {
@@ -827,6 +855,7 @@ export default function RandomChatPage() {
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (serverlessPollIntervalRef.current) clearInterval(serverlessPollIntervalRef.current);
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
       if (socket?.connected && !activeMatchIdRef.current) {
         socket.emit('leave_random_queue');
       }
@@ -839,8 +868,6 @@ export default function RandomChatPage() {
     async (skipCurrent = false, mode: ChatMode = chatModeRef.current) => {
       if (isMatchmakingStartingRef.current) return;
       isMatchmakingStartingRef.current = true;
-
-      
 
       setConnectionState('SEARCHING');
       setMatchStatus('searching');
@@ -858,6 +885,9 @@ export default function RandomChatPage() {
         serverlessPollIntervalRef.current = null;
       }
 
+      // Bug 9: Clear any prior search timeout and start a fresh 20-second one
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
       const preferences = {
         gender: currentUser?.profile?.gender || 'unspecified',
         preferredGender: currentUser?.profile?.preferredGender || 'auto',
@@ -870,6 +900,15 @@ export default function RandomChatPage() {
       if (socket?.connected) {
         socket.emit('join_random_queue', preferences);
         isMatchmakingStartingRef.current = false;
+
+        // Bug 9: 20-second timeout — show connection problem if socket is connected but
+        // no match arrives (server queue or matching may be stuck)
+        searchTimeoutRef.current = setTimeout(() => {
+          if (matchStatusRef.current === 'searching') {
+            console.warn('[RANDOM_CHAT] 20s search timeout — no match received');
+            setSearchError('No one found yet. The server might be busy — you can wait or try again.');
+          }
+        }, 20000);
         return;
       }
 
