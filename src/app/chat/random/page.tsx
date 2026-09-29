@@ -777,6 +777,18 @@ export default function RandomChatPage() {
       setPartnerCameraOff(Boolean(data.isCameraOff));
     };
 
+    const handleMatchmakingBlocked = (data: { reason?: string; mode?: string }) => {
+      isMatchmakingStartingRef.current = false;
+      setConnectionState('IDLE');
+      setMatchStatus('mode_select');
+      if (data?.reason === 'VIP_REQUIRED') {
+        setShowVipModal(true);
+        setSearchError('Voice and Video calls are exclusive to VIP members. Upgrade to VIP to unlock full access.');
+      } else if (data?.reason === 'ACCOUNT_RESTRICTED') {
+        setSearchError('Your account is currently restricted from matchmaking.');
+      }
+    };
+
     socket.on('queue_joined', handleQueueJoined);
     socket.on('random_match_found', handleRandomMatchFound);
     socket.on('receive_random_message', handleReceiveRandomMessage);
@@ -790,6 +802,7 @@ export default function RandomChatPage() {
     socket.on('webrtc:answer', handleWebRtcAnswer);
     socket.on('webrtc:ice-candidate', handleWebRtcIce);
     socket.on('partner_media_state', handlePartnerMediaState);
+    socket.on('matchmaking_blocked', handleMatchmakingBlocked);
 
     return () => {
       socket.off('queue_joined', handleQueueJoined);
@@ -805,6 +818,7 @@ export default function RandomChatPage() {
       socket.off('webrtc:answer', handleWebRtcAnswer);
       socket.off('webrtc:ice-candidate', handleWebRtcIce);
       socket.off('partner_media_state', handlePartnerMediaState);
+      socket.off('matchmaking_blocked', handleMatchmakingBlocked);
     };
   }, [socket]); // ← ONLY socket in deps — stable refs used for everything else
 

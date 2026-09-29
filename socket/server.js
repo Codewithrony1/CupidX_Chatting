@@ -8,6 +8,16 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Process crash guards to prevent unhandled errors from terminating the socket server
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRASH_GUARD] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[CRASH_GUARD] Uncaught Exception:', err);
+});
+
+
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET && process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET is required in production.');
 const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'cupidx-development-only-secret';
@@ -24,11 +34,14 @@ let prisma;
 const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL_NON_POOLING || '';
 const isPostgres = databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://');
 
+if (process.env.NODE_ENV === 'production' && !isPostgres) {
+  throw new Error('[FATAL] DATABASE_URL must be a valid PostgreSQL connection string in production. SQLite dev.db is prohibited.');
+}
+
 if (isPostgres) {
   // Production: PostgreSQL via @prisma/adapter-pg
   const { PrismaPg } = require('@prisma/adapter-pg');
   const { Pool } = require('pg');
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   process.env.PGSSLMODE = 'no-verify';
   let cleanUrl = databaseUrl;
   if (/sslmode=/i.test(cleanUrl)) {
@@ -412,13 +425,15 @@ const io = new Server(server, {
       const allowedOrigins = new Set([
         'https://cupidxchat.in',
         'https://www.cupidxchat.in',
+        'https://cupid-x-chatting-alpha.vercel.app',
         CLIENT_URL,
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         ...extraOrigins,
       ]);
-      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-      return callback(new Error('Origin not allowed'));
+      const isVercelPreview = origin && /^https:\/\/cupid-x-chatting[a-z0-9-]*\.vercel\.app$/.test(origin);
+      if (!origin || allowedOrigins.has(origin) || isVercelPreview) return callback(null, true);
+      return callback(new Error('Origin not allowed: ' + origin));
     },
     methods: ['GET', 'POST'],
     credentials: true,
@@ -446,7 +461,16 @@ io.use((socket, next) => {
       if (err) {
         return next(new Error('Invalid token'));
       }
-      socket.user = decoded;
+      const rawUser = decoded.data || decoded;
+      const resolvedUserId = rawUser.userId || rawUser.id || rawUser.sub;
+      if (!resolvedUserId) {
+        return next(new Error('Invalid token: missing userId/id/sub'));
+      }
+      socket.user = {
+        ...rawUser,
+        userId: String(resolvedUserId),
+        username: rawUser.username || rawUser.preferred_username || rawUser.displayName || 'Stranger',
+      };
       next();
     });
   } catch (error) {
@@ -746,7 +770,13 @@ function processMatchQueue() {
     }
 
     if (randomMatchQueue.length >= 2) {
-      setImmediate(processMatchQueue);
+      setImmediate(() => {
+        try {
+          processMatchQueue();
+        } catch (queueErr) {
+          console.error('[PROCESS_QUEUE_ERROR]:', queueErr);
+        }
+      });
     }
   }
 }
@@ -819,25 +849,13 @@ function teardownMatch(matchId, reason, triggeringUserId) {
       ]);
     } catch {}
 
-    if (adminDb) {
-      try {
-        const batch = adminDb.batch();
-        batch.delete(adminDb.collection('active_sessions').doc(userA.userId));
-        batch.delete(adminDb.collection('active_sessions').doc(userB.userId));
-        batch.set(
-          adminDb.collection('matches').doc(matchId),
-          { status: 'ended', endedAt: Date.now(), endedBy: triggeringUserId || null },
-          { merge: true }
-        );
-        await batch.commit().catch(() => {});
-      } catch (e) {}
-    }
   });
 }
 
 // ── Connection Event Router ──────────────────────────────────────────────────
 io.on('connection', async (socket) => {
-  const { userId, username } = socket.user;
+  const userId = socket.user.userId || socket.user.id || socket.user.sub;
+  const username = socket.user.username || 'Stranger';
 
   // 1. Cancel reconnect grace timer if this user was temporarily disconnected
   if (reconnectGraceTimers.has(userId)) {
@@ -908,6 +926,7 @@ io.on('connection', async (socket) => {
 
   // ── Event: Join Random Queue ───────────────────────────────────────────────
   socket.on('join_random_queue', async (preferences = {}) => {
+    try {
     const currentMatchId = userActiveMatch.get(userId);
     if (currentMatchId) {
       teardownMatch(currentMatchId, 'partner_skipped', userId);
@@ -928,11 +947,25 @@ io.on('connection', async (socket) => {
     }
     if (userActiveMatch.has(userId)) return;
 
+    // Mode determination and VIP validation (Bug 2 & 3)
+    const rawMode = preferences.mode || preferences.matchMode || preferences.callType || 'TEXT';
+    const mode = ['TEXT', 'AUDIO', 'VIDEO'].includes(String(rawMode).toUpperCase())
+      ? String(rawMode).toUpperCase()
+      : 'TEXT';
+
+    if (mode !== 'TEXT' && !userData.isVIP) {
+      matchmakingStates.set(userId, 'IDLE');
+      socket.emit('matchmaking_blocked', { reason: 'VIP_REQUIRED', mode });
+      console.log(`[VIP_REQUIRED] User ${userId} denied access to ${mode} mode.`);
+      return;
+    }
+
     const country = detectCountryFromSocket(socket);
 
     const candidate = {
       socketId: socket.id,
       userId,
+      mode,
       username: userData.username,
       vipUsername: userData.vipUsername || null,
       fullName: userData.fullName,
@@ -964,6 +997,10 @@ io.on('connection', async (socket) => {
     socket.emit('queue_joined', { status: 'searching', isVIP: candidate.isVIP, plan: candidate.plan });
 
     processMatchQueue();
+    } catch (queueErr) {
+      console.error('[SOCKET_ERROR] join_random_queue:', queueErr);
+      socket.emit('matchmaking_error', { message: 'Internal server error while joining queue' });
+    }
   });
 
   // ── Event: Leave Random Queue ──────────────────────────────────────────────
@@ -1119,71 +1156,97 @@ io.on('connection', async (socket) => {
 
   // ========= WebRTC Signaling Events =========
   // Relay SDP and ICE candidates between matched peers.
-  // Actual media goes P2P � server only does signaling.
+  // Actual media goes P2P � server only does signaling.
 
   socket.on('webrtc:offer', ({ matchId: mid, sdp }) => {
-    if (!mid || !sdp) return;
-    const match = activeMatches.get(mid);
-    if (!match) return;
-    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
-    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
-    const ps = userSockets.get(partnerId);
-    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:offer', { matchId: mid, sdp, from: userId }));
-    console.log(`[WEBRTC] offer relayed matchId=${mid}`);
+    try {
+      if (!mid || !sdp) return;
+      const match = activeMatches.get(mid);
+      if (!match) return;
+      if (match.mode === 'TEXT') return;
+      if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+      const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+      const ps = userSockets.get(partnerId);
+      if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:offer', { matchId: mid, sdp, from: userId }));
+      console.log(`[WEBRTC] offer relayed matchId=${mid}`);
+    } catch (err) {
+      console.error('[WEBRTC_ERROR] webrtc:offer:', err);
+    }
   });
 
   socket.on('webrtc:answer', ({ matchId: mid, sdp }) => {
-    if (!mid || !sdp) return;
-    const match = activeMatches.get(mid);
-    if (!match) return;
-    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
-    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
-    const ps = userSockets.get(partnerId);
-    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:answer', { matchId: mid, sdp, from: userId }));
-    console.log(`[WEBRTC] answer relayed matchId=${mid}`);
+    try {
+      if (!mid || !sdp) return;
+      const match = activeMatches.get(mid);
+      if (!match) return;
+      if (match.mode === 'TEXT') return;
+      if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+      const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+      const ps = userSockets.get(partnerId);
+      if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:answer', { matchId: mid, sdp, from: userId }));
+      console.log(`[WEBRTC] answer relayed matchId=${mid}`);
+    } catch (err) {
+      console.error('[WEBRTC_ERROR] webrtc:answer:', err);
+    }
   });
 
   socket.on('webrtc:ice-candidate', ({ matchId: mid, candidate }) => {
-    if (!mid || !candidate) return;
-    const match = activeMatches.get(mid);
-    if (!match) return;
-    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
-    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
-    const ps = userSockets.get(partnerId);
-    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:ice-candidate', { matchId: mid, candidate, from: userId }));
+    try {
+      if (!mid || !candidate) return;
+      const match = activeMatches.get(mid);
+      if (!match) return;
+      if (match.mode === 'TEXT') return;
+      if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+      const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+      const ps = userSockets.get(partnerId);
+      if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:ice-candidate', { matchId: mid, candidate, from: userId }));
+    } catch (err) {
+      console.error('[WEBRTC_ERROR] webrtc:ice-candidate:', err);
+    }
   });
 
   socket.on('webrtc:restart', ({ matchId: mid }) => {
-    if (!mid) return;
-    const match = activeMatches.get(mid);
-    if (!match) return;
-    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
-    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
-    const ps = userSockets.get(partnerId);
-    if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:restart', { matchId: mid, from: userId }));
-    console.log(`[WEBRTC] ICE restart matchId=${mid}`);
+    try {
+      if (!mid) return;
+      const match = activeMatches.get(mid);
+      if (!match) return;
+      if (match.mode === 'TEXT') return;
+      if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+      const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+      const ps = userSockets.get(partnerId);
+      if (ps) ps.forEach((sId) => io.to(sId).emit('webrtc:restart', { matchId: mid, from: userId }));
+      console.log(`[WEBRTC] ICE restart matchId=${mid}`);
+    } catch (err) {
+      console.error('[WEBRTC_ERROR] webrtc:restart:', err);
+    }
   });
 
   socket.on('partner_media_state', ({ matchId: mid, isMuted, isCameraOff }) => {
-    if (!mid) return;
-    const match = activeMatches.get(mid);
-    if (!match) return;
-    if (match.userA.userId !== userId && match.userB.userId !== userId) return;
-    const state = partnerMediaStates.get(mid) || {};
-    if (match.userA.userId === userId) {
-      partnerMediaStates.set(mid, { ...state, userAMuted: !!isMuted, userACameraOff: !!isCameraOff });
-    } else {
-      partnerMediaStates.set(mid, { ...state, userBMuted: !!isMuted, userBCameraOff: !!isCameraOff });
+    try {
+      if (!mid) return;
+      const match = activeMatches.get(mid);
+      if (!match) return;
+      if (match.mode === 'TEXT') return;
+      if (match.userA.userId !== userId && match.userB.userId !== userId) return;
+      const state = partnerMediaStates.get(mid) || {};
+      if (match.userA.userId === userId) {
+        partnerMediaStates.set(mid, { ...state, userAMuted: !!isMuted, userACameraOff: !!isCameraOff });
+      } else {
+        partnerMediaStates.set(mid, { ...state, userBMuted: !!isMuted, userBCameraOff: !!isCameraOff });
+      }
+      const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
+      const ps = userSockets.get(partnerId);
+      if (ps) ps.forEach((sId) => io.to(sId).emit('partner_media_state', { matchId: mid, isMuted: !!isMuted, isCameraOff: !!isCameraOff, from: userId }));
+    } catch (err) {
+      console.error('[WEBRTC_ERROR] partner_media_state:', err);
     }
-    const partnerId = match.userA.userId === userId ? match.userB.userId : match.userA.userId;
-    const ps = userSockets.get(partnerId);
-    if (ps) ps.forEach((sId) => io.to(sId).emit('partner_media_state', { matchId: mid, isMuted: !!isMuted, isCameraOff: !!isCameraOff, from: userId }));
   });
   // ========= End WebRTC Signaling Events =========
 
 
   // ── Event: Next Partner (Instant skip & re-queue with 60s anti-rematch) ────
   socket.on('next_partner', async (preferences = {}) => {
+    try {
     nextMatchmakingToken(userId);
     matchmakingStates.set(userId, 'DISCONNECTING');
     const currentMatchId = userActiveMatch.get(userId);
@@ -1208,11 +1271,25 @@ io.on('connection', async (socket) => {
       teardownMatch(userActiveMatch.get(userId), 'partner_skipped', userId);
     }
 
+    // Mode determination and VIP validation (Bug 2 & 3)
+    const rawMode = preferences.mode || preferences.matchMode || preferences.callType || 'TEXT';
+    const mode = ['TEXT', 'AUDIO', 'VIDEO'].includes(String(rawMode).toUpperCase())
+      ? String(rawMode).toUpperCase()
+      : 'TEXT';
+
+    if (mode !== 'TEXT' && !userData.isVIP) {
+      matchmakingStates.set(userId, 'IDLE');
+      socket.emit('matchmaking_blocked', { reason: 'VIP_REQUIRED', mode });
+      console.log(`[VIP_REQUIRED] [NEXT] User ${userId} denied access to ${mode} mode.`);
+      return;
+    }
+
     const country = detectCountryFromSocket(socket);
 
     const candidate = {
       socketId: socket.id,
       userId,
+      mode,
       username: userData.username,
       vipUsername: userData.vipUsername || null,
       fullName: userData.fullName,
@@ -1244,20 +1321,27 @@ io.on('connection', async (socket) => {
     socket.emit('queue_joined', { status: 'searching', isVIP: candidate.isVIP, plan: candidate.plan });
 
     processMatchQueue();
+    } catch (nextErr) {
+      console.error('[SOCKET_ERROR] next_partner:', nextErr);
+    }
   });
 
   // ── Event: End Random Chat ─────────────────────────────────────────────────
   socket.on('end_random_chat', () => {
-    nextMatchmakingToken(userId);
-    matchmakingStates.set(userId, 'DISCONNECTING');
-    const currentMatchId = userActiveMatch.get(userId);
-    if (currentMatchId) {
-      console.log(`[SESSION_CLEANUP] User ${userId} requested chat end for match ${currentMatchId}`);
-      teardownMatch(currentMatchId, 'chat_ended', userId);
+    try {
+      nextMatchmakingToken(userId);
+      matchmakingStates.set(userId, 'DISCONNECTING');
+      const currentMatchId = userActiveMatch.get(userId);
+      if (currentMatchId) {
+        console.log(`[SESSION_CLEANUP] User ${userId} requested chat end for match ${currentMatchId}`);
+        teardownMatch(currentMatchId, 'chat_ended', userId);
+      }
+      randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
+      matchmakingStates.set(userId, 'IDLE');
+      socket.emit('chat_ended_confirm');
+    } catch (endErr) {
+      console.error('[SOCKET_ERROR] end_random_chat:', endErr);
     }
-    randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
-    matchmakingStates.set(userId, 'IDLE');
-    socket.emit('chat_ended_confirm');
   });
 
   // ── Private Chat: 1-on-1 VIP Messaging ─────────────────────────────────────

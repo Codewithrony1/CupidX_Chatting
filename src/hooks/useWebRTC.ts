@@ -66,6 +66,7 @@ export function useWebRTC({
   const matchIdRef = useRef<string | null>(matchId);
   const isOffererRef = useRef<boolean | null>(isOfferer);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const iceServersRef = useRef<RTCIceServer[]>(ICE_SERVERS);
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [connectionState, setConnectionState] = useState<WebRTCConnectionState>('idle');
@@ -92,6 +93,27 @@ export function useWebRTC({
     },
     [onConnectionStateChange]
   );
+
+  // ── Fetch dynamic TURN credentials from Metered ──────────────────────────────
+  const fetchIceServers = useCallback(async (): Promise<RTCIceServer[]> => {
+    try {
+      const token = await getToken?.().catch(() => null);
+      const res = await fetch('/api/turn-credentials', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+          console.log(`[WebRTC] Retrieved ${data.iceServers.length} ICE/TURN servers (${data.provider})`);
+          iceServersRef.current = data.iceServers;
+          return data.iceServers;
+        }
+      }
+    } catch (e) {
+      console.warn('[WebRTC] Error retrieving TURN credentials, defaulting to STUN:', e);
+    }
+    return iceServersRef.current;
+  }, [getToken]);
 
   // ── Helper to POST signals to HTTP fallback ─────────────────────────────────
   const postSignal = useCallback(async (action: string, payload: any) => {
@@ -184,7 +206,7 @@ export function useWebRTC({
         } catch {}
       }
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
 
       // Add local tracks to peer connection
       if (stream) {
@@ -302,6 +324,7 @@ export function useWebRTC({
 
       if (!pc) {
         // If peer connection not ready, create it with local media first
+        await fetchIceServers();
         let stream = localStreamRef.current;
         if (!stream) {
           stream = await acquireMedia();
@@ -337,7 +360,7 @@ export function useWebRTC({
         notifyState('failed');
       }
     },
-    [socket, acquireMedia, createPeerConnection, postSignal, notifyState, onError]
+    [socket, fetchIceServers, acquireMedia, createPeerConnection, postSignal, notifyState, onError]
   );
 
   // ── Handle incoming answer (offerer side) ────────────────────────────────────
@@ -386,6 +409,8 @@ export function useWebRTC({
       if (mode === 'TEXT') return;
       if (isCleaningUp.current) return;
 
+      await fetchIceServers();
+
       const stream = await acquireMedia();
       if (!stream) {
         // Media acquisition failed — error handled in acquireMedia
@@ -398,7 +423,7 @@ export function useWebRTC({
         await createOffer(pc);
       }
     },
-    [mode, acquireMedia, createPeerConnection, createOffer]
+    [mode, fetchIceServers, acquireMedia, createPeerConnection, createOffer]
   );
 
   // ── REST-based Polling for Signaling (Automatic fallback when socket down) ─
@@ -497,6 +522,7 @@ export function useWebRTC({
 
     pendingCandidatesRef.current = [];
     processedCandidateKeysRef.current.clear();
+    iceServersRef.current = ICE_SERVERS;
     setLocalStream(null);
     setIsMuted(false);
     setIsCameraOff(false);

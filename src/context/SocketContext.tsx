@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth as useClerkAuth } from '@clerk/nextjs';
 import { useAuth } from './AuthContext';
 
 interface OfflineMessage {
@@ -26,6 +27,7 @@ const SocketContext = createContext<SocketContextType>({
 
 export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
+  const { getToken } = useClerkAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
@@ -93,7 +95,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
     const initSocket = async () => {
       try {
-        let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+        let socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL?.trim();
         const isClientInBrowser = typeof window !== 'undefined';
         const isLocalHost =
           isClientInBrowser &&
@@ -102,6 +104,9 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         if (!socketUrl) {
           if (isLocalHost) {
             socketUrl = 'http://localhost:3001';
+          } else {
+            console.log('[SocketContext] NEXT_PUBLIC_SOCKET_URL not configured for remote socket host; operating in resilient HTTP mode.');
+            return;
           }
         }
 
@@ -111,7 +116,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           socketUrl &&
           (socketUrl.includes('localhost') || socketUrl.includes('127.0.0.1'))
         ) {
-          console.log('[SocketContext] Public domain detected without remote socket server; operating in resilient dual-transport mode.');
+          console.warn('[SocketContext] Public domain detected with localhost socket URL. Set NEXT_PUBLIC_SOCKET_URL in Vercel to your socket server host (e.g. Render/Railway/Fly).');
           return;
         }
 
@@ -119,8 +124,14 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           return;
         }
 
-        const res = await fetch('/api/auth/token');
+        const clerkToken = await getToken().catch(() => null);
+        const res = await fetch('/api/auth/token', {
+          headers: {
+            ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}),
+          },
+        });
         if (!res.ok || isDisposed) {
+          console.warn('[SocketContext] Failed to retrieve authentication token for socket connection (status:', res.status, ')');
           return;
         }
         const { token } = await res.json();
@@ -139,7 +150,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         activeSocket.on('connect', () => {
           if (isDisposed) return;
           setIsConnected(true);
-          console.log('⚡ Connected to CupidX Real-Time WebSocket');
+          console.log('⚡ Connected to CupidX Real-Time WebSocket at', socketUrl);
           if (activeSocket) {
             flushQueue(activeSocket);
           }
@@ -156,10 +167,15 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
         activeSocket.on('connect_error', async (err) => {
           if (isDisposed) return;
-          console.warn('Socket reconnection attempt error:', err.message);
+          console.error('[Socket Error] Connection to socket server failed:', err.message);
           // Proactively refresh auth token for subsequent reconnect attempts
           try {
-            const tokenRes = await fetch('/api/auth/token');
+            const freshClerkToken = await getToken().catch(() => null);
+            const tokenRes = await fetch('/api/auth/token', {
+              headers: {
+                ...(freshClerkToken ? { Authorization: `Bearer ${freshClerkToken}` } : {}),
+              },
+            });
             if (tokenRes.ok) {
               const fresh = await tokenRes.json();
               if (fresh?.token && activeSocket) {
@@ -181,7 +197,12 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     const handleOnline = () => {
       console.log('[SocketContext] Network restored (online). Triggering immediate socket reconnection...');
       if (activeSocket) {
-        fetch('/api/auth/token')
+        getToken()
+          .then((freshClerkToken) =>
+            fetch('/api/auth/token', {
+              headers: freshClerkToken ? { Authorization: `Bearer ${freshClerkToken}` } : {},
+            })
+          )
           .then((r) => r.json())
           .then(({ token }) => {
             if (token && activeSocket) {
