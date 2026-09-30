@@ -558,7 +558,7 @@ export function getAuthCookieOptions(req?: Request, maxAgeSeconds: number = 7 * 
   return {
     httpOnly: true,
     secure: isSecure,
-    sameSite: 'strict' as const,
+    sameSite: 'lax' as const,
     maxAge: maxAgeSeconds,
     path: '/',
   };

@@ -66,9 +66,7 @@ function createPrismaClient(): PrismaClient {
       process.env.NODE_ENV === 'production';
 
     if (needsSsl && typeof process !== 'undefined') {
-      // 1. Prevent Node TLS rejection of Supabase pooler intermediate/self-signed certs in serverless
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-      // 2. Set PGSSLMODE to no-verify so pg connection-parameters defaults rejectUnauthorized to false
+      // Set PGSSLMODE to no-verify so pg connection-parameters defaults rejectUnauthorized to false
       process.env.PGSSLMODE = 'no-verify';
     }
 

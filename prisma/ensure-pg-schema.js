@@ -13,7 +13,6 @@ async function ensurePgSchema() {
     return;
   }
 
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   process.env.PGSSLMODE = 'no-verify';
 
   // Prepare clean connection URL with sslmode=no-verify

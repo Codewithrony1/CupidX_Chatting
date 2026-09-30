@@ -12,17 +12,19 @@ export async function POST(req: Request) {
   const clientIp = getClientIp(req);
 
   try {
-    const { username, password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const rawIdentifier = (body.identifier || body.username || '').trim();
+    const password = body.password || '';
 
-    if (!username || !password) {
-      const errRes = NextResponse.json({ error: 'Missing username or password' }, { status: 400 });
+    if (!rawIdentifier || !password) {
+      const errRes = NextResponse.json({ error: 'Please enter your username or email and password' }, { status: 400 });
       return applyRateLimitHeaders(errRes, checkAuthRateLimit(clientIp));
     }
 
-    const cleanUsername = username.toLowerCase().trim();
+    const cleanIdentifier = rawIdentifier.toLowerCase();
 
     // Dual-tier rate limiting: IP throttle (10 req/min) + Account lockout (5 failed attempts/15 mins)
-    const limitCheck = checkAuthRateLimit(clientIp, cleanUsername);
+    const limitCheck = checkAuthRateLimit(clientIp, cleanIdentifier);
     if (limitCheck.isBlocked) {
       const blockedRes = NextResponse.json(
         {
@@ -34,21 +36,26 @@ export async function POST(req: Request) {
       return applyRateLimitHeaders(blockedRes, limitCheck);
     }
 
-    const user = await prisma.user.findUnique({
-      where: { username: cleanUsername },
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: cleanIdentifier },
+          { email: cleanIdentifier },
+        ],
+      },
       include: { profile: true, subscription: true },
     });
 
     if (!user) {
-      recordAuthAttempt(clientIp, cleanUsername, true);
-      const postLimit = checkAuthRateLimit(clientIp, cleanUsername);
-      const errRes = NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+      recordAuthAttempt(clientIp, cleanIdentifier, true);
+      const postLimit = checkAuthRateLimit(clientIp, cleanIdentifier);
+      const errRes = NextResponse.json({ error: 'Invalid username/email or password' }, { status: 401 });
       return applyRateLimitHeaders(errRes, postLimit);
     }
 
     if (user.isSuspended) {
       const suspendedRes = NextResponse.json(
-        { error: 'Your account has been suspended' },
+        { error: 'Your account has been suspended. Please contact support.' },
         { status: 403 }
       );
       return applyRateLimitHeaders(suspendedRes, limitCheck);
@@ -64,14 +71,14 @@ export async function POST(req: Request) {
 
     const match = await comparePassword(password, user.passwordHash);
     if (!match) {
-      recordAuthAttempt(clientIp, cleanUsername, true);
-      const postLimit = checkAuthRateLimit(clientIp, cleanUsername);
-      const errRes = NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+      recordAuthAttempt(clientIp, cleanIdentifier, true);
+      const postLimit = checkAuthRateLimit(clientIp, cleanIdentifier);
+      const errRes = NextResponse.json({ error: 'Invalid username/email or password' }, { status: 401 });
       return applyRateLimitHeaders(errRes, postLimit);
     }
 
     // Success! Record successful auth (clears account lock)
-    recordAuthAttempt(clientIp, cleanUsername, false);
+    recordAuthAttempt(clientIp, cleanIdentifier, false);
 
     const token = signToken({
       userId: user.id,
@@ -85,20 +92,24 @@ export async function POST(req: Request) {
         id: user.id,
         username: user.username,
         fullName: user.fullName,
+        email: user.email,
         role: user.role,
         profile: user.profile,
         subscription: user.subscription,
       },
     });
 
-    // Enforce HttpOnly: true, Secure: true, SameSite: 'strict' (BUG-004)
     response.cookies.set('token', token, getAuthCookieOptions(req));
 
-    const postLimit = checkAuthRateLimit(clientIp, cleanUsername);
+    const postLimit = checkAuthRateLimit(clientIp, cleanIdentifier);
     return applyRateLimitHeaders(response, postLimit);
-  } catch (error) {
-    console.error('Login error:', error);
-    const errRes = NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } catch (error: any) {
+    console.error('[AUTH:LOGIN_ERROR]:', error?.message || error);
+    const isDbError = error?.code?.startsWith('P') || error?.message?.includes('database') || error?.message?.includes('connection');
+    const userMessage = isDbError
+      ? 'Database service is connecting. Please retry in a few seconds.'
+      : 'Login failed. Please check your credentials and try again.';
+    const errRes = NextResponse.json({ error: userMessage }, { status: 500 });
     return applyRateLimitHeaders(errRes, checkAuthRateLimit(clientIp));
   }
 }

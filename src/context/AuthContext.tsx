@@ -119,40 +119,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   /**
    * Initializes user profile from the canonical Clerk + Prisma backend (/api/auth/me)
    */
-  const initializeUserSession = async (cUser: any, forceRefresh = false): Promise<UserProfile | null> => {
-    if (!cUser) {
-      currentInitUidRef.current = null;
-      setUser(null);
-      return null;
-    }
+  const initializeUserSession = async (cUser?: any, forceRefresh = false): Promise<UserProfile | null> => {
+    const activeClerkUser = cUser || clerkUser;
+    const sessionKey = activeClerkUser?.id || (user?.id ? user.id : 'client_session');
 
     // Skip re-fetch only if same user AND not a forced refresh (e.g. after onboarding)
-    if (!forceRefresh && currentInitUidRef.current === cUser.id && user) {
+    if (!forceRefresh && currentInitUidRef.current === sessionKey && user) {
       return user;
     }
-    currentInitUidRef.current = cUser.id;
+    currentInitUidRef.current = sessionKey;
 
-    console.log('[AUTH] Clerk Profile initialization for ID:', cUser.id);
     try {
-      const email = cUser.primaryEmailAddress?.emailAddress || null;
-      const displayName = cUser.fullName || cUser.username || cUser.firstName || 'User';
+      const email = activeClerkUser?.primaryEmailAddress?.emailAddress || null;
+      const displayName = activeClerkUser?.fullName || activeClerkUser?.username || activeClerkUser?.firstName || 'User';
 
       // Obtain verified Clerk session token if available
-      const token = await getToken().catch(() => null);
-      const authHeaders: Record<string, string> = {
-        'x-clerk-user-id': cUser.id,
-      };
+      let token: string | null = null;
+      try {
+        token = await getToken().catch(() => null);
+      } catch {}
+
+      const authHeaders: Record<string, string> = {};
+      if (activeClerkUser?.id) {
+        authHeaders['x-clerk-user-id'] = activeClerkUser.id;
+      }
       if (token) {
         authHeaders['Authorization'] = `Bearer ${token}`;
       }
 
-      // Canonical backend DB (Prisma/Supabase) is the only profile source.
+      // Canonical backend DB (Prisma/Supabase) is the authoritative profile source.
       const backendRes = await fetch('/api/auth/me', {
         headers: authHeaders,
         credentials: 'include',
       }).then((res) => (res.ok ? res.json() : null)).catch(() => null);
 
       const backendUser = backendRes?.user;
+
+      if (!backendUser && !activeClerkUser) {
+        currentInitUidRef.current = null;
+        setUser(null);
+        return null;
+      }
 
       const isProfileDone = Boolean(
         backendUser &&
@@ -170,9 +177,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isVipActive = isUserVip(backendUser);
 
       const resolvedProfile: UserProfile = {
-        id: backendUser?.id || cUser.id,
-        uid: cUser.id,
-        clerkUserId: cUser.id,
+        id: backendUser?.id || activeClerkUser?.id || 'user',
+        uid: activeClerkUser?.id || backendUser?.id || 'user',
+        clerkUserId: activeClerkUser?.id || backendUser?.clerkUserId || null,
         username: backendUser?.username || '',
         usernameLower: (backendUser?.username || '').toLowerCase(),
         vipUsername: backendUser?.vipUsername || null,
@@ -223,25 +230,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshUser = useCallback(async () => {
-    if (clerkUser) {
-      currentInitUidRef.current = null;
-      await initializeUserSession(clerkUser, true);
-    }
+    currentInitUidRef.current = null;
+    await initializeUserSession(clerkUser, true);
   }, [clerkUser]);
 
-  // ─── 1. Handle Clerk User State Changes ─────────────────────────────────────
+  // ─── 1. Handle User Session Initialization on Mount & State Changes ─────────
   useEffect(() => {
-    if (!isLoaded) return;
-
-    if (isSignedIn && clerkUser) {
-      initializeUserSession(clerkUser).then(() => {
-        setLoading(false);
-      });
-    } else {
-      setUser(null);
-      currentInitUidRef.current = null;
+    initializeUserSession(clerkUser).finally(() => {
       setLoading(false);
-    }
+    });
   }, [isLoaded, isSignedIn, clerkUser]);
 
   // ─── 1b. Window focus & visibility revalidation for instant VIP sync ───────
@@ -295,7 +292,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ];
     const isPublic = publicPaths.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
-    const isAuthed = Boolean(isSignedIn && clerkUser);
+    const isAuthed = Boolean(user || (isSignedIn && clerkUser));
 
     // Unauthenticated user on protected route -> redirect to /login
     if (!isAuthed && !isPublic) {
@@ -485,143 +482,84 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [signUp, signIn, clerk]);
 
-  // ─── 4. Email / Password Login via Clerk ────────────────────────────────────
+  // ─── 4. Email / Password Login via Native API ──────────────────────────────
   const loginWithEmail = useCallback(async (emailOrUsername: string, pass: string) => {
-    if (!clerk) {
-      throw new Error('Sign-in service is initializing. Please try again.');
-    }
-
-    // If signIn hook isn't loaded yet, fall back to Clerk modal
-    if (!signIn) {
-      clerk.openSignIn({
-        fallbackRedirectUrl: '/auth-callback',
-        signUpFallbackRedirectUrl: '/auth-callback',
-        initialValues: {
-          emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
-        },
-      });
-      return;
-    }
-
     try {
-      const isEmail = emailOrUsername.includes('@');
-      // Clerk v7: create() returns { error }, status on signIn.status
-      const { error: createError } = await signIn.create({
-        identifier: emailOrUsername.trim(),
-        password: pass,
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ identifier: emailOrUsername.trim(), password: pass }),
       });
 
-      if (createError) {
-        const msg = (createError as any)?.longMessage || (createError as any)?.message || 'Invalid email or password.';
-        throw new Error(msg);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Invalid username/email or password.');
       }
 
-      if (signIn.status === 'complete') {
-        // Clerk v7: finalize() converts completed sign-in into active session
-        const { error: finalizeError } = await signIn.finalize();
-        if (finalizeError) {
-          console.warn('[AUTH] signIn.finalize error:', finalizeError);
-        }
-        // Navigate to auth-callback router — evaluates profile state on server
-        router.replace('/auth-callback');
+      currentInitUidRef.current = null;
+      const profile = await initializeUserSession(undefined, true);
+      if (profile && checkProfileCompletion(profile)) {
+        router.replace('/dashboard');
       } else {
-        console.warn('[AUTH] Incomplete sign-in status:', signIn.status);
-        clerk.openSignIn({
-          fallbackRedirectUrl: '/auth-callback',
-          signUpFallbackRedirectUrl: '/auth-callback',
-          initialValues: {
-            emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
-          },
-        });
-      }
-    } catch (err: any) {
-      console.error('[AUTH] Clerk login error:', err);
-      const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Invalid email or password.';
-      throw new Error(msg);
-    }
-  }, [clerk, signIn, router]);
-
-  // ─── 5. Email / Password Signup via Clerk ───────────────────────────────────
-  const signUpWithEmail = useCallback(async (emailOrUsername: string, pass: string, name?: string) => {
-    if (!clerk) {
-      throw new Error('Sign-up service is initializing. Please try again.');
-    }
-
-    // If signUp hook isn't loaded yet, fall back to Clerk modal
-    if (!signUp) {
-      clerk.openSignUp({
-        fallbackRedirectUrl: '/auth-callback',
-        initialValues: {
-          emailAddress: emailOrUsername.includes('@') ? emailOrUsername : undefined,
-          firstName: name || undefined,
-        },
-      });
-      return;
-    }
-
-    try {
-      const isEmail = emailOrUsername.includes('@');
-      // Clerk v7: create() returns { error }, status on signUp.status
-      const { error: createError } = await signUp.create({
-        emailAddress: isEmail ? emailOrUsername.trim() : undefined,
-        username: !isEmail ? emailOrUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') : undefined,
-        password: pass,
-        firstName: name || undefined,
-      });
-
-      if (createError) {
-        const msg = (createError as any)?.longMessage || (createError as any)?.message || 'Could not complete registration.';
-        throw new Error(msg);
-      }
-
-      if (signUp.status === 'complete') {
-        // Clerk v7: finalize() converts completed sign-up into active session
-        const { error: finalizeError } = await signUp.finalize();
-        if (finalizeError) {
-          console.warn('[AUTH] signUp.finalize error:', finalizeError);
-        }
-        // Navigate to setup-profile after session is active
         router.replace('/setup-profile');
-      } else {
-        console.warn('[AUTH] Sign-up requires additional verification:', signUp.status);
-        clerk.openSignUp({
-          fallbackRedirectUrl: '/auth-callback',
-          initialValues: {
-            emailAddress: isEmail ? emailOrUsername.trim() : undefined,
-            firstName: name || undefined,
-          },
-        });
       }
     } catch (err: any) {
-      console.error('[AUTH] Clerk signup error:', err);
-      const msg = err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || err?.message || 'Could not complete registration.';
-      throw new Error(msg);
+      console.error('[AUTH] Login error:', err);
+      throw new Error(err.message || 'Invalid username/email or password.');
     }
-  }, [clerk, signUp, router]);
+  }, [router]);
 
-  // ─── 6. Logout via Clerk ───────────────────────────────────────────────────
+  // ─── 5. Email / Password Signup via Native API ─────────────────────────────
+  const signUpWithEmail = useCallback(async (emailOrUsername: string, pass: string, name?: string) => {
+    try {
+      const cleanId = emailOrUsername.trim();
+      const isEmail = cleanId.includes('@');
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          fullName: name?.trim() || (isEmail ? cleanId.split('@')[0] : cleanId),
+          username: cleanId,
+          email: isEmail ? cleanId : undefined,
+          password: pass,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not complete registration.');
+      }
+
+      currentInitUidRef.current = null;
+      await initializeUserSession(undefined, true);
+      router.replace('/setup-profile');
+    } catch (err: any) {
+      console.error('[AUTH] Signup error:', err);
+      throw new Error(err.message || 'Could not complete registration.');
+    }
+  }, [router]);
+
+  // ─── 6. Logout ─────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
-      try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-      } catch (logoutApiErr) {
-        console.warn('[AUTH] Logout API clearance notice:', logoutApiErr);
-      }
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
 
       setUser(null);
       currentInitUidRef.current = null;
 
-      if (clerk) {
-        await clerk.signOut();
+      if (clerk && isSignedIn) {
+        await clerk.signOut().catch(() => {});
       }
       router.replace('/login');
     } catch (e) {
       console.error('[AUTH] Logout error:', e);
       router.replace('/login');
     }
-  }, [clerkUser, clerk, router]);
+  }, [clerk, isSignedIn, router]);
 
-  const isAuthenticated = Boolean(isSignedIn && clerkUser);
+  const isAuthenticated = Boolean(user || (isSignedIn && clerkUser));
 
   const contextValue = useMemo<AuthContextType>(
     () => ({

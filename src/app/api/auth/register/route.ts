@@ -26,31 +26,58 @@ export async function POST(req: Request) {
       return applyRateLimitHeaders(blockedRes, limitCheck);
     }
 
-    const { fullName, username, password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const fullName = (body.fullName || '').trim();
+    const rawUsername = (body.username || '').trim();
+    const rawEmail = (body.email || '').trim().toLowerCase();
+    const password = body.password || '';
 
-    if (!fullName || !username || !password) {
-      const errRes = NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!fullName || !rawUsername || !password) {
+      const errRes = NextResponse.json({ error: 'Please fill in all required fields' }, { status: 400 });
       return applyRateLimitHeaders(errRes, limitCheck);
     }
 
-    const cleanUsername = username.toLowerCase().trim();
+    let cleanUsername = rawUsername.toLowerCase().trim();
+    let cleanEmail = rawEmail;
+
+    if (cleanUsername.includes('@')) {
+      if (!cleanEmail) cleanEmail = cleanUsername;
+      cleanUsername = cleanUsername.split('@')[0].replace(/[^a-z0-9_]/g, '');
+    }
+
+    if (cleanUsername.length < 3) {
+      cleanUsername = `${cleanUsername || 'user'}_${Math.random().toString(36).substring(2, 6)}`;
+    }
 
     // Validate username against Zod schema & reserved list
     const usernameValidation = usernameSchema.safeParse(cleanUsername);
     if (!usernameValidation.success) {
       const errRes = NextResponse.json(
-        { error: usernameValidation.error.issues[0]?.message || 'Invalid username' },
+        { error: usernameValidation.error.issues[0]?.message || 'Username can only contain letters, numbers, and underscores (3-20 chars).' },
         { status: 400 }
       );
       return applyRateLimitHeaders(errRes, limitCheck);
     }
 
     if (password.length < 6) {
-      const errRes = NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
+      const errRes = NextResponse.json({ error: 'Password must be at least 6 characters long' }, { status: 400 });
       return applyRateLimitHeaders(errRes, limitCheck);
     }
 
-    // Check if user exists
+    // Check duplicate email if email provided
+    if (cleanEmail) {
+      const existingEmail = await prisma.user.findFirst({
+        where: { email: cleanEmail },
+      });
+      if (existingEmail) {
+        recordAuthAttempt(clientIp, cleanUsername, true);
+        const postLimit = checkAuthRateLimit(clientIp);
+        const errRes = NextResponse.json({ error: 'An account with this email already exists. Please log in.' }, { status: 400 });
+        return applyRateLimitHeaders(errRes, postLimit);
+      }
+    }
+
+    // Check if username exists
     const existingUser = await prisma.user.findUnique({
       where: { username: cleanUsername },
     });
@@ -58,7 +85,7 @@ export async function POST(req: Request) {
     if (existingUser) {
       recordAuthAttempt(clientIp, cleanUsername, true);
       const postLimit = checkAuthRateLimit(clientIp);
-      const errRes = NextResponse.json({ error: 'Username is already taken' }, { status: 400 });
+      const errRes = NextResponse.json({ error: 'This username is already taken. Please choose another.' }, { status: 400 });
       return applyRateLimitHeaders(errRes, postLimit);
     }
 
@@ -69,6 +96,7 @@ export async function POST(req: Request) {
       data: {
         fullName,
         username: cleanUsername,
+        email: cleanEmail || null,
         passwordHash: hashed,
         profile: {
           create: {
@@ -96,6 +124,7 @@ export async function POST(req: Request) {
         id: user.id,
         username: user.username,
         fullName: user.fullName,
+        email: user.email,
         role: user.role,
       },
     });
@@ -105,8 +134,12 @@ export async function POST(req: Request) {
     const postLimit = checkAuthRateLimit(clientIp);
     return applyRateLimitHeaders(response, postLimit);
   } catch (error: any) {
-    console.error('Registration error:', error);
-    const errRes = NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('[AUTH:REGISTER_ERROR]:', error?.message || error);
+    const isDbError = error?.code?.startsWith('P') || error?.message?.includes('database') || error?.message?.includes('connection');
+    const userMessage = isDbError
+      ? 'Database service is connecting. Please retry in a few seconds.'
+      : 'Registration failed. Please check your information and try again.';
+    const errRes = NextResponse.json({ error: userMessage }, { status: 500 });
     return applyRateLimitHeaders(errRes, checkAuthRateLimit(clientIp));
   }
 }
