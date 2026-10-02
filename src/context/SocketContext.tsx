@@ -126,6 +126,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
         const clerkToken = await getToken().catch(() => null);
         const res = await fetch('/api/auth/token', {
+          credentials: 'include',
           headers: {
             ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}),
           },
@@ -172,6 +173,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           try {
             const freshClerkToken = await getToken().catch(() => null);
             const tokenRes = await fetch('/api/auth/token', {
+              credentials: 'include',
               headers: {
                 ...(freshClerkToken ? { Authorization: `Bearer ${freshClerkToken}` } : {}),
               },

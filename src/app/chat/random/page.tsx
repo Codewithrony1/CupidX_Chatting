@@ -807,6 +807,10 @@ export default function RandomChatPage() {
 
     const handleMatchmakingBlocked = (data: { reason?: string; mode?: string }) => {
       isMatchmakingStartingRef.current = false;
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
       setConnectionState('IDLE');
       setMatchStatus('mode_select');
       if (data?.reason === 'VIP_REQUIRED') {
@@ -815,6 +819,17 @@ export default function RandomChatPage() {
       } else if (data?.reason === 'ACCOUNT_RESTRICTED') {
         setSearchError('Your account is currently restricted from matchmaking.');
       }
+    };
+
+    const handleMatchmakingError = (data: { message?: string }) => {
+      isMatchmakingStartingRef.current = false;
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
+      setConnectionState('IDLE');
+      setMatchStatus('mode_select');
+      setSearchError(data?.message || 'Matchmaking error. Please try again.');
     };
 
     socket.on('queue_joined', handleQueueJoined);
@@ -831,6 +846,7 @@ export default function RandomChatPage() {
     socket.on('webrtc:ice-candidate', handleWebRtcIce);
     socket.on('partner_media_state', handlePartnerMediaState);
     socket.on('matchmaking_blocked', handleMatchmakingBlocked);
+    socket.on('matchmaking_error', handleMatchmakingError);
 
     return () => {
       socket.off('queue_joined', handleQueueJoined);
@@ -847,6 +863,7 @@ export default function RandomChatPage() {
       socket.off('webrtc:ice-candidate', handleWebRtcIce);
       socket.off('partner_media_state', handlePartnerMediaState);
       socket.off('matchmaking_blocked', handleMatchmakingBlocked);
+      socket.off('matchmaking_error', handleMatchmakingError);
     };
   }, [socket]); // ← ONLY socket in deps — stable refs used for everything else
 

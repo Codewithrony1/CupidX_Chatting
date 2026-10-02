@@ -526,25 +526,30 @@ function calculateMatchScore(candidateA, candidateB, now) {
 
   // Mode enforcement: TEXT users never match with AUDIO/VIDEO users
   if ((candidateA.mode || 'TEXT') !== (candidateB.mode || 'TEXT')) {
+    console.log(`[MATCH_REJECT] Mode mismatch: ${candidateA.username} (${candidateA.mode}) vs ${candidateB.username} (${candidateB.mode})`);
     return { canMatch: false, score: -1 };
   }
 
   // Invariant: MAX ACTIVE SESSIONS PER USER = 1
   if (userActiveMatch.has(candidateA.userId) || userActiveMatch.has(candidateB.userId)) {
+    console.log(`[MATCH_REJECT] User already active in match: A=${userActiveMatch.has(candidateA.userId)}, B=${userActiveMatch.has(candidateB.userId)}`);
     return { canMatch: false, score: -1 };
   }
 
   // 60-Second Anti-Rematch Exclusion Guard
   if (isRematchExcluded(candidateA.userId, candidateB.userId)) {
+    console.log(`[MATCH_REJECT] Anti-rematch cooldown active between ${candidateA.username} and ${candidateB.username}`);
     return { canMatch: false, score: -1 };
   }
 
   const blockedA = blockedUsersCache.get(candidateA.userId);
   if (blockedA && blockedA.has(candidateB.userId)) {
+    console.log(`[MATCH_REJECT] ${candidateA.username} has blocked ${candidateB.username}`);
     return { canMatch: false, score: -1 };
   }
   const blockedB = blockedUsersCache.get(candidateB.userId);
   if (blockedB && blockedB.has(candidateA.userId)) {
+    console.log(`[MATCH_REJECT] ${candidateB.username} has blocked ${candidateA.username}`);
     return { canMatch: false, score: -1 };
   }
 
@@ -1021,6 +1026,11 @@ io.on('connection', async (socket) => {
       searchToken: nextMatchmakingToken(userId),
     };
 
+    if (!socket.connected || !userSockets.has(userId)) {
+      console.log(`[QUEUE_JOIN] Socket ${socket.id} disconnected before queue insert. Aborting.`);
+      return;
+    }
+
     matchmakingStates.set(userId, 'SEARCHING');
     const existingIdx = randomMatchQueue.findIndex((c) => c.userId === userId);
     if (existingIdx !== -1) {
@@ -1040,16 +1050,21 @@ io.on('connection', async (socket) => {
 
   // ── Event: Leave Random Queue ──────────────────────────────────────────────
   socket.on('leave_random_queue', () => {
-    nextMatchmakingToken(userId);
-    matchmakingStates.set(userId, 'IDLE');
-    randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
-    console.log(`[QUEUE_LEAVE] User ${userId} left queue. Total in queue: ${randomMatchQueue.length}`);
-    socket.emit('queue_left');
+    try {
+      nextMatchmakingToken(userId);
+      matchmakingStates.set(userId, 'IDLE');
+      randomMatchQueue = randomMatchQueue.filter((c) => c.userId !== userId);
+      console.log(`[QUEUE_LEAVE] User ${userId} left queue. Total in queue: ${randomMatchQueue.length}`);
+      socket.emit('queue_left');
+    } catch (err) {
+      console.error('[SOCKET_ERROR] leave_random_queue:', err);
+    }
   });
 
   // ── Event: Send Random Message ─────────────────────────────────────────────
   socket.on('send_random_message', async (data, callback) => {
-    const matchId = userActiveMatch.get(userId);
+    try {
+      const matchId = userActiveMatch.get(userId);
     if (!matchId) {
       if (typeof callback === 'function') callback({ error: 'No active chat session found.', code: 'SESSION_EXPIRED' });
       return;
@@ -1156,6 +1171,10 @@ io.on('connection', async (socket) => {
 
     if (typeof callback === 'function') {
       callback({ success: true, message: messageObj });
+    }
+    } catch (err) {
+      console.error('[SOCKET_ERROR] send_random_message:', err);
+      if (typeof callback === 'function') callback({ error: 'Failed to send message.' });
     }
   });
 
@@ -1345,6 +1364,11 @@ io.on('connection', async (socket) => {
       searchToken: nextMatchmakingToken(userId),
     };
 
+    if (!socket.connected || !userSockets.has(userId)) {
+      console.log(`[QUEUE_JOIN] [NEXT] Socket ${socket.id} disconnected before queue insert. Aborting.`);
+      return;
+    }
+
     matchmakingStates.set(userId, 'SEARCHING');
     const existingIdx = randomMatchQueue.findIndex((c) => c.userId === userId);
     if (existingIdx !== -1) {
@@ -1358,6 +1382,7 @@ io.on('connection', async (socket) => {
     processMatchQueue();
     } catch (nextErr) {
       console.error('[SOCKET_ERROR] next_partner:', nextErr);
+      socket.emit('matchmaking_error', { message: 'Failed to find next partner' });
     }
   });
 
