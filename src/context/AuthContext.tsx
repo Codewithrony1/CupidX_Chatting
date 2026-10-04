@@ -497,8 +497,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.error || 'Invalid username/email or password.');
       }
 
+      // After login, fetch fresh user profile from /api/auth/me (cookie was just set)
+      // Use initializeUserSession with current clerkUser if present, otherwise fetch directly
       currentInitUidRef.current = null;
-      const profile = await initializeUserSession(undefined, true);
+      let profile: UserProfile | null = null;
+
+      if (clerkUser) {
+        // Clerk-based session: use the normal flow
+        profile = await initializeUserSession(clerkUser, true);
+      } else {
+        // Native DB session: fetch /api/auth/me directly with the new cookie
+        try {
+          const meRes = await fetch('/api/auth/me', {
+            credentials: 'include',
+          });
+          const meData = meRes.ok ? await meRes.json() : null;
+          const backendUser = meData?.user;
+
+          if (backendUser) {
+            const isProfileDone = Boolean(
+              backendUser.username &&
+              !backendUser.username.startsWith('user_') &&
+              (backendUser.profileCompleted ||
+               backendUser.profileLocked ||
+               backendUser.genderDobLocked ||
+               backendUser.profile?.profileCompleted ||
+               backendUser.profile?.ageGenderConfirmed)
+            );
+            const isVipActive = isUserVip(backendUser);
+            profile = {
+              id: backendUser.id,
+              uid: backendUser.id,
+              clerkUserId: backendUser.clerkUserId || null,
+              username: backendUser.username || '',
+              usernameLower: (backendUser.username || '').toLowerCase(),
+              vipUsername: backendUser.vipUsername || null,
+              vipUsernameClaimedAt: backendUser.vipUsernameClaimedAt || null,
+              fullName: backendUser.fullName || emailOrUsername,
+              displayName: backendUser.displayName || backendUser.fullName || emailOrUsername,
+              email: backendUser.email || null,
+              role: backendUser.role || 'USER',
+              membershipTier: isVipActive ? 'VIP' : 'FREE',
+              is_vip: isVipActive,
+              isVIP: isVipActive,
+              vip_expires_at: backendUser.vip_expires_at || null,
+              vip_started_at: backendUser.vip_started_at || null,
+              online: true,
+              status: 'active' as const,
+              profileCompleted: isProfileDone,
+              profileLocked: isProfileDone,
+              genderDobLocked: Boolean(backendUser.genderDobLocked),
+              dateOfBirth: backendUser.dob || null,
+              gender: backendUser.gender || 'unspecified',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              profile: {
+                bio: backendUser.profile?.bio || 'Hey there! I am using CupidX.',
+                age: backendUser.dob ? calculateDobAge(backendUser.dob) : 18,
+                dateOfBirth: backendUser.dob || null,
+                gender: backendUser.gender || 'unspecified',
+                themePreference: backendUser.profile?.themePreference || 'purple',
+                avatarType: backendUser.profile?.avatarType || 'EMOJI',
+                avatarEmoji: backendUser.profile?.avatarEmoji || '😊',
+                avatarUrl: backendUser.profile?.avatarUrl || null,
+                interests: backendUser.profile?.interests || '',
+                randomChatIntroSeen: backendUser.profile?.randomChatIntroSeen ?? false,
+                ageGenderConfirmed: Boolean(backendUser.profile?.ageGenderConfirmed || backendUser.genderDobLocked),
+              },
+              subscription: backendUser.subscription || { isActive: false, plan: 'FREE' },
+            };
+            setUser(profile);
+          }
+        } catch (meErr) {
+          console.error('[AUTH] /api/auth/me fetch after login failed:', meErr);
+        }
+      }
+
       if (profile && checkProfileCompletion(profile)) {
         router.replace('/dashboard');
       } else {
@@ -508,7 +582,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('[AUTH] Login error:', err);
       throw new Error(err.message || 'Invalid username/email or password.');
     }
-  }, [router]);
+  }, [router, clerkUser]);
 
   // ─── 5. Email / Password Signup via Native API ─────────────────────────────
   const signUpWithEmail = useCallback(async (emailOrUsername: string, pass: string, name?: string) => {
