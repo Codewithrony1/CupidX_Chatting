@@ -299,10 +299,12 @@ function VideoArea({
 }) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(() => {});
     } else if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
     }
@@ -311,15 +313,24 @@ function VideoArea({
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(() => {});
     } else if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
+    }
+
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().catch(() => {});
+    } else if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = null;
     }
   }, [remoteStream]);
 
   if (mode === 'AUDIO') {
-    // Audio mode: show avatars, no video
+    // Audio mode: show avatars with active audio playback
     return (
       <div className="flex flex-col items-center justify-center gap-6 py-8">
+        <audio ref={remoteAudioRef} autoPlay playsInline />
         {/* Partner avatar */}
         <div className="relative">
           <div className="w-28 h-28 rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-2xl shadow-blue-500/30">
@@ -369,6 +380,7 @@ function VideoArea({
   // VIDEO mode
   return (
     <div className="relative w-full bg-black rounded-2xl overflow-hidden" style={{ aspectRatio: '16/9', maxHeight: '50vh' }}>
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       {/* Remote video (main) */}
       {remoteStream && !partnerCameraOff ? (
         <video
