@@ -41,7 +41,7 @@ import {
   Camera,
   Radio,
 } from 'lucide-react';
-import SelfHostedVipModal from '@/components/payment/SelfHostedVipModal';
+import GetVipModal from '@/components/payment/GetVipModal';
 import { useChatViewport } from '@/hooks/useChatViewport';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { sanitizeChatText } from '@/lib/sanitizeChatText';
@@ -1970,7 +1970,7 @@ export default function RandomChatPage() {
       )}
 
       {/* ── VIP MODAL ────────────────────────────────────────────────────── */}
-      <SelfHostedVipModal
+      <GetVipModal
         isOpen={showVipModal}
         onClose={() => {
           setShowVipModal(false);
@@ -1979,11 +1979,7 @@ export default function RandomChatPage() {
             setConnectionState('IDLE');
           }
         }}
-        reason="photo"
-        onSuccess={() => {
-          refreshUser();
-          setShowVipModal(false);
-        }}
+        reason="Voice and video calls require a VIP membership."
       />
 
       {/* ── PROFILE SHEET ────────────────────────────────────────────────── */}

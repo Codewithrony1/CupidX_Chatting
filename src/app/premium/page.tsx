@@ -21,6 +21,8 @@ import {
   ShieldCheck,
   RefreshCw,
   X,
+  Phone,
+  Send,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/AppShell';
@@ -91,6 +93,14 @@ export default function PremiumPage() {
   const upiPayUri = `upi://pay?pa=${pricing.merchantUpiId}&pn=${encodeURIComponent(pricing.merchantName)}&am=${activeAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`CupidX VIP ${planLabel}`)}`;
   const staticQrUrl = selectedPlan === 'monthly' ? pricing.qrMonthly : (selectedPlan === '3months' ? pricing.qrThreeMonths : pricing.qrYearly);
   const dynamicQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiPayUri)}`;
+
+  const whatsappNumber = process.env.NEXT_PUBLIC_ADMIN_WHATSAPP || '+919876543210';
+  const telegramUsername = (process.env.NEXT_PUBLIC_ADMIN_TELEGRAM || '@cupidxadmin').replace(/^@/, '');
+  const cleanWhatsApp = whatsappNumber.replace(/[^0-9]/g, '');
+  const whatsappUrl = `https://wa.me/${cleanWhatsApp}?text=${encodeURIComponent(
+    `Hi Admin, I made a VIP payment (${planLabel}) on CupidX for my username: @${user?.username || 'user'}`
+  )}`;
+  const telegramUrl = `https://t.me/${telegramUsername}`;
 
   // Fetch Pricing & QR Settings
   const fetchSettings = async () => {
@@ -518,6 +528,35 @@ export default function PremiumPage() {
               <p className="text-[10px] text-slate-400 leading-tight">
                 💡 After paying, copy the <strong>12-digit UTR / Reference ID</strong> from your UPI app receipt and submit below.
               </p>
+
+              {/* Direct Admin Contact on WhatsApp & Telegram */}
+              <div className="pt-2 border-t border-white/10 space-y-1.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Instant Support / Send Receipt to Admin
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <a
+                    href={whatsappUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2 px-3 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors shadow"
+                  >
+                    <Phone className="w-3.5 h-3.5 fill-current" />
+                    <span>WhatsApp</span>
+                    <ExternalLink className="w-3 h-3 opacity-70" />
+                  </a>
+                  <a
+                    href={telegramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2 px-3 rounded-xl bg-sky-600/90 hover:bg-sky-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors shadow"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Telegram</span>
+                    <ExternalLink className="w-3 h-3 opacity-70" />
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -40,25 +40,46 @@ export interface AdminAccessResult {
 }
 
 export async function verifyAdminAccess(req: Request): Promise<AdminAccessResult> {
-  // Hard security boundary: ADMIN_MODE + loopback host are both required.
-  if (!isLocalAdminRequest(req)) {
-    return { authorized: false, user: null, adminId: null, adminClerkUserId: null };
-  }
-
-  // 1. Try authenticated Clerk/JWT session first if present
+  // 1. Authoritative check: User is logged in and has role === 'ADMIN'
   try {
     const user = await getCurrentUser(req);
-    if (user) {
-      const adminUser = { ...user, role: 'ADMIN' } as CurrentUser & { role: string };
+    if (user && user.role === 'ADMIN') {
       return {
         authorized: true,
-        user: adminUser,
+        user: user as any,
         adminId: user.id,
         adminClerkUserId: user.clerkUserId || null,
       };
     }
-  } catch (e) {
-    // Continue to local fallback
+  } catch (e) {}
+
+  // 2. Secret-based check: ADMIN_SECRET provided via header or query param
+  const adminSecret = process.env.ADMIN_SECRET;
+  if (adminSecret) {
+    const providedSecret = req.headers.get('x-admin-secret');
+    const url = new URL(req.url);
+    const querySecret = url.searchParams.get('admin_secret');
+    if ((providedSecret && providedSecret === adminSecret) || (querySecret && querySecret === adminSecret)) {
+      return {
+        authorized: true,
+        user: {
+          id: 'admin_secret',
+          clerkUserId: null,
+          username: 'admin',
+          fullName: 'System Administrator',
+          email: 'admin@cupidxchat.in',
+          role: 'ADMIN',
+          is_vip: true,
+        } as any,
+        adminId: 'admin_secret',
+        adminClerkUserId: null,
+      };
+    }
+  }
+
+  // 3. Localhost developer fallback (when starting via npm run admin / localhost)
+  if (!isLocalAdminRequest(req)) {
+    return { authorized: false, user: null, adminId: null, adminClerkUserId: null };
   }
 
   // 2. Terminal-only local admin access fallback (when starting via npm start / npm run admin)

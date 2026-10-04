@@ -44,7 +44,6 @@ export function middleware(req: NextRequest) {
   if (isAdminPath) {
     const host = (req.headers.get('host') ?? '').toLowerCase();
     const isLocalHost =
-      process.env.ADMIN_MODE === 'true' &&
       (host === 'localhost:3000' ||
         host === '127.0.0.1:3000' ||
         host === '[::1]:3000' ||
@@ -52,19 +51,30 @@ export function middleware(req: NextRequest) {
         host === '127.0.0.1:3001' ||
         host === '[::1]:3001');
 
-    if (!isLocalHost) {
-      return new NextResponse('Not Found', { status: 404 });
+    const adminSecret = process.env.ADMIN_SECRET;
+    const providedSecret = req.headers.get('x-admin-secret') || req.nextUrl.searchParams.get('admin_secret');
+    const hasSecretMatch = Boolean(adminSecret && providedSecret === adminSecret);
+
+    const token = req.cookies.get('token')?.value;
+    const clerkSession = req.cookies.get('__session')?.value;
+    const hasSession = Boolean(token || clerkSession);
+
+    // If local dev or valid secret or has active session, let request reach route handler
+    // (The route handler performs authoritative server-side role === 'ADMIN' verification)
+    if (isLocalHost || hasSecretMatch || hasSession) {
+      return NextResponse.next();
     }
 
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (adminSecret) {
-      const providedSecret = req.headers.get('x-admin-secret');
-      const isAdminApi = pathname === '/api/admin' || pathname.startsWith('/api/admin/');
-      if (isAdminApi && providedSecret !== adminSecret) {
-        return new NextResponse('Forbidden', { status: 403 });
-      }
+    if (pathname.startsWith('/api/admin')) {
+      return new NextResponse(JSON.stringify({ error: 'Admin authorization required' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
-    return NextResponse.next();
+
+    const loginUrl = new URL('/login', req.url);
+    loginUrl.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
   // 2. Allow public routes
