@@ -606,14 +606,73 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.error || 'Could not complete registration.');
       }
 
+      // After registration, fetch fresh profile from /api/auth/me (JWT cookie was just set)
       currentInitUidRef.current = null;
-      await initializeUserSession(undefined, true);
+
+      if (clerkUser) {
+        await initializeUserSession(clerkUser, true);
+      } else {
+        // Native DB session: set user from register response directly
+        try {
+          const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+          const meData = meRes.ok ? await meRes.json() : null;
+          const backendUser = meData?.user;
+          if (backendUser) {
+            const isVipActive = isUserVip(backendUser);
+            setUser({
+              id: backendUser.id,
+              uid: backendUser.id,
+              clerkUserId: backendUser.clerkUserId || null,
+              username: backendUser.username || '',
+              usernameLower: (backendUser.username || '').toLowerCase(),
+              vipUsername: backendUser.vipUsername || null,
+              vipUsernameClaimedAt: backendUser.vipUsernameClaimedAt || null,
+              fullName: backendUser.fullName || name || cleanId,
+              displayName: backendUser.displayName || backendUser.fullName || name || cleanId,
+              email: backendUser.email || null,
+              role: backendUser.role || 'USER',
+              membershipTier: isVipActive ? 'VIP' : 'FREE',
+              is_vip: isVipActive,
+              isVIP: isVipActive,
+              vip_expires_at: null,
+              vip_started_at: null,
+              online: true,
+              status: 'active' as const,
+              profileCompleted: false,
+              profileLocked: false,
+              genderDobLocked: false,
+              dateOfBirth: null,
+              gender: 'unspecified',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              profile: {
+                bio: 'Hey there! I am using CupidX.',
+                age: 18,
+                dateOfBirth: null,
+                gender: 'unspecified',
+                themePreference: 'purple',
+                avatarType: 'EMOJI',
+                avatarEmoji: '😊',
+                avatarUrl: null,
+                interests: '',
+                randomChatIntroSeen: false,
+                ageGenderConfirmed: false,
+              },
+              subscription: { isActive: false, plan: 'FREE' },
+            });
+          }
+        } catch (meErr) {
+          console.error('[AUTH] /api/auth/me fetch after register failed:', meErr);
+        }
+      }
+
+      // New user always goes to setup-profile to complete onboarding
       router.replace('/setup-profile');
     } catch (err: any) {
       console.error('[AUTH] Signup error:', err);
       throw new Error(err.message || 'Could not complete registration.');
     }
-  }, [router]);
+  }, [router, clerkUser]);
 
   // ─── 6. Logout ─────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
